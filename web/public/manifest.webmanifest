@@ -1,0 +1,9 @@
+{
+  "name": "STOCK assistant",
+  "short_name": "STOCK",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1f4fd1",
+  "lang": "ko"
+}
