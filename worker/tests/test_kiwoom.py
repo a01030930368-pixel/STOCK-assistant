@@ -65,3 +65,16 @@ def test_client_reuses_token_and_sends_headers():
     assert [c.url.path for c in calls] == ["/oauth2/token", "/api/dostk/acnt", "/api/dostk/acnt"]
     assert calls[1].headers["api-id"] == "kt00018"
     assert calls[1].headers["authorization"] == "Bearer T"
+
+
+def test_token_error_reports_kiwoom_message():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"return_code": 3, "return_msg": "앱키가 유효하지 않습니다"})
+
+    client = KiwoomClient("https://mockapi.kiwoom.com", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
+    try:
+        client.domestic_balance()
+    except RuntimeError as e:
+        assert "앱키가 유효하지 않습니다" in str(e)
+    else:
+        raise AssertionError("expected RuntimeError")

@@ -99,6 +99,9 @@ class KiwoomClient:
         )
         res.raise_for_status()
         body = res.json()
+        # 키움은 키가 틀려도 200을 돌려주고 본문에 오류 코드만 담습니다.
+        if str(body.get("return_code", "0")) != "0" or not body.get("token"):
+            raise RuntimeError(f"키움 토큰 발급 실패 ({body.get('return_code')}): {body.get('return_msg')}")
         self._token = body["token"]
         self._token_expires = datetime.strptime(body["expires_dt"], KST_FORMAT)
         return self._token
