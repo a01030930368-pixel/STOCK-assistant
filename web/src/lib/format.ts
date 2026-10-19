@@ -10,3 +10,7 @@ export function signClass(value: string | number): string {
 export function today(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
 }
+
+export function usd(value: string | number): string {
+  return `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}

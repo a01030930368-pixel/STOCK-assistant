@@ -79,6 +79,46 @@ def parse_balance(body: dict) -> Balance:
     )
 
 
+@dataclass(frozen=True)
+class UsBalance:
+    """미국 주식 잔고. 금액은 모두 달러, exch_rate는 원/달러 환율입니다."""
+    holdings: list[Holding]
+    total_buy: Decimal
+    total_eval: Decimal
+    total_pnl: Decimal
+    total_pnl_pct: Decimal
+    exch_rate: Decimal
+
+
+def parse_us_balance(body: dict) -> UsBalance:
+    rows = [
+        row for row in body.get("result_list", [])
+        if row.get("crnc_code", "USD").strip().upper() == "USD" and parse_number(row.get("poss_qty")) > 0
+    ]
+    holdings = [
+        Holding(
+            ticker=row["stk_cd"].strip(),
+            name=(row.get("frgn_stk_nm") or row["stk_cd"]).strip(),
+            quantity=parse_number(row["poss_qty"]),
+            avg_price=parse_price(row.get("frgn_stk_book_uv")),
+            cur_price=parse_price(row.get("now_pric")),
+            eval_amount=parse_number(row.get("evlt_amt")),
+            pnl=parse_number(row.get("pl_amt")),
+            pnl_pct=parse_number(row.get("pl_rt")),
+        )
+        for row in rows
+    ]
+    rates = [parse_number(row.get("exch_rate")) for row in rows]
+    return UsBalance(
+        holdings=holdings,
+        total_buy=parse_number(body.get("tot_prch_amt")),
+        total_eval=parse_number(body.get("tot_evlt_amt")),
+        total_pnl=parse_number(body.get("tot_pl_amt")),
+        total_pnl_pct=parse_number(body.get("tot_pl_rt")),
+        exch_rate=next((r for r in rates if r > 0), Decimal(0)),
+    )
+
+
 class KiwoomClient:
     def __init__(self, base_url: str, appkey: str, secretkey: str, http: httpx.Client | None = None):
         self._base_url = base_url
@@ -125,3 +165,7 @@ class KiwoomClient:
     def domestic_balance(self) -> Balance:
         # kt00018 계좌평가잔고내역요청, qry_tp=1 합산
         return parse_balance(self._post("/api/dostk/acnt", "kt00018", {"qry_tp": "1", "dmst_stex_tp": "KRX"}))
+
+    def us_balance(self) -> UsBalance:
+        # ust21070 미국주식 원장잔고확인, 빈 값이면 전체 종목
+        return parse_us_balance(self._post("/api/us/acnt", "ust21070", {"stex_tp": "", "stk_cd": ""}))

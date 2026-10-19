@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import httpx
 
-from app.kiwoom import KiwoomClient, parse_balance, parse_number, parse_price, split_ticker
+from app.kiwoom import KiwoomClient, parse_balance, parse_number, parse_price, parse_us_balance, split_ticker
 
 SAMPLE = {
     "tot_pur_amt": "000000001400000",
@@ -78,3 +78,58 @@ def test_token_error_reports_kiwoom_message():
         assert "앱키가 유효하지 않습니다" in str(e)
     else:
         raise AssertionError("expected RuntimeError")
+
+
+US_SAMPLE = {
+    "crnc_code": "USD",
+    "tot_evlt_amt": "4588.2000",
+    "tot_prch_amt": "4200.5000",
+    "tot_pl_amt": "387.7000",
+    "tot_pl_rt": "9.23",
+    "result_list": [
+        {
+            "stex_nm": "미국", "crnc_code": "USD", "stk_cd": "AAPL", "frgn_stk_nm": "애플",
+            "poss_qty": "000000000020", "frgn_stk_book_uv": "210.0250", "now_pric": "229.4100",
+            "evlt_amt": "4588.2000", "pl_amt": "387.7000", "pl_rt": "9.23", "exch_rate": "1375.25",
+        },
+        {
+            "stex_nm": "미국", "crnc_code": "USD", "stk_cd": "TSLA", "frgn_stk_nm": "테슬라",
+            "poss_qty": "000000000000", "frgn_stk_book_uv": "0", "now_pric": "250", "evlt_amt": "0",
+            "pl_amt": "0", "pl_rt": "0", "exch_rate": "1375.25",
+        },
+    ],
+    "return_code": 0,
+}
+
+
+def test_parse_us_balance():
+    balance = parse_us_balance(US_SAMPLE)
+    assert [h.ticker for h in balance.holdings] == ["AAPL"]
+    aapl = balance.holdings[0]
+    assert aapl.name == "애플"
+    assert aapl.quantity == Decimal(20)
+    assert aapl.avg_price == Decimal("210.0250")
+    assert aapl.cur_price == Decimal("229.4100")
+    assert aapl.pnl_pct == Decimal("9.23")
+    assert balance.total_eval == Decimal("4588.2000")
+    assert balance.exch_rate == Decimal("1375.25")
+
+
+def test_parse_us_balance_empty_account():
+    balance = parse_us_balance({"result_list": [], "return_code": 0})
+    assert balance.holdings == []
+    assert balance.exch_rate == Decimal(0)
+
+
+def test_us_balance_calls_ust21070():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/token":
+            return httpx.Response(200, json={"token": "t", "expires_dt": "20991231235959", "return_code": 0})
+        seen.append((request.url.path, request.headers["api-id"]))
+        return httpx.Response(200, json=US_SAMPLE)
+
+    client = KiwoomClient("https://api.kiwoom.com", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
+    assert client.us_balance().holdings[0].ticker == "AAPL"
+    assert seen == [("/api/us/acnt", "ust21070")]
