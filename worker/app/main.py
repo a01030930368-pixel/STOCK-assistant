@@ -7,7 +7,7 @@ import psycopg
 
 import httpx
 
-from . import alerts, config, db, macro, telegram
+from . import alerts, config, db, logsafe, macro, telegram
 from .kiwoom import KiwoomClient
 from .research_job import ResearchJob
 from .market import kr_market_open, us_market_open
@@ -54,8 +54,12 @@ def refresh_macro(cfg: config.Config, conn: psycopg.Connection, http: httpx.Clie
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = config.load()
+    logsafe.setup([
+        cfg.kiwoom_appkey, cfg.kiwoom_secretkey, cfg.telegram_bot_token,
+        cfg.ecos_api_key, cfg.fred_api_key, cfg.dart_api_key,
+        cfg.naver_client_id, cfg.naver_client_secret, cfg.finnhub_api_key,
+    ])
     kiwoom = None
     if cfg.kiwoom_appkey and cfg.kiwoom_secretkey:
         kiwoom = KiwoomClient(cfg.kiwoom_base_url, cfg.kiwoom_appkey, cfg.kiwoom_secretkey)
