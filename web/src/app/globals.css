@@ -29,7 +29,9 @@ a:hover { text-decoration: underline; }
 ::selection { background: var(--accent-soft); }
 
 /* 상단 바: PC는 메뉴까지, 폰은 이름만 보이고 메뉴는 아래 탭으로 */
-.topbar { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+/* backdrop-filter를 쓰면 안쪽의 fixed 메뉴가 화면 아래가 아니라 이 바 기준으로 붙어서, 바탕은 단색으로 둡니다.
+   폰 홈 화면 앱은 화면 맨 위(시계·노치)까지 그려지므로 그만큼 띄웁니다. */
+.topbar { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); padding-top: env(safe-area-inset-top); }
 .topbar-inner { max-width: 1440px; margin: 0 auto; padding: 0 20px; height: 64px; display: flex; align-items: center; gap: 36px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: 0.1em; color: var(--fg); font-size: 1.3rem; }
 .brand svg { color: var(--accent); flex-shrink: 0; }
