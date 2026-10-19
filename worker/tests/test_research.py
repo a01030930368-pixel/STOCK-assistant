@@ -13,9 +13,29 @@ def client(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
+def test_google_news_parses_rss():
+    rss = """<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>
+      <item><title>삼성전자, 3분기 &amp; 실적 - 한국경제</title><link>https://news.google.com/rss/articles/a</link>
+        <pubDate>Sun, 18 Oct 2026 23:00:00 GMT</pubDate><source url="https://www.hankyung.com">한국경제</source></item>
+      <item><title>새 소식 - 연합뉴스</title><link>https://news.google.com/rss/articles/b</link>
+        <pubDate>Mon, 19 Oct 2026 01:00:00 GMT</pubDate><source url="https://www.yna.co.kr">연합뉴스</source></item>
+    </channel></rss>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["q"] == '"삼성전자" when:7d'
+        assert request.url.params["hl"] == "ko"
+        return httpx.Response(200, content=rss.encode())
+
+    news = research.google_news("005930", "삼성전자", client(handler))
+    assert [n.title for n in news] == ["새 소식", "삼성전자, 3분기 & 실적"]
+    assert news[1].source == "한국경제"
+    assert news[1].url == "https://news.google.com/rss/articles/a"
+
+
 def test_naver_news_strips_markup():
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers["X-Naver-Client-Id"] == "id"
+        assert request.url.host == "naverapihub.apigw.ntruss.com"
+        assert request.headers["X-NCP-APIGW-API-KEY-ID"] == "id"
         assert request.url.params["query"] == "삼성전자"
         return httpx.Response(200, json={"items": [{
             "title": "<b>삼성전자</b>, 3분기 &quot;깜짝&quot; 실적", "originallink": "https://news.example/1",
@@ -146,3 +166,14 @@ def test_sec_requests_send_user_agent():
         return httpx.Response(200, json={"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}})
 
     assert research.sec_ciks("STOCK-assistant me@example.com", client(handler)) == {"AAPL": 320193}
+
+
+def test_sec_revenue_merges_old_and_new_tags():
+    # 예전 연도는 Revenues, 최근 연도는 RevenueFromContract... 로 보고한 회사
+    facts = {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": [fact(22, "2023-12-31", "2023-01-01")]}},
+        "RevenueFromContractWithCustomerExcludingAssessedTax": {"units": {"USD": [fact(43, "2024-12-31", "2024-01-01")]}},
+        "OperatingIncomeLoss": {"units": {"USD": [fact(-150, "2023-12-31", "2023-01-01"), fact(-200, "2024-12-31", "2024-01-01")]}},
+    }}}
+    rows = research.parse_sec_financials("IONQ", facts)
+    assert [(r.period, r.revenue) for r in rows] == [("FY2024", Decimal(43)), ("FY2023", Decimal(22))]

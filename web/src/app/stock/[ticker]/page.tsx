@@ -122,7 +122,11 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       ))}
 
       <h2>뉴스</h2>
-      {news.length === 0 && <p className="muted">아직 없습니다. {stock.market === "KR" ? "NAVER_CLIENT_ID·NAVER_CLIENT_SECRET" : "FINNHUB_API_KEY"}를 넣으면 워커가 1시간마다 가져옵니다.</p>}
+      {news.length === 0 && (
+        <p className="muted">
+          아직 없습니다. {stock.market === "KR" ? "워커가 1시간마다 구글 뉴스에서 가져옵니다." : "FINNHUB_API_KEY를 넣으면 워커가 1시간마다 가져옵니다."}
+        </p>
+      )}
       {news.map((n) => (
         <div key={n.url} className="card">
           <a href={n.url} target="_blank" rel="noreferrer">{n.title}</a>

@@ -1,6 +1,6 @@
 """보유 종목의 뉴스·실적·재무를 무료 API에서 가져옵니다.
 
-국내: 네이버 검색 API(뉴스), OpenDART(실적 공시, 재무제표)
+국내: 구글 뉴스 RSS(키 없음) 또는 네이버 API HUB(뉴스), OpenDART(실적 공시, 재무제표)
 미국: Finnhub(뉴스, 분기 EPS), SEC EDGAR(재무제표, 키 없음)
 """
 import html
@@ -16,7 +16,9 @@ from email.utils import parsedate_to_datetime
 import httpx
 
 DART = "https://opendart.fss.or.kr/api"
-NAVER_NEWS = "https://openapi.naver.com/v1/search/news.json"
+# 네이버 개발자센터 검색 API는 2026-07-31 신규 신청이 끝나 네이버 클라우드 API HUB 주소를 씁니다.
+NAVER_NEWS = "https://naverapihub.apigw.ntruss.com/search/v1/news"
+GOOGLE_NEWS = "https://news.google.com/rss/search"
 FINNHUB = "https://finnhub.io/api/v1"
 SEC_TICKERS = "https://www.sec.gov/files/company_tickers.json"
 SEC_FACTS = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
@@ -68,13 +70,32 @@ def _clean(text: str) -> str:
     return html.unescape(re.sub(r"</?b>", "", text or "")).strip()
 
 
-# ---------------------------------------------------------------- 네이버 뉴스
+# ---------------------------------------------------------------- 국내 뉴스
+
+def google_news(ticker: str, name: str, http: httpx.Client) -> list[News]:
+    """키 없이 쓰는 구글 뉴스 한국어 RSS. 최근 7일, 최신 10건."""
+    res = http.get(GOOGLE_NEWS, params={"q": f'"{name}" when:7d', "hl": "ko", "gl": "KR", "ceid": "KR:ko"})
+    res.raise_for_status()
+    items = []
+    for item in ET.fromstring(res.content).iter("item"):
+        source = (item.findtext("source") or "").strip()
+        title = (item.findtext("title") or "").strip()
+        # 제목 끝에 " - 언론사"가 붙어 옵니다.
+        if source and title.endswith(f" - {source}"):
+            title = title[: -len(source) - 3]
+        items.append(News(
+            ticker=ticker, title=html.unescape(title), url=(item.findtext("link") or "").strip(),
+            source=source or "구글 뉴스", published_at=parsedate_to_datetime(item.findtext("pubDate")), summary="",
+        ))
+    items.sort(key=lambda n: n.published_at, reverse=True)
+    return [n for n in items if n.title and n.url][:10]
+
 
 def naver_news(ticker: str, name: str, client_id: str, secret: str, http: httpx.Client) -> list[News]:
     res = http.get(
         NAVER_NEWS,
-        params={"query": name, "display": "10", "sort": "date"},
-        headers={"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": secret},
+        params={"query": name, "display": "10", "sort": "date", "format": "json"},
+        headers={"X-NCP-APIGW-API-KEY-ID": client_id, "X-NCP-APIGW-API-KEY": secret},
     )
     res.raise_for_status()
     return [
@@ -232,8 +253,13 @@ SEC_TAGS = {
 
 
 def _annual(facts: dict, tags: tuple[str, ...]) -> dict[str, Decimal]:
-    """10-K에 보고된 연간 값을 회계연도 말일(end)별로 모읍니다. 같은 값이 여러 보고서에 반복되면 나중 것을 씁니다."""
+    """10-K에 보고된 연간 값을 회계연도 말일(end)별로 모읍니다. 같은 값이 여러 보고서에 반복되면 나중 것을 씁니다.
+
+    회사가 해마다 다른 태그로 보고하기도 해서(예: 예전엔 Revenues, 요즘은 RevenueFromContract...)
+    모든 태그를 합치고, 같은 연도가 겹치면 앞 태그를 씁니다.
+    """
     gaap = facts.get("facts", {}).get("us-gaap", {})
+    merged: dict[str, Decimal] = {}
     for tag in tags:
         units = gaap.get(tag, {}).get("units", {}).get("USD")
         if not units:
@@ -248,9 +274,8 @@ def _annual(facts: dict, tags: tuple[str, ...]) -> dict[str, Decimal]:
                 if not 350 <= days <= 380:
                     continue
             by_end[f["end"]] = Decimal(str(f["val"]))
-        if by_end:
-            return by_end
-    return {}
+        merged = by_end | merged
+    return merged
 
 
 def parse_sec_financials(ticker: str, facts: dict) -> list[Financials]:
