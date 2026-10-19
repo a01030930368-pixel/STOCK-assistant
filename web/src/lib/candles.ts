@@ -76,7 +76,7 @@ export function wallClock(ts: Date, timeZone: string): number {
 
 // N분봉은 장 시작 시각(국내 9:00, 미국 9:30)부터 N분씩 끊습니다. HTS와 같은 방식입니다.
 export function aggregateMinutes(bars: MinuteCandle[], size: number, openSec: number): MinuteCandle[] {
-  if (size === 1) return bars;
+  // 1분봉도 같은 분에 두 줄이 있으면(진행 중이던 봉) 하나로 합칩니다. 차트는 시각이 겹치면 그리지 못합니다.
   const step = size * 60;
   const out: MinuteCandle[] = [];
   for (const b of bars) {

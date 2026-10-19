@@ -89,6 +89,10 @@ class ResearchJob:
     def _calendar(self, conn: psycopg.Connection, now: datetime) -> None:
         today = now.date()
         self._try("휴장일", lambda: db.save_calendar(conn, "holiday", calendar.holiday_events(today)))
+        self._try("금리 결정·만기일", lambda: db.save_calendar(conn, "policy", calendar.policy_events(today)))
+        if self.cfg.fred_api_key:
+            self._try("미국 경제지표 일정", lambda: db.save_calendar(
+                conn, "economic", calendar.fred_release_events(self.cfg.fred_api_key, today, self.http)))
         if not self.cfg.finnhub_api_key:
             return
         for ticker, name, market in db.watched_stocks(conn):

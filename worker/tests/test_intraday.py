@@ -56,3 +56,10 @@ def test_job_polls_open_market_every_two_minutes(monkeypatch):
     assert saved == ["005930", "IONQ"]
     job.run(None, t + timedelta(minutes=2))
     assert saved == ["005930", "IONQ", "005930"]
+
+
+def test_parse_yahoo_snaps_live_bar_to_the_minute():
+    body = {"chart": {"result": [{"timestamp": [1760621400, 1760621460, 1760621487], "indicators": {"quote": [
+        {"open": [1, 2, 3], "high": [1, 2, 3], "low": [1, 2, 3], "close": [1, 2, 3], "volume": [1, 1, 1]}]}}]}}
+    bars = intraday.parse_yahoo(body)
+    assert [b.ts.second for b in bars] == [0, 0] and bars[-1].close == 3

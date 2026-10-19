@@ -46,4 +46,9 @@ describe("minute candles", () => {
     const kr = aggregateMinutes([m(9, 0, 1), m(9, 2, 2), m(9, 3, 3)], 3, 9 * 3600);
     expect(kr.map((b) => b.close)).toEqual([2, 3]);
   });
+
+  it("keeps one 1-minute bar when the same minute arrives twice", () => {
+    const one = aggregateMinutes([m(9, 30, 10), m(9, 31, 11), m(9, 31, 12)], 1, 9.5 * 3600);
+    expect(one.map((b) => b.close)).toEqual([10, 12]);
+  });
 });

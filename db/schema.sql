@@ -190,7 +190,7 @@ CREATE TABLE cash_balances (
 -- 다가오는 일정: 한국·미국 휴장일(거래소 달력)과 미국 보유 종목 실적 발표 예정일(Finnhub)
 CREATE TABLE calendar_events (
   day     DATE NOT NULL,
-  kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings')),
+  kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic')),
   market  TEXT NOT NULL CHECK (market IN ('KR', 'US')),
   ticker  TEXT NOT NULL DEFAULT '',
   title   TEXT NOT NULL,

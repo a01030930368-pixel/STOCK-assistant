@@ -14,6 +14,7 @@
   --accent: #c9a96b; --accent-soft: #2a2418; --on-accent: #17140e;
   --up: #e8806f; --up-soft: #2c1714; --down: #86a8e6; --down-soft: #141c2b;
   --warn: #e0b25a; --warn-soft: #2b2312;
+  --macro: #b48ead; --macro-soft: #2a2129;
   --radius: 10px; --nav-h: 64px;
   --sans: "Pretendard Variable", "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   /* 숫자도 같은 글씨로 쓰고, 자리만 맞춥니다(tabular-nums). */
@@ -93,6 +94,7 @@ h2 { font-size: 1rem; font-weight: 600; margin: 32px 0 12px; color: var(--sub); 
 .badge.down { background: var(--down-soft); color: var(--down); }
 .badge.warn { background: var(--warn-soft); color: var(--warn); }
 .badge.gold { background: var(--accent-soft); color: var(--accent); }
+.badge.macro { background: var(--macro-soft); color: var(--macro); }
 .chip { display: inline-block; padding: 1px 7px; border-radius: 5px; font-size: 0.74rem; background: var(--surface-2); color: var(--muted); border: 1px solid var(--line-2); }
 
 /* 목록: 한 줄에 이름(왼쪽)과 숫자(오른쪽) */
@@ -221,11 +223,13 @@ dl.facts dd { margin: 0; }
 .cal-cell.today .cal-num { color: var(--accent); font-weight: 600; }
 .cal-chip { font-size: 0.74rem; padding: 2px 6px; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--surface-2); color: var(--muted); }
 .cal-chip.earnings { background: var(--accent-soft); color: var(--accent); }
+.cal-chip.policy, .cal-chip.economic { background: var(--macro-soft); color: var(--macro); }
 @media (max-width: 720px) {
   .cal-cell { min-height: 62px; padding: 5px; gap: 3px; }
   .cal-head div { padding: 8px 6px; }
   .cal-chip { font-size: 0; padding: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
   .cal-chip.earnings { background: var(--accent); }
+  .cal-chip.policy, .cal-chip.economic { background: var(--macro); }
 }
 .cal-num.up { color: var(--up); } .cal-num.down { color: var(--down); }
 
