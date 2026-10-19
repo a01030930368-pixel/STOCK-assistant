@@ -82,8 +82,20 @@ MIGRATIONS = [
       detail  TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (day, kind, market, ticker, title)
     )""",
+    """CREATE TABLE IF NOT EXISTS price_history (
+      ticker  TEXT NOT NULL,
+      day     DATE NOT NULL,
+      close   NUMERIC(18, 4) NOT NULL,
+      PRIMARY KEY (ticker, day)
+    )""",
+    """CREATE TABLE IF NOT EXISTS chart_memos (
+      id          SERIAL PRIMARY KEY,
+      ticker      TEXT NOT NULL,
+      day         DATE NOT NULL,
+      body        TEXT NOT NULL CHECK (length(trim(body)) > 0),
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
-
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
         conn.execute(statement)
@@ -234,3 +246,22 @@ def save_calendar(conn: psycopg.Connection, kind: str, events: list[Event], tick
                 (e.day, e.kind, e.market, e.ticker, e.title, e.detail),
             )
         conn.execute("DELETE FROM calendar_events WHERE day < CURRENT_DATE - 30")
+
+
+def save_prices(conn: psycopg.Connection, ticker: str, rows) -> None:
+    for day, close in rows:
+        conn.execute(
+            """INSERT INTO price_history (ticker, day, close) VALUES (%s, %s, %s)
+               ON CONFLICT (ticker, day) DO UPDATE SET close = EXCLUDED.close""",
+            (ticker, day, close),
+        )
+
+
+def snapshot_prices(conn: psycopg.Connection) -> None:
+    """보유 종목 현재가를 그 시장의 오늘 날짜 종가로 적어 둡니다. 장 마감 뒤 마지막 값이 그날 종가가 됩니다."""
+    conn.execute(
+        """INSERT INTO price_history (ticker, day, close)
+           SELECT ticker, (now() AT TIME ZONE CASE market WHEN 'KR' THEN 'Asia/Seoul' ELSE 'America/New_York' END)::date, cur_price
+           FROM holdings WHERE cur_price > 0
+           ON CONFLICT (ticker, day) DO UPDATE SET close = EXCLUDED.close"""
+    )

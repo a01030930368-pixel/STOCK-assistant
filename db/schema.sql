@@ -197,3 +197,20 @@ CREATE TABLE calendar_events (
   detail  TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (day, kind, market, ticker, title)
 );
+
+-- 차트용 일봉 종가(국내 키움 ka10081, 미국 Stooq, 장중 현재가 스냅샷)
+CREATE TABLE price_history (
+  ticker  TEXT NOT NULL,
+  day     DATE NOT NULL,
+  close   NUMERIC(18, 4) NOT NULL,
+  PRIMARY KEY (ticker, day)
+);
+
+-- 차트 메모: 특정 날짜에 남긴 생각
+CREATE TABLE chart_memos (
+  id          SERIAL PRIMARY KEY,
+  ticker      TEXT NOT NULL,
+  day         DATE NOT NULL,
+  body        TEXT NOT NULL CHECK (length(trim(body)) > 0),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

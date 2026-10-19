@@ -233,3 +233,21 @@ dl.facts dd { margin: 0; }
 .summary-line { display: flex; flex-wrap: wrap; gap: 3px 14px; margin-top: 4px; font-size: 0.8rem; color: var(--sub); }
 .summary-line span { white-space: nowrap; }
 h1 + .summary-line { font-size: 0.95rem; margin: -6px 0 18px; }
+
+/* 차트 메모 */
+.chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0; }
+.chart-head .segment { width: 220px; }
+.chart-box { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 0 2px; }
+.list-item button.ghost { white-space: nowrap; }
+.price-chart { display: block; width: 100%; height: auto; cursor: crosshair; touch-action: pan-y; }
+.price-chart .grid { stroke: var(--line-2); stroke-width: 1; }
+.price-chart .axis { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.price-chart .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.price-chart .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.price-chart .hover-dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.price-chart .memo-dot { fill: var(--fg); stroke: var(--surface); stroke-width: 2; }
+.chart-tip { position: absolute; top: 10px; pointer-events: none; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 0.86rem; max-width: 240px; }
+.chart-tip .tip-memo { margin-top: 4px; color: var(--sub); border-left: 2px solid var(--accent); padding-left: 6px; }
+.memo-form { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.memo-form input[name="body"] { flex: 1; min-width: 200px; }
+.memo-form input[type="date"] { width: auto; }

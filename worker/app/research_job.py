@@ -1,24 +1,27 @@
 """종목 정보 수집 일정. 뉴스는 1시간, 실적·재무는 12시간마다 모읍니다."""
 import logging
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import httpx
 import psycopg
 
-from . import calendar, db, research, translate
+from . import calendar, db, prices, research, translate
 from .config import Config
 
 log = logging.getLogger("worker")
 
+KST = ZoneInfo("Asia/Seoul")
 NEWS_EVERY = timedelta(hours=1)
 FUNDAMENTALS_EVERY = timedelta(hours=12)
 CODES_EVERY = timedelta(days=1)
 
 
 class ResearchJob:
-    def __init__(self, cfg: Config, http: httpx.Client):
+    def __init__(self, cfg: Config, http: httpx.Client, kiwoom=None):
         self.cfg = cfg
         self.http = http
+        self.kiwoom = kiwoom
         self.last_news: datetime | None = None
         self.last_fundamentals: datetime | None = None
         self.dart_codes: dict[str, str] = {}
@@ -39,6 +42,7 @@ class ResearchJob:
             self._refresh_codes(now)
             self._fundamentals(conn, now)
             self._calendar(conn, now)
+            self._prices(conn, now)
 
     def _try(self, what: str, fn) -> None:
         # 한 종목·한 출처가 실패해도 나머지는 계속 모읍니다.
@@ -72,6 +76,15 @@ class ResearchJob:
             except Exception as e:
                 log.warning("뉴스 제목 번역 실패, 다음 시간에 다시 합니다: %s", e)
                 return
+
+    def _prices(self, conn: psycopg.Connection, now: datetime) -> None:
+        # 차트용 1년치 일봉 종가를 12시간마다 다시 받아 빈 날을 채웁니다.
+        base = now.astimezone(KST).strftime("%Y%m%d")
+        for ticker, name, market in db.watched_stocks(conn):
+            if market == "KR" and self.kiwoom:
+                self._try(f"{name} 일봉", lambda: db.save_prices(conn, ticker, self.kiwoom.kr_daily(ticker, base)))
+            elif market == "US":
+                self._try(f"{ticker} 일봉", lambda: db.save_prices(conn, ticker, prices.stooq_daily(ticker, self.http)))
 
     def _calendar(self, conn: psycopg.Connection, now: datetime) -> None:
         today = now.date()

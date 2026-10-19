@@ -222,6 +222,12 @@ class KiwoomClient:
         # kt00001 예수금상세현황요청, qry_tp=3 추정조회
         return parse_kr_cash(self._post("/api/dostk/acnt", "kt00001", {"qry_tp": "3"}))
 
+    def kr_daily(self, ticker: str, base_day: str) -> list:
+        # ka10081 주식일봉차트조회요청. base_dt부터 과거로, 수정주가(upd_stkpr_tp=1) 기준
+        from .prices import parse_kr_daily
+
+        return parse_kr_daily(self._post("/api/dostk/chart", "ka10081", {"stk_cd": ticker, "base_dt": base_day, "upd_stkpr_tp": "1"}))
+
     def us_cash(self) -> Cash:
         # ust21110 해외주식 예수금 조회
         return parse_us_cash(self._post("/api/us/acnt", "ust21110", {}))

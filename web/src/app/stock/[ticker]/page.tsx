@@ -4,6 +4,7 @@ import { addPeer, deletePeer } from "@/app/actions";
 import { query } from "@/lib/db";
 import { loadSummaries } from "@/lib/summaryData";
 import SummaryLine from "@/app/_components/SummaryLine";
+import ChartMemo, { type Memo, type PricePoint } from "@/app/_components/ChartMemo";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +44,15 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
     [peers.map((p) => p.peer_ticker)],
   );
   const summary = (await loadSummaries([ticker])).get(ticker);
+  const prices = (await safe<{ day: string; close: string }>(
+    "SELECT to_char(day, 'YYYY-MM-DD') AS day, close FROM price_history WHERE ticker = $1 AND day > now() - interval '400 days' ORDER BY day",
+    [ticker],
+  )).map<PricePoint>((p) => ({ day: p.day, close: Number(p.close) }));
+  const memos = await safe<Memo>(
+    "SELECT id, to_char(day, 'YYYY-MM-DD') AS day, body FROM chart_memos WHERE ticker = $1 ORDER BY day DESC, id DESC",
+    [ticker],
+  );
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: stock.market === "US" ? "America/New_York" : "Asia/Seoul" });
   const peerMargin = median(peerLatest.map(operatingMargin));
   const latestMargin = financials[0] ? operatingMargin(financials[0]) : null;
 
@@ -51,6 +61,9 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       <h1>{stock.name} <span className="muted">{stock.ticker} · {stock.market}</span></h1>
       <SummaryLine parts={summary} />
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}
+
+      <h2>차트 메모</h2>
+      <ChartMemo ticker={ticker} market={stock.market} prices={prices} memos={memos} today={today} />
 
       <h2>재무 요약</h2>
       {financials.length === 0 ? (

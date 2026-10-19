@@ -198,3 +198,19 @@ export async function deletePeer(form: FormData) {
   await query("DELETE FROM stock_peers WHERE ticker = $1 AND peer_ticker = $2", [ticker, text(form, "peerTicker").toUpperCase()]);
   revalidatePath(`/stock/${ticker}`);
 }
+
+export async function addChartMemo(form: FormData) {
+  const ticker = text(form, "ticker").toUpperCase();
+  const day = text(form, "day");
+  const body = text(form, "body").slice(0, 500);
+  if (ticker && /^\d{4}-\d{2}-\d{2}$/.test(day) && body) {
+    await query("INSERT INTO chart_memos (ticker, day, body) VALUES ($1, $2, $3)", [ticker, day, body]);
+  }
+  revalidatePath(`/stock/${ticker}`);
+}
+
+export async function deleteChartMemo(form: FormData) {
+  const ticker = text(form, "ticker").toUpperCase();
+  await query("DELETE FROM chart_memos WHERE id = $1 AND ticker = $2", [num(form, "id"), ticker]);
+  revalidatePath(`/stock/${ticker}`);
+}
