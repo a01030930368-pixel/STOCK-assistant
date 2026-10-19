@@ -11,6 +11,7 @@ from . import alerts, config, db, logsafe, macro, telegram
 from .kiwoom import KiwoomClient
 from .research_job import ResearchJob
 from .screener_job import ScreenerJob
+from .intraday_job import IntradayJob
 from .market import kr_market_open, us_market_open
 
 log = logging.getLogger("worker")
@@ -84,6 +85,7 @@ def main() -> None:
     http = httpx.Client(timeout=30)
     research = ResearchJob(cfg, http, kiwoom)
     screener = ScreenerJob(kiwoom)
+    minutes = IntradayJob(http, kiwoom)
     first = True
     last_macro: datetime | None = None
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:
@@ -108,6 +110,10 @@ def main() -> None:
                 screener.run(conn, now)
             except Exception:
                 log.exception("검색기 갱신 실패")
+            try:
+                minutes.run(conn, now)
+            except Exception:
+                log.exception("분봉 갱신 실패")
             time.sleep(cfg.poll_seconds)
 
 

@@ -298,3 +298,10 @@ h1 + .summary-line { font-size: 0.95rem; margin: -6px 0 18px; }
 .preset-form label.check { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; color: var(--sub); font-size: 0.88rem; }
 .form-actions { display: flex; align-items: center; gap: 16px; }
 .screener-edit .preset-form { margin-bottom: 8px; background: var(--surface-2); }
+.chart-tools .segment.hidden { display: none; }
+.chart-tools .segment.views button { padding: 5px 9px; }
+.chart-empty { padding: 40px 16px; text-align: center; }
+@media (max-width: 720px) {
+  .chart-tools .segment.views { width: 100%; }
+  .chart-tools .segment.views button { flex: 1; padding: 5px 0; font-size: 0.78rem; }
+}

@@ -4,7 +4,8 @@ import { addPeer, deletePeer } from "@/app/actions";
 import { query } from "@/lib/db";
 import { loadSummaries } from "@/lib/summaryData";
 import SummaryLine from "@/app/_components/SummaryLine";
-import ChartMemo, { type Candle, type Level, type Memo, type Trade } from "@/app/_components/ChartMemo";
+import ChartMemo, { type Candle, type Level, type Memo, type MinuteCandle, type Trade } from "@/app/_components/ChartMemo";
+import { wallClock } from "@/lib/candles";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +55,13 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       open: p.open === null ? close : Number(p.open), high: p.high === null ? close : Number(p.high), low: p.low === null ? close : Number(p.low),
     };
   });
+  const tz = stock.market === "US" ? "America/New_York" : "Asia/Seoul";
+  const minutes = (await safe<{ ts: Date; open: string; high: string; low: string; close: string; volume: string }>(
+    "SELECT ts, open, high, low, close, volume FROM minute_bars WHERE ticker = $1 ORDER BY ts",
+    [ticker],
+  )).map<MinuteCandle>((m) => ({
+    t: wallClock(m.ts, tz), open: Number(m.open), high: Number(m.high), low: Number(m.low), close: Number(m.close), volume: Number(m.volume),
+  }));
   const trades = (await safe<{ day: string; side: "buy" | "sell"; price: string; quantity: string }>(
     `SELECT to_char(b.trade_date, 'YYYY-MM-DD') AS day, 'buy' AS side, b.price, b.quantity FROM buy_entries b JOIN positions p ON p.id = b.position_id WHERE p.ticker = $1
      UNION ALL
@@ -70,7 +78,7 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
     "SELECT id, to_char(day, 'YYYY-MM-DD') AS day, body FROM chart_memos WHERE ticker = $1 ORDER BY day DESC, id DESC",
     [ticker],
   );
-  const today = new Date().toLocaleDateString("sv-SE", { timeZone: stock.market === "US" ? "America/New_York" : "Asia/Seoul" });
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: tz });
   const peerMargin = median(peerLatest.map(operatingMargin));
   const latestMargin = financials[0] ? operatingMargin(financials[0]) : null;
 
@@ -81,7 +89,7 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}
 
       <h2>차트 메모</h2>
-      <ChartMemo ticker={ticker} market={stock.market} candles={candles} memos={memos} trades={trades} levels={levels} today={today} />
+      <ChartMemo ticker={ticker} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} />
 
       <h2>재무 요약</h2>
       {financials.length === 0 ? (

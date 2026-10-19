@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time } from "lightweight-charts";
+import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
 import { addChartMemo, deleteChartMemo } from "@/app/actions";
-import { aggregate, bucketOf, rsi, sma, type Candle, type Period } from "@/lib/candles";
+import { aggregate, aggregateMinutes, bucketOf, MINUTES, rsi, sma, type Candle, type MinuteCandle, type Period } from "@/lib/candles";
 
-export type { Candle };
+export type { Candle, MinuteCandle };
 export type Memo = { id: number; day: string; body: string };
 export type Trade = { day: string; side: "buy" | "sell"; price: number; quantity: number };
 export type Level = { kind: "avg" | "stop" | "target"; price: number };
@@ -17,7 +17,15 @@ const MAS = [
   { n: 60, color: "#7fb8a4" },
   { n: 120, color: "#8a857b" },
 ];
-const PERIODS: { key: Period; label: string }[] = [{ key: "D", label: "일" }, { key: "W", label: "주" }, { key: "M", label: "월" }];
+type View = Period | `${(typeof MINUTES)[number]}`;
+const VIEWS: { key: View; label: string }[] = [
+  ...MINUTES.map((n) => ({ key: `${n}` as View, label: `${n}분` })),
+  { key: "D", label: "일" }, { key: "W", label: "주" }, { key: "M", label: "월" },
+];
+// 차트에 그리는 봉. 일·주·월봉은 날짜 문자열, 분봉은 현지 시각 초를 time으로 씁니다.
+type Bar = { time: Time; key: string; label: string; day: string; open: number; high: number; low: number; close: number; volume: number | null };
+const MINUTE_BARS_SHOWN = 150;
+const hhmm = (t: number) => new Date(t * 1000).toISOString().slice(5, 16).replace("T", " ");
 const RANGES = [
   { key: "3m", label: "3개월", months: 3 },
   { key: "6m", label: "6개월", months: 6 },
@@ -31,10 +39,12 @@ const md = (day: string) => `${Number(day.slice(5, 7))}.${Number(day.slice(8, 10
 const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
 const compact = (v: number) => (v >= 1e12 ? `${(v / 1e12).toFixed(1)}조` : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v.toLocaleString("ko-KR"));
 
-export default function ChartMemo({ ticker, market, candles, memos, trades, levels, today }: {
-  ticker: string; market: string; candles: Candle[]; memos: Memo[]; trades: Trade[]; levels: Level[]; today: string;
+export default function ChartMemo({ ticker, market, candles, minutes, memos, trades, levels, today }: {
+  ticker: string; market: string; candles: Candle[]; minutes: MinuteCandle[]; memos: Memo[]; trades: Trade[]; levels: Level[]; today: string;
 }) {
-  const [period, setPeriod] = useState<Period>("D");
+  const [view, setView] = useState<View>("D");
+  const intraday = !["D", "W", "M"].includes(view);
+  const period: Period = intraday ? "D" : (view as Period);
   const [range, setRange] = useState<Range>("6m");
   const [show, setShow] = useState({ ma: true, volume: true, rsi: false, trades: true, memos: true, levels: true });
   const [big, setBig] = useState(false);
@@ -46,17 +56,26 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
   rangeRef.current = range;
 
   const fmt = (v: number) => (market === "US" ? `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : Math.round(v).toLocaleString("ko-KR"));
-  const bars = useMemo(() => aggregate(candles, period), [candles, period]);
+  const bars = useMemo<Bar[]>(() => {
+    if (intraday) {
+      const openSec = market === "US" ? 9.5 * 3600 : 9 * 3600;
+      return aggregateMinutes(minutes, Number(view), openSec).map((b) => ({
+        ...b, time: b.t as UTCTimestamp, key: String(b.t), label: hhmm(b.t), day: new Date(b.t * 1000).toISOString().slice(0, 10),
+      }));
+    }
+    return aggregate(candles, period).map((c) => ({ ...c, time: c.day as Time, key: c.day, label: c.day }));
+  }, [candles, minutes, view, intraday, period, market]);
   const closes = useMemo(() => bars.map((b) => b.close), [bars]);
   const maValues = useMemo(() => MAS.map((m) => sma(closes, m.n)), [closes]);
   const memosByBar = useMemo(() => {
     const map = new Map<string, Memo[]>();
+    if (intraday) return map;
     for (const m of memos) {
       const key = bucketOf(m.day, period);
       map.set(key, [...(map.get(key) ?? []), m]);
     }
     return map;
-  }, [memos, period]);
+  }, [memos, period, intraday]);
 
   useEffect(() => {
     if (!box.current || bars.length < 2) return;
@@ -81,7 +100,7 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
           horzLine: { color: MUTED, labelBackgroundColor: "#2a2418" },
         },
         rightPriceScale: { borderColor: "#26262b", scaleMargins: { top: 0.16, bottom: 0.06 } },
-        timeScale: { borderColor: "#26262b", rightOffset: 4, minBarSpacing: 2 },
+        timeScale: { borderColor: "#26262b", rightOffset: 4, minBarSpacing: 2, timeVisible: intraday, secondsVisible: false },
         localization: { locale: "ko-KR", dateFormat: "yyyy-MM-dd" },
       });
       chartRef.current = chart;
@@ -91,12 +110,12 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
         priceLineColor: GOLD,
         priceFormat: { type: "custom", formatter: fmt, minMove: market === "US" ? 0.01 : 1 },
       });
-      price.setData(bars.map((b) => ({ time: b.day as Time, open: b.open, high: b.high, low: b.low, close: b.close })));
+      price.setData(bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
 
       if (show.ma) {
         MAS.forEach((m, k) => {
           const s = chart!.addSeries(lc.LineSeries, { color: m.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-          s.setData(bars.flatMap((b, i) => (maValues[k][i] === null ? [] : [{ time: b.day as Time, value: maValues[k][i]! }])));
+          s.setData(bars.flatMap((b, i) => (maValues[k][i] === null ? [] : [{ time: b.time, value: maValues[k][i]! }])));
         });
       }
 
@@ -104,7 +123,7 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
       if (show.volume && bars.some((b) => b.volume)) {
         const vol = chart.addSeries(lc.HistogramSeries, { priceFormat: { type: "custom", formatter: compact }, priceLineVisible: false, lastValueVisible: false }, pane);
         vol.setData(bars.map((b, i) => ({
-          time: b.day as Time, value: b.volume ?? 0,
+          time: b.time, value: b.volume ?? 0,
           color: (i === 0 ? b.close >= b.open : b.close >= bars[i - 1].close) ? "rgba(232,128,111,0.55)" : "rgba(134,168,230,0.55)",
         })));
         chart.panes()[pane].setStretchFactor(0.28);
@@ -116,7 +135,7 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
           color: GOLD, lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
           priceFormat: { type: "custom", formatter: (v: number) => v.toFixed(0) },
         }, pane);
-        s.setData(bars.flatMap((b, i) => (r[i] === null ? [] : [{ time: b.day as Time, value: r[i]! }])));
+        s.setData(bars.flatMap((b, i) => (r[i] === null ? [] : [{ time: b.time, value: r[i]! }])));
         for (const v of [30, 70]) s.createPriceLine({ price: v, color: v === 30 ? DOWN : UP, lineWidth: 1, lineStyle: lc.LineStyle.Dotted, axisLabelVisible: false, title: "" });
         chart.panes()[pane].setStretchFactor(0.28);
       }
@@ -127,9 +146,10 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
         }
       }
 
+      const index = new Map(bars.map((b, i) => [b.key, i]));
       const markers: SeriesMarker<Time>[] = [];
       const first = bars[0].day;
-      if (show.trades) {
+      if (show.trades && !intraday) {
         for (const t of trades) {
           if (t.day < first) continue;
           markers.push(t.side === "buy"
@@ -139,18 +159,18 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
       }
       if (show.memos) {
         for (const key of memosByBar.keys()) {
-          if (key >= first) markers.push({ time: key as Time, position: "aboveBar", shape: "circle", color: "#ece8df", size: 0.8 });
+          if (key >= first && index.has(key)) markers.push({ time: key as Time, position: "aboveBar", shape: "circle", color: "#ece8df", size: 0.8 });
         }
       }
       markers.sort((a, b) => String(a.time).localeCompare(String(b.time)));
       lc.createSeriesMarkers(price, markers);
 
-      const index = new Map(bars.map((b, i) => [b.day, i]));
       chart.subscribeCrosshairMove((p: MouseEventParams<Time>) => setHover(p.time ? index.get(String(p.time)) ?? null : null));
       chart.subscribeClick((p: MouseEventParams<Time>) => {
-        if (p.time) setDay(String(p.time) > today ? today : String(p.time));
+        const b = p.time === undefined ? undefined : bars[index.get(String(p.time)) ?? -1];
+        if (b) setDay(b.day > today ? today : b.day);
       });
-      applyRange(chart, bars, rangeRef.current);
+      applyRange(chart, bars, intraday ? "intraday" : rangeRef.current);
     })();
     return () => {
       disposed = true;
@@ -159,11 +179,11 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
     };
     // fmt·period는 bars·market과 함께 바뀌므로 의존성에서 뺍니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars, show, levels, trades, memosByBar, maValues, closes, today, big]);
+  }, [bars, show, levels, trades, memosByBar, maValues, closes, today, big, intraday]);
 
   useEffect(() => {
-    if (chartRef.current) applyRange(chartRef.current, bars, range);
-  }, [range, bars]);
+    if (chartRef.current) applyRange(chartRef.current, bars, intraday ? "intraday" : range);
+  }, [range, bars, intraday]);
 
   useEffect(() => {
     if (!big) return;
@@ -175,17 +195,17 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
   const i = hover ?? bars.length - 1;
   const bar = bars[i];
   const prev = i > 0 ? bars[i - 1] : null;
-  const barMemos = bar ? memosByBar.get(bar.day) ?? [] : [];
+  const barMemos = bar ? memosByBar.get(bar.key) ?? [] : [];
   const toggle = (k: keyof typeof show) => setShow((s) => ({ ...s, [k]: !s[k] }));
 
   return (
     <>
       <div className={big ? "chart-wrap big" : "chart-wrap"}>
         <div className="chart-tools">
-          <div className="segment small">
-            {PERIODS.map((p) => <button key={p.key} type="button" aria-selected={period === p.key} onClick={() => setPeriod(p.key)}>{p.label}</button>)}
+          <div className="segment small views">
+            {VIEWS.map((v) => <button key={v.key} type="button" aria-selected={view === v.key} onClick={() => setView(v.key)}>{v.label}</button>)}
           </div>
-          <div className="segment small">
+          <div className={intraday ? "segment small hidden" : "segment small"}>
             {RANGES.map((r) => <button key={r.key} type="button" aria-selected={range === r.key} onClick={() => setRange(r.key)}>{r.label}</button>)}
           </div>
           <div className="chart-toggles">
@@ -197,12 +217,16 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
         </div>
 
         {bars.length < 2 ? (
-          <p className="muted">아직 가격 기록이 없습니다. 워커가 다음 수집 때(최대 12시간) 일봉을 받아 오고, 그 뒤로는 매일 종가가 쌓입니다.</p>
+          <p className="muted chart-empty">
+            {intraday
+              ? "아직 분봉이 없어요. 장이 열려 있는 동안 워커가 2분마다 1분봉을 받아 오고, 최근 8일치를 보관해요."
+              : "아직 가격 기록이 없습니다. 워커가 다음 수집 때(최대 12시간) 일봉을 받아 오고, 그 뒤로는 매일 종가가 쌓입니다."}
+          </p>
         ) : (
           <div className="chart-box">
             <div className="chart-legend">
               <div>
-                <span className="muted">{bar.day}{period === "W" ? " 주" : period === "M" ? " 월" : ""}</span>
+                <span className="muted">{bar.label}{view === "W" ? " 주" : view === "M" ? " 월" : ""}</span>
                 <span><i>시</i>{fmt(bar.open)}</span>
                 <span><i>고</i><b className="up">{fmt(bar.high)}</b></span>
                 <span><i>저</i><b className="down">{fmt(bar.low)}</b></span>
@@ -213,7 +237,7 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
               {show.ma && (
                 <div>
                   {MAS.map((m, k) => maValues[k][i] !== null && (
-                    <span key={m.n} style={{ color: m.color }}>{m.n}일 {fmt(maValues[k][i]!)}</span>
+                    <span key={m.n} style={{ color: m.color }}>{m.n}{intraday ? "봉" : "일"} {fmt(maValues[k][i]!)}</span>
                   ))}
                 </div>
               )}
@@ -251,7 +275,11 @@ export default function ChartMemo({ ticker, market, candles, memos, trades, leve
   );
 }
 
-function applyRange(chart: IChartApi, bars: Candle[], range: Range) {
+function applyRange(chart: IChartApi, bars: Bar[], range: Range | "intraday") {
+  if (range === "intraday") {
+    chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - MINUTE_BARS_SHOWN) - 0.5, to: bars.length - 1 + 4 });
+    return;
+  }
   const months = RANGES.find((r) => r.key === range)!.months;
   if (!months || bars.length < 2) {
     chart.timeScale().fitContent();

@@ -135,6 +135,16 @@ MIGRATIONS = [
           ('골든크로스', '{"goldenCross": true}');
       END IF;
     END $$""",
+    """CREATE TABLE IF NOT EXISTS minute_bars (
+      ticker  TEXT NOT NULL,
+      ts      TIMESTAMPTZ NOT NULL,
+      open    NUMERIC(18, 4) NOT NULL,
+      high    NUMERIC(18, 4) NOT NULL,
+      low     NUMERIC(18, 4) NOT NULL,
+      close   NUMERIC(18, 4) NOT NULL,
+      volume  NUMERIC(20, 0) NOT NULL DEFAULT 0,
+      PRIMARY KEY (ticker, ts)
+    )""",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -330,3 +340,14 @@ def save_screener(conn: psycopg.Connection, market: str, rows) -> None:
                  dec(m.volume_ratio), dec(m.rsi14), dec(m.ma5, 4), dec(m.ma20, 4), dec(m.ma20_gap_pct), m.golden_cross,
                  dec(m.high_52w, 4), dec(m.near_high_pct), [dec(v, 4) for v in m.spark]),
             )
+
+
+def save_minutes(conn: psycopg.Connection, ticker: str, bars, keep_days: int = 8) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO minute_bars (ticker, ts, open, high, low, close, volume) VALUES (%s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (ticker, ts) DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                 close = EXCLUDED.close, volume = EXCLUDED.volume""",
+            [(ticker, b.ts, b.open, b.high, b.low, b.close, b.volume) for b in bars],
+        )
+    conn.execute("DELETE FROM minute_bars WHERE ticker = %s AND ts < now() - make_interval(days => %s)", (ticker, keep_days))

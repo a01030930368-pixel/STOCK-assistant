@@ -252,3 +252,15 @@ INSERT INTO screener_presets (name, rules) VALUES
   ('눌림목', '{"rsiMax": 35, "ma20": "below"}'),
   ('신고가 근접', '{"nearHighPct": 5}'),
   ('골든크로스', '{"goldenCross": true}');
+
+-- 분봉(1분). 워커가 장중 2분마다 보유·관심 종목을 받아 최근 8일치만 보관
+CREATE TABLE minute_bars (
+  ticker  TEXT NOT NULL,
+  ts      TIMESTAMPTZ NOT NULL,
+  open    NUMERIC(18, 4) NOT NULL,
+  high    NUMERIC(18, 4) NOT NULL,
+  low     NUMERIC(18, 4) NOT NULL,
+  close   NUMERIC(18, 4) NOT NULL,
+  volume  NUMERIC(20, 0) NOT NULL DEFAULT 0,
+  PRIMARY KEY (ticker, ts)
+);
