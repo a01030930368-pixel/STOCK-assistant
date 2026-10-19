@@ -4,6 +4,7 @@ import { addPeer, deletePeer } from "@/app/actions";
 import { query } from "@/lib/db";
 import { loadSummaries } from "@/lib/summaryData";
 import SummaryLine from "@/app/_components/SummaryLine";
+import AiNote, { type AiComment } from "@/app/_components/AiNote";
 import ChartMemo, { type Candle, type Level, type Memo, type MinuteCandle, type Trade } from "@/app/_components/ChartMemo";
 import { wallClock } from "@/lib/candles";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
@@ -55,6 +56,10 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       open: p.open === null ? close : Number(p.open), high: p.high === null ? close : Number(p.high), low: p.low === null ? close : Number(p.low),
     };
   });
+  const [comment] = await safe<AiComment>(
+    "SELECT ticker, to_char(day, 'YYYY-MM-DD') AS day, tone, body FROM ai_comments WHERE ticker = $1 ORDER BY day DESC LIMIT 1",
+    [ticker],
+  );
   const tz = stock.market === "US" ? "America/New_York" : "Asia/Seoul";
   const minutes = (await safe<{ ts: Date; open: string; high: string; low: string; close: string; volume: string }>(
     "SELECT ts, open, high, low, close, volume FROM minute_bars WHERE ticker = $1 ORDER BY ts",
@@ -86,6 +91,7 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
     <>
       <h1>{stock.name} <span className="muted">{stock.ticker} · {stock.market}</span></h1>
       <SummaryLine parts={summary} />
+      {comment && <div className="panel ai-panel"><AiNote c={comment} title={<span className="label">AI 한마디</span>} /></div>}
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}
 
       <h2>차트 메모</h2>

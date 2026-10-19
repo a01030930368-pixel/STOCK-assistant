@@ -6,6 +6,7 @@ import NewsTabs from "./_components/NewsTabs";
 import SummaryLine from "./_components/SummaryLine";
 import { loadSummaries } from "@/lib/summaryData";
 import type { Part } from "@/lib/summary";
+import AiNote, { type AiComment } from "@/app/_components/AiNote";
 import EventLine, { type CalendarEvent } from "./_components/EventLine";
 
 export const dynamic = "force-dynamic";
@@ -137,6 +138,10 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
     [scope],
   ).catch(() => []);
 
+  const comments = await query<AiComment & { market: string }>(
+    `SELECT DISTINCT ON (c.ticker) c.ticker, h.name, h.market, to_char(c.day, 'YYYY-MM-DD') AS day, c.tone, c.body
+     FROM ai_comments c JOIN holdings h ON h.ticker = c.ticker ORDER BY c.ticker, c.day DESC`,
+  ).catch(() => []);
   const summaries = await loadSummaries();
   const krCash = cash.find((c) => c.market === "KR");
   const usCash = cash.find((c) => c.market === "US");
@@ -224,6 +229,18 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
                     <div className="row2"><a href={f.url} target="_blank" rel="noopener noreferrer">{f.name} 실적 발표</a><span className="badge">{asOf(f.reported_day)}</span></div>
                     <div className="meta">{f.title}</div>
                   </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="panel">
+            <div className="panel-title">AI 한마디</div>
+            {comments.filter((c) => scope === "all" || c.market === scope).length === 0 ? (
+              <div className="muted">.env에 ANTHROPIC_API_KEY를 넣으면 장 마감 뒤 보유 종목마다 하루 한 번 점검 메모를 써 드려요.</div>
+            ) : (
+              <ul className="feed">
+                {comments.filter((c) => scope === "all" || c.market === scope).map((c) => (
+                  <li key={c.ticker}><AiNote c={c} title={<Link href={`/stock/${encodeURIComponent(c.ticker)}`}>{c.name}</Link>} /></li>
                 ))}
               </ul>
             )}

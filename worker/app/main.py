@@ -12,6 +12,7 @@ from .kiwoom import KiwoomClient
 from .research_job import ResearchJob
 from .screener_job import ScreenerJob
 from .intraday_job import IntradayJob
+from .ai_job import AiJob
 from .market import kr_market_open, us_market_open
 
 log = logging.getLogger("worker")
@@ -73,7 +74,7 @@ def main() -> None:
     logsafe.setup([
         cfg.kiwoom_appkey, cfg.kiwoom_secretkey, cfg.telegram_bot_token,
         cfg.ecos_api_key, cfg.fred_api_key, cfg.dart_api_key,
-        cfg.naver_client_id, cfg.naver_client_secret, cfg.finnhub_api_key,
+        cfg.naver_client_id, cfg.naver_client_secret, cfg.finnhub_api_key, cfg.anthropic_api_key,
     ])
     kiwoom = None
     if cfg.kiwoom_appkey and cfg.kiwoom_secretkey:
@@ -86,6 +87,7 @@ def main() -> None:
     research = ResearchJob(cfg, http, kiwoom)
     screener = ScreenerJob(kiwoom)
     minutes = IntradayJob(http, kiwoom)
+    comments = AiJob(cfg, http)
     first = True
     last_macro: datetime | None = None
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:
@@ -114,6 +116,10 @@ def main() -> None:
                 minutes.run(conn, now)
             except Exception:
                 log.exception("분봉 갱신 실패")
+            try:
+                comments.run(conn, now)
+            except Exception:
+                log.exception("AI 한마디 실패")
             time.sleep(cfg.poll_seconds)
 
 

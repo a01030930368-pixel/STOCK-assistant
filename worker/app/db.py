@@ -145,6 +145,15 @@ MIGRATIONS = [
       volume  NUMERIC(20, 0) NOT NULL DEFAULT 0,
       PRIMARY KEY (ticker, ts)
     )""",
+    """CREATE TABLE IF NOT EXISTS ai_comments (
+      ticker      TEXT NOT NULL,
+      day         DATE NOT NULL,
+      tone        TEXT NOT NULL,
+      body        TEXT NOT NULL,
+      model       TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (ticker, day)
+    )""",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -351,3 +360,83 @@ def save_minutes(conn: psycopg.Connection, ticker: str, bars, keep_days: int = 8
             [(ticker, b.ts, b.open, b.high, b.low, b.close, b.volume) for b in bars],
         )
     conn.execute("DELETE FROM minute_bars WHERE ticker = %s AND ts < now() - make_interval(days => %s)", (ticker, keep_days))
+
+
+def held_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
+    return conn.execute("SELECT ticker, name, market FROM holdings WHERE quantity > 0 ORDER BY ticker").fetchall()
+
+
+def ai_comment_days(conn: psycopg.Connection) -> dict[str, object]:
+    """종목별 마지막 AI 한마디 날짜."""
+    return dict(conn.execute("SELECT ticker, max(day) FROM ai_comments GROUP BY ticker").fetchall())
+
+
+def save_ai_comment(conn: psycopg.Connection, ticker: str, day, tone: str, body: str, model: str) -> None:
+    conn.execute(
+        """INSERT INTO ai_comments (ticker, day, tone, body, model) VALUES (%s, %s, %s, %s, %s)
+           ON CONFLICT (ticker, day) DO UPDATE SET tone = EXCLUDED.tone, body = EXCLUDED.body, model = EXCLUDED.model, created_at = now()""",
+        (ticker, day, tone, body, model),
+    )
+    conn.execute("DELETE FROM ai_comments WHERE ticker = %s AND day < CURRENT_DATE - 60", (ticker,))
+
+
+def _plain(v) -> str:
+    # Decimal('40.0000') -> '40', 지수 표기(4E+1) 없이
+    return format(v.normalize(), "f")
+
+
+def ai_context(conn: psycopg.Connection, ticker: str, name: str, market: str) -> dict:
+    """AI 한마디에 넣을 자료. 없는 항목은 빼고 보냅니다."""
+    from .screener import rsi
+
+    ctx: dict = {"ticker": ticker, "name": name, "market": market}
+    h = conn.execute("SELECT quantity, avg_price, cur_price, pnl_pct FROM holdings WHERE ticker = %s", (ticker,)).fetchone()
+    if h:
+        ctx["holding"] = {"quantity": _plain(h[0]), "avg_price": _plain(h[1]), "cur_price": _plain(h[2]), "pnl_pct": h[3]}
+    j = conn.execute(
+        """SELECT b.reason, b.scenario, b.risk_1, b.risk_2, b.risk_3, b.stop_price, b.target_price
+           FROM buy_entries b JOIN positions p ON p.id = b.position_id
+           WHERE p.ticker = %s AND p.status = 'open' ORDER BY b.trade_date DESC, b.id DESC LIMIT 1""",
+        (ticker,),
+    ).fetchone()
+    if j:
+        ctx["journal"] = {"reason": j[0], "scenario": j[1], "risks": [j[2], j[3], j[4]],
+                          "stop_price": _plain(j[5]), "target_price": _plain(j[6])}
+    closes = [float(r[0]) for r in conn.execute(
+        "SELECT close FROM (SELECT day, close FROM price_history WHERE ticker = %s ORDER BY day DESC LIMIT 250) t ORDER BY day", (ticker,)
+    ).fetchall()]
+    if len(closes) >= 2:
+        last = closes[-1]
+        ma20 = sum(closes[-20:]) / len(closes[-20:])
+        r = rsi(closes)
+        ctx["price"] = {
+            "종가": round(last, 2),
+            "1개월 등락": f"{(last / closes[-22] - 1) * 100:+.1f}%" if len(closes) >= 22 else None,
+            "20일선 대비": f"{(last / ma20 - 1) * 100:+.1f}%",
+            "52주 최고가 대비": f"{(last / max(closes) - 1) * 100:+.1f}%",
+            "RSI(14)": round(r) if r is not None else None,
+        }
+    ctx["earnings"] = [
+        f"{e[0]} EPS {_plain(e[1])}" + (f" (예상 {_plain(e[2])})" if e[2] is not None else "")
+        for e in conn.execute(
+            """SELECT COALESCE(to_char(reported_on, 'YYYY-MM-DD'), period), eps_actual, eps_estimate FROM stock_earnings
+               WHERE ticker = %s AND eps_actual IS NOT NULL ORDER BY reported_on DESC NULLS LAST LIMIT 2""",
+            (ticker,),
+        ).fetchall()
+    ]
+    ctx["events"] = [
+        f"{d} {t} {detail}".strip()
+        for d, t, detail in conn.execute(
+            """SELECT to_char(day, 'YYYY-MM-DD'), title, detail FROM calendar_events
+               WHERE ticker = %s AND day BETWEEN CURRENT_DATE AND CURRENT_DATE + 30 ORDER BY day LIMIT 3""",
+            (ticker,),
+        ).fetchall()
+    ]
+    ctx["news"] = [
+        f"{d} {t}" for d, t in conn.execute(
+            """SELECT to_char(published_at, 'MM-DD'), COALESCE(title_ko, title) FROM stock_news
+               WHERE ticker = %s AND published_at > now() - interval '7 days' ORDER BY published_at DESC LIMIT 6""",
+            (ticker,),
+        ).fetchall()
+    ]
+    return ctx
