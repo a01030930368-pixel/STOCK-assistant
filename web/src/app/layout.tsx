@@ -12,6 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <nav>
           <Link href="/">포트폴리오</Link>
           <Link href="/journal">매매일지</Link>
+          <Link href="/macro">매크로</Link>
         </nav>
         <main>{children}</main>
       </body>

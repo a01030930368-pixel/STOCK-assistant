@@ -1,11 +1,13 @@
 """장중에 키움 잔고를 동기화하고 손절·익절 알림을 텔레그램으로 보냅니다."""
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import psycopg
 
-from . import alerts, config, db, telegram
+import httpx
+
+from . import alerts, config, db, macro, telegram
 from .kiwoom import KiwoomClient
 from .market import kr_market_open, us_market_open
 
@@ -33,6 +35,23 @@ def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | No
         db.mark_triggered(conn, alert.id)
 
 
+MACRO_EVERY = timedelta(hours=6)
+
+
+def refresh_macro(cfg: config.Config, conn: psycopg.Connection, http: httpx.Client) -> None:
+    today = datetime.now(timezone.utc).date()
+    sources = []
+    if cfg.ecos_api_key:
+        sources.append(("ECOS", lambda: macro.fetch_ecos(cfg.ecos_api_key, today, http)))
+    if cfg.fred_api_key:
+        sources.append(("FRED", lambda: macro.fetch_fred(cfg.fred_api_key, http)))
+    for name, fetch in sources:
+        try:
+            db.save_indicators(conn, fetch())
+        except Exception:
+            log.exception("%s 매크로 지표 가져오기 실패", name)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = config.load()
@@ -41,11 +60,18 @@ def main() -> None:
         kiwoom = KiwoomClient(cfg.kiwoom_base_url, cfg.kiwoom_appkey, cfg.kiwoom_secretkey)
     else:
         log.warning("키움 키가 없어 잔고 동기화를 건너뜁니다.")
+    if not (cfg.ecos_api_key or cfg.fred_api_key):
+        log.warning("ECOS·FRED 키가 없어 매크로 지표 자동 수집을 건너뜁니다.")
+    http = httpx.Client(timeout=10)
     first = True
+    last_macro: datetime | None = None
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:
         db.migrate(conn)
         while True:
             now = datetime.now(timezone.utc)
+            if last_macro is None or now - last_macro >= MACRO_EVERY:
+                refresh_macro(cfg, conn, http)
+                last_macro = now
             kr, us = first or kr_market_open(now), first or us_market_open(now)
             if kr or us:
                 try:

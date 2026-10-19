@@ -19,6 +19,7 @@ CREATE TABLE macro_snapshots (
   usdkrw            NUMERIC(10, 2),
   gdp_outlook       TEXT,
   inflation         NUMERIC(5, 2),
+  us_inflation      NUMERIC(5, 2),
   key_variables     TEXT,
   implications      TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -123,4 +124,12 @@ CREATE TABLE us_account_summary (
   total_pnl_pct  NUMERIC(8, 2) NOT NULL,
   exch_rate      NUMERIC(12, 4) NOT NULL,
   synced_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 공공 API에서 가져온 최신 매크로 지표. 매크로 메모 작성 시 기본값으로 씁니다.
+CREATE TABLE macro_indicators (
+  code        TEXT PRIMARY KEY,
+  value       NUMERIC(12, 4) NOT NULL,
+  as_of       TEXT NOT NULL,
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );

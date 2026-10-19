@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { saveNotes } from "@/app/actions";
 import { query } from "@/lib/db";
 import { signClass, today, won } from "@/lib/format";
+import MacroCard, { SNAPSHOT_COLUMNS, type Snapshot } from "@/app/macro/MacroCard";
 import Principles from "../Principles";
 import SellForm from "./SellForm";
 
@@ -12,10 +13,12 @@ type Position = { id: number; ticker: string; name: string; market: string; stat
 type Buy = {
   id: number; trade_day: string; quantity: string; price: string; reason: string; scenario: string;
   risk_1: string; risk_2: string; risk_3: string; weight_pct: string; stop_price: string; target_price: string; target_basis: string;
+  macro_snapshot_id: number | null;
 };
 type Sell = {
   id: number; trade_day: string; quantity: string; price: string; return_pct: string; holding_days: number;
   reason_type: string; reason_detail: string; lesson: string; followed_rules: boolean;
+  macro_snapshot_id: number | null;
 };
 type Alert = { id: number; kind: string; price: string; active: boolean; triggered_at: Date | null };
 
@@ -30,6 +33,14 @@ export default async function PositionPage({ params }: { params: Promise<{ id: s
   const buys = await query<Buy>(`SELECT *, ${date} FROM buy_entries WHERE position_id = $1 ORDER BY trade_date, id`, [id]);
   const sells = await query<Sell>(`SELECT *, ${date} FROM sell_entries WHERE position_id = $1 ORDER BY trade_date, id`, [id]);
   const alerts = await query<Alert>("SELECT id, kind, price, active, triggered_at FROM alerts WHERE position_id = $1 ORDER BY id DESC LIMIT 4", [id]);
+  const snapshotIds = [...buys, ...sells].map((e) => e.macro_snapshot_id).filter((v): v is number => v !== null);
+  const snapshots = new Map(
+    (await query<Snapshot>(`SELECT ${SNAPSHOT_COLUMNS} FROM macro_snapshots WHERE id = ANY($1)`, [snapshotIds])).map((s) => [s.id, s]),
+  );
+  const macroOf = (id: number | null) => {
+    const s = id === null ? undefined : snapshots.get(id);
+    return s && <MacroCard s={s} title={`당시 매크로 (${s.snapshot_day} 메모)`} />;
+  };
   const remaining = buys.reduce((s, b) => s + Number(b.quantity), 0) - sells.reduce((s, x) => s + Number(x.quantity), 0);
 
   return (
@@ -52,6 +63,7 @@ export default async function PositionPage({ params }: { params: Promise<{ id: s
           {b.scenario && <div>기대 시나리오: {b.scenario}</div>}
           <div>주요 리스크: {b.risk_1} / {b.risk_2} / {b.risk_3}</div>
           <div>손절 {won(b.stop_price, 2)} · 익절 {won(b.target_price, 2)} ({b.target_basis === "chart" ? "차트 분석" : "퍼센트"})</div>
+          {macroOf(b.macro_snapshot_id)}
         </div>
       ))}
       {position.status === "open" && <p><Link href={`/journal/buy?${new URLSearchParams({ ticker: position.ticker, name: position.name, market: position.market })}`}>+ 추가 매수 기록</Link></p>}
@@ -73,6 +85,7 @@ export default async function PositionPage({ params }: { params: Promise<{ id: s
           <div>매도 이유: {REASON[s.reason_type]}{s.reason_detail && ` (${s.reason_detail})`}</div>
           <div>배운 것: {s.lesson}</div>
           <div>원칙 준수: {s.followed_rules ? "지켰다" : "못 지켰다"}</div>
+          {macroOf(s.macro_snapshot_id)}
         </div>
       ))}
       {position.status === "open" && remaining > 0 && (
