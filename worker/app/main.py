@@ -7,14 +7,23 @@ import psycopg
 
 from . import alerts, config, db, telegram
 from .kiwoom import KiwoomClient
-from .market import kr_market_open
+from .market import kr_market_open, us_market_open
 
 log = logging.getLogger("worker")
 
 
-def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | None) -> None:
-    if kiwoom:
-        db.save_balance(conn, kiwoom.domestic_balance())
+def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | None, kr: bool, us: bool) -> None:
+    # 한쪽 시장 조회가 실패해도 다른 시장과 알림은 계속 돌도록 따로 처리합니다.
+    if kiwoom and kr:
+        try:
+            db.save_balance(conn, kiwoom.domestic_balance())
+        except Exception:
+            log.exception("국내 잔고 동기화 실패")
+    if kiwoom and us:
+        try:
+            db.save_us_balance(conn, kiwoom.us_balance())
+        except Exception:
+            log.exception("미국 잔고 동기화 실패")
     prices = db.current_prices(conn)
     for alert, price in alerts.due(db.active_alerts(conn), prices):
         text = alerts.message(alert, price)
@@ -34,10 +43,13 @@ def main() -> None:
         log.warning("키움 키가 없어 잔고 동기화를 건너뜁니다.")
     first = True
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:
+        db.migrate(conn)
         while True:
-            if first or kr_market_open(datetime.now(timezone.utc)):
+            now = datetime.now(timezone.utc)
+            kr, us = first or kr_market_open(now), first or us_market_open(now)
+            if kr or us:
                 try:
-                    tick(cfg, conn, kiwoom)
+                    tick(cfg, conn, kiwoom, kr, us)
                 except Exception:
                     log.exception("동기화 실패")
                 first = False

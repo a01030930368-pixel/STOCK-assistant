@@ -113,3 +113,14 @@ CREATE TABLE account_summary (
   est_deposit      NUMERIC(20, 2) NOT NULL,
   synced_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 미국 주식 잔고 합계(달러). worker/app/db.py의 MIGRATIONS와 같아야 합니다.
+CREATE TABLE us_account_summary (
+  id             INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  total_buy      NUMERIC(20, 4) NOT NULL,
+  total_eval     NUMERIC(20, 4) NOT NULL,
+  total_pnl      NUMERIC(20, 4) NOT NULL,
+  total_pnl_pct  NUMERIC(8, 2) NOT NULL,
+  exch_rate      NUMERIC(12, 4) NOT NULL,
+  synced_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
