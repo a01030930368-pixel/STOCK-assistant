@@ -35,6 +35,11 @@ def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | No
             db.save_cash(conn, "US", kiwoom.us_cash())
         except Exception:
             log.exception("미국 예수금 동기화 실패")
+    if kiwoom and (kr or us):
+        try:
+            db.snapshot_prices(conn)
+        except Exception:
+            log.exception("차트용 종가 저장 실패")
     prices = db.current_prices(conn)
     for alert, price in alerts.due(db.active_alerts(conn), prices):
         text = alerts.message(alert, price)
@@ -76,7 +81,7 @@ def main() -> None:
     if not (cfg.ecos_api_key or cfg.fred_api_key):
         log.warning("ECOS·FRED 키가 없어 매크로 지표 자동 수집을 건너뜁니다.")
     http = httpx.Client(timeout=30)
-    research = ResearchJob(cfg, http)
+    research = ResearchJob(cfg, http, kiwoom)
     first = True
     last_macro: datetime | None = None
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:

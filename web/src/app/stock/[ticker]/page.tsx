@@ -4,6 +4,7 @@ import { addPeer, deletePeer } from "@/app/actions";
 import { query } from "@/lib/db";
 import { loadSummaries } from "@/lib/summaryData";
 import SummaryLine from "@/app/_components/SummaryLine";
+import ChartMemo, { type Candle, type Level, type Memo, type Trade } from "@/app/_components/ChartMemo";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +44,33 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
     [peers.map((p) => p.peer_ticker)],
   );
   const summary = (await loadSummaries([ticker])).get(ticker);
+  const candles = (await safe<{ day: string; open: string | null; high: string | null; low: string | null; close: string; volume: string | null }>(
+    "SELECT to_char(day, 'YYYY-MM-DD') AS day, open, high, low, close, volume FROM price_history WHERE ticker = $1 ORDER BY day",
+    [ticker],
+  )).map<Candle>((p) => {
+    const close = Number(p.close);
+    return {
+      day: p.day, close, volume: p.volume === null ? null : Number(p.volume),
+      open: p.open === null ? close : Number(p.open), high: p.high === null ? close : Number(p.high), low: p.low === null ? close : Number(p.low),
+    };
+  });
+  const trades = (await safe<{ day: string; side: "buy" | "sell"; price: string; quantity: string }>(
+    `SELECT to_char(b.trade_date, 'YYYY-MM-DD') AS day, 'buy' AS side, b.price, b.quantity FROM buy_entries b JOIN positions p ON p.id = b.position_id WHERE p.ticker = $1
+     UNION ALL
+     SELECT to_char(s.trade_date, 'YYYY-MM-DD'), 'sell', s.price, s.quantity FROM sell_entries s JOIN positions p ON p.id = s.position_id WHERE p.ticker = $1`,
+    [ticker],
+  )).map<Trade>((t) => ({ day: t.day, side: t.side, price: Number(t.price), quantity: Number(t.quantity) }));
+  const levels = (await safe<{ kind: Level["kind"]; price: string }>(
+    `SELECT 'avg' AS kind, avg_price AS price FROM holdings WHERE ticker = $1 AND avg_price > 0
+     UNION ALL
+     SELECT kind, price FROM alerts WHERE ticker = $1 AND active AND kind IN ('stop', 'target')`,
+    [ticker],
+  )).map<Level>((l) => ({ kind: l.kind, price: Number(l.price) }));
+  const memos = await safe<Memo>(
+    "SELECT id, to_char(day, 'YYYY-MM-DD') AS day, body FROM chart_memos WHERE ticker = $1 ORDER BY day DESC, id DESC",
+    [ticker],
+  );
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: stock.market === "US" ? "America/New_York" : "Asia/Seoul" });
   const peerMargin = median(peerLatest.map(operatingMargin));
   const latestMargin = financials[0] ? operatingMargin(financials[0]) : null;
 
@@ -51,6 +79,9 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       <h1>{stock.name} <span className="muted">{stock.ticker} · {stock.market}</span></h1>
       <SummaryLine parts={summary} />
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}
+
+      <h2>차트 메모</h2>
+      <ChartMemo ticker={ticker} market={stock.market} candles={candles} memos={memos} trades={trades} levels={levels} today={today} />
 
       <h2>재무 요약</h2>
       {financials.length === 0 ? (

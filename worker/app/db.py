@@ -82,8 +82,25 @@ MIGRATIONS = [
       detail  TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (day, kind, market, ticker, title)
     )""",
+    """CREATE TABLE IF NOT EXISTS price_history (
+      ticker  TEXT NOT NULL,
+      day     DATE NOT NULL,
+      close   NUMERIC(18, 4) NOT NULL,
+      PRIMARY KEY (ticker, day)
+    )""",
+    # 캔들·거래량 차트용. 예전 DB에는 종가만 있었습니다.
+    "ALTER TABLE price_history ADD COLUMN IF NOT EXISTS open NUMERIC(18, 4)",
+    "ALTER TABLE price_history ADD COLUMN IF NOT EXISTS high NUMERIC(18, 4)",
+    "ALTER TABLE price_history ADD COLUMN IF NOT EXISTS low NUMERIC(18, 4)",
+    "ALTER TABLE price_history ADD COLUMN IF NOT EXISTS volume NUMERIC(20, 0)",
+    """CREATE TABLE IF NOT EXISTS chart_memos (
+      id          SERIAL PRIMARY KEY,
+      ticker      TEXT NOT NULL,
+      day         DATE NOT NULL,
+      body        TEXT NOT NULL CHECK (length(trim(body)) > 0),
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
-
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
         conn.execute(statement)
@@ -234,3 +251,29 @@ def save_calendar(conn: psycopg.Connection, kind: str, events: list[Event], tick
                 (e.day, e.kind, e.market, e.ticker, e.title, e.detail),
             )
         conn.execute("DELETE FROM calendar_events WHERE day < CURRENT_DATE - 30")
+
+
+def save_prices(conn: psycopg.Connection, ticker: str, rows) -> None:
+    for r in rows:
+        conn.execute(
+            """INSERT INTO price_history (ticker, day, open, high, low, close, volume) VALUES (%s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (ticker, day) DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                 close = EXCLUDED.close, volume = EXCLUDED.volume""",
+            (ticker, r.day, r.open, r.high, r.low, r.close, r.volume),
+        )
+
+
+def snapshot_prices(conn: psycopg.Connection) -> None:
+    """보유 종목 현재가를 그 시장의 오늘 날짜 종가로 적어 둡니다. 장 마감 뒤 마지막 값이 그날 종가가 됩니다.
+
+    고가·저가는 지금까지 본 값으로 넓히고, 일봉을 받아 오면 정확한 값으로 덮어씁니다."""
+    conn.execute(
+        """INSERT INTO price_history (ticker, day, open, high, low, close)
+           SELECT ticker, (now() AT TIME ZONE CASE market WHEN 'KR' THEN 'Asia/Seoul' ELSE 'America/New_York' END)::date,
+             cur_price, cur_price, cur_price, cur_price
+           FROM holdings WHERE cur_price > 0
+           ON CONFLICT (ticker, day) DO UPDATE SET close = EXCLUDED.close,
+             open = COALESCE(price_history.open, EXCLUDED.close),
+             high = GREATEST(COALESCE(price_history.high, EXCLUDED.close), EXCLUDED.close),
+             low = LEAST(COALESCE(price_history.low, EXCLUDED.close), EXCLUDED.close)"""
+    )
