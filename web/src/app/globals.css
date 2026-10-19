@@ -268,3 +268,33 @@ h1 + .summary-line { font-size: 0.95rem; margin: -6px 0 18px; }
 .memo-form input[name="body"] { flex: 1; min-width: 200px; }
 .memo-form input[type="date"] { width: auto; }
 .list-item button.ghost { white-space: nowrap; }
+
+/* 검색기 */
+.screener-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.preset-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.preset-card { display: flex; flex-direction: column; gap: 6px; color: var(--fg); transition: border-color 0.15s; }
+.preset-card:hover { text-decoration: none; border-color: #4a3f28; }
+.preset-card.on { border-color: var(--accent); }
+.preset-head { display: flex; align-items: baseline; gap: 6px; }
+.preset-head b { font-weight: 600; margin-right: auto; }
+.preset-count { font-size: 1.45rem; font-weight: 700; color: var(--muted); line-height: 1; }
+.preset-card.on .preset-count { color: var(--accent); }
+.preset-desc { color: var(--muted); font-size: 0.78rem; margin-bottom: 2px; }
+.preset-line { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0 0; border-top: 1px solid var(--line-2); font-size: 0.88rem; }
+.preset-line span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.screener-result .table-scroll { overflow-x: auto; }
+.screener-result table td:first-child, .screener-result table th:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+.screener-result table th:first-child { background: var(--surface-2); }
+.stock-link { color: var(--fg); font-weight: 600; }
+.stock-link:hover { color: var(--accent); }
+.code { font-size: 0.75rem; }
+.badge.tag { margin-right: 4px; font-size: 0.74rem; }
+.screener-empty { padding: 0 18px 18px; }
+.screener-edit { padding: 0 18px 12px; }
+.screener-note { margin-top: 10px; font-size: 0.8rem; }
+.preset-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 14px; margin-bottom: 16px; }
+.preset-form .panel-title, .preset-form .wide { grid-column: 1 / -1; }
+.preset-form label { display: grid; gap: 6px; font-size: 0.8rem; color: var(--muted); }
+.preset-form label.check { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; color: var(--sub); font-size: 0.88rem; }
+.form-actions { display: flex; align-items: center; gap: 16px; }
+.screener-edit .preset-form { margin-bottom: 8px; background: var(--surface-2); }
