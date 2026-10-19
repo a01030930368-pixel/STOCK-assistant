@@ -275,3 +275,9 @@ CREATE TABLE ai_comments (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (ticker, day)
 );
+
+-- 텔레그램 일정 알림·아침 브리핑을 보낸 기록(하루 한 번만 보내려고)
+CREATE TABLE notices_sent (
+  key      TEXT PRIMARY KEY,
+  sent_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
