@@ -2,6 +2,7 @@ import Link from "next/link";
 import { distancePct, scopeOf, totalOf, type Account, type Scope } from "@/lib/board";
 import { query } from "@/lib/db";
 import { asOf, fixedPct, signClass, usd, won } from "@/lib/format";
+import NewsTabs from "./_components/NewsTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ type Summary = { total_buy: string; total_eval: string; total_pnl: string; total
 type UsSummary = Summary & { exch_rate: string };
 type Cash = { market: "KR" | "US"; deposit: string; d2_deposit: string | null; orderable: string | null; synced_at: Date };
 type AlertRow = { ticker: string; name: string; market: "KR" | "US"; kind: "stop" | "target" | "custom"; direction: "below" | "above"; price: string; cur_price: string };
-type News = { ticker: string; url: string; title: string; source: string; published_at: Date };
+type News = { ticker: string; market: "KR" | "US"; url: string; title: string; title_ko: string | null; source: string; published_at: Date };
 type Filing = { ticker: string; name: string; title: string; url: string; reported_day: string };
 
 const signed = (v: number, text: string) => (v > 0 ? `+${text}` : text);
@@ -103,10 +104,20 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
      FROM alerts a JOIN holdings h ON h.ticker = a.ticker WHERE a.active`,
   );
   const tickers = holdings.filter((h) => scope === "all" || h.market === scope).map((h) => h.ticker);
+  // 국내·해외 탭에 나눠 보여 주도록 시장마다 최신 8건씩 가져옵니다.
   const news = await query<News>(
-    "SELECT ticker, url, title, source, published_at FROM stock_news WHERE ticker = ANY($1) ORDER BY published_at DESC LIMIT 6",
-    [tickers],
-  ).catch(() => []);
+    `SELECT * FROM (
+       SELECT n.ticker, h.market, n.url, n.title, n.title_ko, n.source, n.published_at,
+              row_number() OVER (PARTITION BY h.market ORDER BY n.published_at DESC) AS rn
+       FROM stock_news n JOIN holdings h ON h.ticker = n.ticker
+     ) t WHERE rn <= 8 ORDER BY published_at DESC`,
+  ).catch(() =>
+    // 번역 칸이 생기기 전(워커 업데이트 전) DB에서도 화면이 뜨도록 합니다.
+    query<News>(
+      `SELECT n.ticker, h.market, n.url, n.title, NULL AS title_ko, n.source, n.published_at
+       FROM stock_news n JOIN holdings h ON h.ticker = n.ticker ORDER BY n.published_at DESC LIMIT 16`,
+    ).catch(() => []),
+  );
   const filings = await query<Filing>(
     `SELECT e.ticker, h.name, e.title, e.url, to_char(e.reported_on, 'YYYYMMDD') AS reported_day
      FROM stock_earnings e JOIN holdings h ON h.ticker = e.ticker
@@ -209,19 +220,13 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
             <div className="muted">실적 발표일·휴장일 캘린더는 다음 단계에서 붙일 예정이에요.</div>
           </div>
           <div className="panel">
-            <div className="panel-title">최신 뉴스</div>
-            {news.length === 0 ? (
-              <div className="muted">보유 종목 뉴스가 아직 없습니다.</div>
-            ) : (
-              <ul className="feed">
-                {news.map((n) => (
-                  <li key={n.ticker + n.url}>
-                    <a href={n.url} target="_blank" rel="noopener noreferrer">{n.title}</a>
-                    <div className="meta">{n.ticker} · {n.source} · {kst(n.published_at)}</div>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <NewsTabs
+              initial={scope === "US" || (scope === "all" && !news.some((n) => n.market === "KR")) ? "US" : "KR"}
+              items={news.map((n) => ({
+                key: n.ticker + n.url, market: n.market, ticker: n.ticker, title: n.title, titleKo: n.title_ko,
+                url: n.url, meta: `${n.source} · ${kst(n.published_at)}`,
+              }))}
+            />
           </div>
         </section>
       </div>

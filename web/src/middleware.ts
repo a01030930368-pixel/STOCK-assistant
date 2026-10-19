@@ -12,8 +12,8 @@ export function middleware(req: NextRequest) {
   }
   return new NextResponse("인증이 필요합니다", {
     status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="STOCK assistant", charset="UTF-8"' },
+    headers: { "WWW-Authenticate": 'Basic realm="LODESTAR", charset="UTF-8"' },
   });
 }
 
-export const config = { matcher: ["/((?!_next/static|_next/image|manifest.webmanifest).*)"] };
+export const config = { matcher: ["/((?!_next/static|_next/image|manifest.webmanifest|icon|apple-icon|icon-192.png|icon-512.png).*)"] };

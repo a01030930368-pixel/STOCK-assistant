@@ -1,3 +1,10 @@
+@font-face {
+  font-family: "Pretendard Variable";
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+  src: url("/fonts/PretendardVariable.woff2") format("woff2-variations");
+}
 /* 옵시디언 + 샴페인 골드. 어두운 화면 하나만 씁니다. 오르면 빨강, 내리면 파랑. */
 :root {
   color-scheme: dark;
@@ -8,12 +15,13 @@
   --up: #e8806f; --up-soft: #2c1714; --down: #86a8e6; --down-soft: #141c2b;
   --warn: #e0b25a; --warn-soft: #2b2312;
   --radius: 10px; --nav-h: 64px;
-  --sans: "IBM Plex Sans KR", "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --sans: "Pretendard Variable", "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  /* 숫자도 같은 글씨로 쓰고, 자리만 맞춥니다(tabular-nums). */
+  --mono: var(--sans);
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; background: var(--outer); }
-body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--fg); line-height: 1.5; font-family: var(--sans); }
+body { margin: 0; min-height: 100vh; font-variant-numeric: tabular-nums; letter-spacing: -0.005em; background: var(--bg); color: var(--fg); line-height: 1.5; font-family: var(--sans); }
 main { max-width: 1040px; margin: 0 auto; padding: 24px 20px 56px; }
 main:has(.board) { max-width: 1440px; }
 a { color: var(--accent); text-decoration: none; }
@@ -22,8 +30,9 @@ a:hover { text-decoration: underline; }
 
 /* 상단 바: PC는 메뉴까지, 폰은 이름만 보이고 메뉴는 아래 탭으로 */
 .topbar { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
-.topbar-inner { max-width: 1440px; margin: 0 auto; padding: 0 20px; height: 58px; display: flex; align-items: center; gap: 36px; }
-.brand { font-weight: 600; letter-spacing: 0.04em; color: var(--accent); font-size: 0.98rem; }
+.topbar-inner { max-width: 1440px; margin: 0 auto; padding: 0 20px; height: 64px; display: flex; align-items: center; gap: 36px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: 0.1em; color: var(--fg); font-size: 1.3rem; }
+.brand svg { color: var(--accent); flex-shrink: 0; }
 .brand:hover { text-decoration: none; }
 .tabs { display: flex; gap: 2px; }
 .tabs a { display: flex; align-items: center; gap: 7px; padding: 8px 12px; border-radius: 8px; color: var(--muted); font-weight: 500; font-size: 0.93rem; }
@@ -42,7 +51,8 @@ a:hover { text-decoration: underline; }
 .macro-strip a { color: inherit; }
 
 @media (max-width: 720px) {
-  .topbar-inner { height: 50px; }
+  .topbar-inner { height: 54px; }
+  .brand { font-size: 1.15rem; }
   .tabs {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; height: calc(var(--nav-h) + env(safe-area-inset-bottom));
     padding: 6px 8px env(safe-area-inset-bottom); background: var(--surface-2); border-top: 1px solid var(--line); gap: 0;
@@ -186,3 +196,10 @@ dl.facts dd { margin: 0; }
   .holdings .list-item .side .sub { display: none; }
   .holdings .list-item .sub { white-space: nowrap; }
 }
+.segment.small { display: flex; margin-bottom: 12px; }
+.segment.small button { flex: 1; }
+.segment button { background: none; border: 0; padding: 5px 16px; border-radius: 6px; color: var(--muted); font-size: 0.86rem; font-weight: 500; min-height: 30px; }
+.segment button:hover { color: var(--fg); filter: none; }
+.segment button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.link-toggle { background: none; border: 0; padding: 0; color: var(--accent); font-size: 0.78rem; font-weight: 500; }
+.link-toggle:hover { text-decoration: underline; filter: none; }
