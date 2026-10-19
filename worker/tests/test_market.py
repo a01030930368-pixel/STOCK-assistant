@@ -25,3 +25,9 @@ def test_kr_market_open():
     # 한국 10:00 = UTC 01:00, 2026-10-19 월요일
     assert kr_market_open(utc(2026, 10, 19, 1, 0))
     assert not kr_market_open(utc(2026, 10, 19, 8, 0))
+
+
+def test_markets_closed_on_exchange_holidays():
+    # 2026-10-09 한글날(금), 2026-11-26 추수감사절(목)
+    assert not kr_market_open(utc(2026, 10, 9, 1, 0))
+    assert not us_market_open(utc(2026, 11, 26, 15, 0))
