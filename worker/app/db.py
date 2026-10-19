@@ -75,7 +75,7 @@ MIGRATIONS = [
     )""",
     """CREATE TABLE IF NOT EXISTS calendar_events (
       day     DATE NOT NULL,
-      kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings')),
+      kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic')),
       market  TEXT NOT NULL CHECK (market IN ('KR', 'US')),
       ticker  TEXT NOT NULL DEFAULT '',
       title   TEXT NOT NULL,
@@ -154,6 +154,10 @@ MIGRATIONS = [
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (ticker, day)
     )""",
+    # 금리 결정·만기일(policy)과 미국 경제지표 발표일(economic)을 일정에 넣을 수 있게 합니다.
+    "ALTER TABLE calendar_events DROP CONSTRAINT IF EXISTS calendar_events_kind_check",
+    """ALTER TABLE calendar_events ADD CONSTRAINT calendar_events_kind_check
+       CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic'))""",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -360,6 +364,8 @@ def save_minutes(conn: psycopg.Connection, ticker: str, bars, keep_days: int = 8
             [(ticker, b.ts, b.open, b.high, b.low, b.close, b.volume) for b in bars],
         )
     conn.execute("DELETE FROM minute_bars WHERE ticker = %s AND ts < now() - make_interval(days => %s)", (ticker, keep_days))
+    # 예전에 초가 붙은 채 저장된 진행 중 봉을 지웁니다. 같은 분의 완성된 봉이 따로 있습니다.
+    conn.execute("DELETE FROM minute_bars WHERE ticker = %s AND extract(second FROM ts) <> 0", (ticker,))
 
 
 def held_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:

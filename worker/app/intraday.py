@@ -51,7 +51,11 @@ def parse_yahoo(body: dict) -> list[MinuteBar]:
         if any(v is None for v in vals[:4]):
             continue  # 거래가 없던 1분은 비어 옵니다.
         o, h, l, c = (round(Decimal(str(v)), 4) for v in vals[:4])
-        out.append(MinuteBar(datetime.fromtimestamp(t, timezone.utc), o, max(h, c), min(l, c), c, Decimal(int(vals[4] or 0))))
+        # 진행 중인 마지막 봉은 13:05:27처럼 초가 붙어 와서 분 단위로 맞춥니다. 같은 분이면 나중 값을 씁니다.
+        ts = datetime.fromtimestamp(t - t % 60, timezone.utc)
+        if out and out[-1].ts == ts:
+            out.pop()
+        out.append(MinuteBar(ts, o, max(h, c), min(l, c), c, Decimal(int(vals[4] or 0))))
     return out
 
 

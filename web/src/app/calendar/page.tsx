@@ -43,7 +43,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
                   {day && <span className={`cal-num${off ? " up" : j === 6 ? " down" : ""}`}>{Number(day.slice(8))}</span>}
                   {list.map((e) => (
                     <span key={e.kind + e.market + e.title} className={`cal-chip ${e.kind}`} title={e.detail || e.title}>
-                      {e.kind === "earnings" ? e.title.replace(" 실적 발표", " 실적") : e.title.replace(" 휴장 · ", " 휴장 ")}
+                      {e.kind === "earnings" ? e.title.replace(" 실적 발표", " 실적") : e.title.replace(" 휴장 · ", " 휴장 ").replace(/\(.*\)/, "")}
                     </span>
                   ))}
                 </div>
@@ -56,11 +56,11 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
       <div className="panel" style={{ marginTop: 16 }}>
         <div className="panel-title">이달 일정 <span className="muted">{events.length}건</span></div>
         {events.length === 0 ? (
-          <div className="muted">이달에는 일정이 없습니다. 워커가 12시간마다 휴장일과 미국 보유 종목 실적 발표 예정일을 가져옵니다.</div>
+          <div className="muted">이달에는 일정이 없습니다. 워커가 12시간마다 휴장일, 미국 보유 종목 실적 발표 예정일, 금리 결정·경제지표 발표일을 가져옵니다.</div>
         ) : (
           <ul className="feed">{events.map((e) => <EventLine key={e.day + e.kind + e.market + e.title} e={e} />)}</ul>
         )}
-        <div className="muted" style={{ marginTop: 12, fontSize: "0.8rem" }}>국내 종목 실적 발표일은 미리 공개되는 무료 자료가 없어서, 공시가 나오면 포트폴리오의 "확인할 것"에 표시됩니다.</div>
+        <div className="muted" style={{ marginTop: 12, fontSize: "0.8rem" }}>국내 종목 실적 발표일은 미리 공개되는 무료 자료가 없어서, 공시가 나오면 포트폴리오의 "확인할 것"에 표시됩니다. 미국 경제지표 발표일은 FRED 키가 있을 때 나옵니다.</div>
       </div>
     </>
   );
