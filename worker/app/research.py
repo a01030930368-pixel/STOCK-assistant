@@ -253,8 +253,13 @@ SEC_TAGS = {
 
 
 def _annual(facts: dict, tags: tuple[str, ...]) -> dict[str, Decimal]:
-    """10-K에 보고된 연간 값을 회계연도 말일(end)별로 모읍니다. 같은 값이 여러 보고서에 반복되면 나중 것을 씁니다."""
+    """10-K에 보고된 연간 값을 회계연도 말일(end)별로 모읍니다. 같은 값이 여러 보고서에 반복되면 나중 것을 씁니다.
+
+    회사가 해마다 다른 태그로 보고하기도 해서(예: 예전엔 Revenues, 요즘은 RevenueFromContract...)
+    모든 태그를 합치고, 같은 연도가 겹치면 앞 태그를 씁니다.
+    """
     gaap = facts.get("facts", {}).get("us-gaap", {})
+    merged: dict[str, Decimal] = {}
     for tag in tags:
         units = gaap.get(tag, {}).get("units", {}).get("USD")
         if not units:
@@ -269,9 +274,8 @@ def _annual(facts: dict, tags: tuple[str, ...]) -> dict[str, Decimal]:
                 if not 350 <= days <= 380:
                     continue
             by_end[f["end"]] = Decimal(str(f["val"]))
-        if by_end:
-            return by_end
-    return {}
+        merged = by_end | merged
+    return merged
 
 
 def parse_sec_financials(ticker: str, facts: dict) -> list[Financials]:

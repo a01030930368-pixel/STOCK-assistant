@@ -166,3 +166,14 @@ def test_sec_requests_send_user_agent():
         return httpx.Response(200, json={"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}})
 
     assert research.sec_ciks("STOCK-assistant me@example.com", client(handler)) == {"AAPL": 320193}
+
+
+def test_sec_revenue_merges_old_and_new_tags():
+    # 예전 연도는 Revenues, 최근 연도는 RevenueFromContract... 로 보고한 회사
+    facts = {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": [fact(22, "2023-12-31", "2023-01-01")]}},
+        "RevenueFromContractWithCustomerExcludingAssessedTax": {"units": {"USD": [fact(43, "2024-12-31", "2024-01-01")]}},
+        "OperatingIncomeLoss": {"units": {"USD": [fact(-150, "2023-12-31", "2023-01-01"), fact(-200, "2024-12-31", "2024-01-01")]}},
+    }}}
+    rows = research.parse_sec_financials("IONQ", facts)
+    assert [(r.period, r.revenue) for r in rows] == [("FY2024", Decimal(43)), ("FY2023", Decimal(22))]
