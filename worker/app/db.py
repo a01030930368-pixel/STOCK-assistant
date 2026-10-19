@@ -3,6 +3,7 @@ from decimal import Decimal
 import psycopg
 
 from .alerts import Alert
+from .calendar import Event
 from .kiwoom import Balance, Cash, UsBalance
 from .macro import Indicator
 from .research import Earnings, Financials, News
@@ -72,8 +73,16 @@ MIGRATIONS = [
       orderable   NUMERIC(20, 4),
       synced_at   TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
+    """CREATE TABLE IF NOT EXISTS calendar_events (
+      day     DATE NOT NULL,
+      kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings')),
+      market  TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+      ticker  TEXT NOT NULL DEFAULT '',
+      title   TEXT NOT NULL,
+      detail  TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (day, kind, market, ticker, title)
+    )""",
 ]
-
 
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -209,3 +218,19 @@ def active_alerts(conn: psycopg.Connection) -> list[Alert]:
 
 def mark_triggered(conn: psycopg.Connection, alert_id: int) -> None:
     conn.execute("UPDATE alerts SET active = false, triggered_at = now() WHERE id = %s", (alert_id,))
+
+
+def save_calendar(conn: psycopg.Connection, kind: str, events: list[Event], ticker: str | None = None) -> None:
+    """앞으로의 일정을 새로 받은 것으로 바꿉니다. 실적은 종목별로, 휴장일은 한 번에 바꿉니다."""
+    with conn.transaction():
+        if ticker is None:
+            conn.execute("DELETE FROM calendar_events WHERE kind = %s AND day >= CURRENT_DATE", (kind,))
+        else:
+            conn.execute("DELETE FROM calendar_events WHERE kind = %s AND ticker = %s AND day >= CURRENT_DATE", (kind, ticker))
+        for e in events:
+            conn.execute(
+                """INSERT INTO calendar_events (day, kind, market, ticker, title, detail) VALUES (%s, %s, %s, %s, %s, %s)
+                   ON CONFLICT DO NOTHING""",
+                (e.day, e.kind, e.market, e.ticker, e.title, e.detail),
+            )
+        conn.execute("DELETE FROM calendar_events WHERE day < CURRENT_DATE - 30")

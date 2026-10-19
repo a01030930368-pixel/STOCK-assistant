@@ -3,6 +3,7 @@ import { distancePct, scopeOf, totalOf, type Account, type Scope } from "@/lib/b
 import { query } from "@/lib/db";
 import { asOf, fixedPct, signClass, usd, won } from "@/lib/format";
 import NewsTabs from "./_components/NewsTabs";
+import EventLine, { type CalendarEvent } from "./_components/EventLine";
 
 export const dynamic = "force-dynamic";
 
@@ -125,6 +126,13 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
     [tickers],
   ).catch(() => []);
 
+  const upcoming = await query<CalendarEvent>(
+    `SELECT to_char(day, 'YYYY-MM-DD') AS day, kind, market, ticker, title, detail FROM calendar_events
+     WHERE day >= CURRENT_DATE AND day < CURRENT_DATE + 45 AND ($1 = 'all' OR market = $1)
+     ORDER BY day, kind DESC LIMIT 6`,
+    [scope],
+  ).catch(() => []);
+
   const krCash = cash.find((c) => c.market === "KR");
   const usCash = cash.find((c) => c.market === "US");
   const rate = usSummary ? Number(usSummary.exch_rate) : 0;
@@ -216,8 +224,12 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
             )}
           </div>
           <div className="panel">
-            <div className="panel-title">다가오는 일정</div>
-            <div className="muted">실적 발표일·휴장일 캘린더는 다음 단계에서 붙일 예정이에요.</div>
+            <div className="panel-title">다가오는 일정 <Link href="/calendar" className="muted">전체 보기</Link></div>
+            {upcoming.length === 0 ? (
+              <div className="muted">앞으로 45일 동안 휴장일이나 실적 발표 예정이 없습니다.</div>
+            ) : (
+              <ul className="feed">{upcoming.map((e) => <EventLine key={e.day + e.kind + e.market + e.title} e={e} />)}</ul>
+            )}
           </div>
           <div className="panel">
             <NewsTabs

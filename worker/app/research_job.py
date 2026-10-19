@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import psycopg
 
-from . import db, research, translate
+from . import calendar, db, research, translate
 from .config import Config
 
 log = logging.getLogger("worker")
@@ -38,6 +38,7 @@ class ResearchJob:
             self.last_fundamentals = now
             self._refresh_codes(now)
             self._fundamentals(conn, now)
+            self._calendar(conn, now)
 
     def _try(self, what: str, fn) -> None:
         # 한 종목·한 출처가 실패해도 나머지는 계속 모읍니다.
@@ -71,6 +72,16 @@ class ResearchJob:
             except Exception as e:
                 log.warning("뉴스 제목 번역 실패, 다음 시간에 다시 합니다: %s", e)
                 return
+
+    def _calendar(self, conn: psycopg.Connection, now: datetime) -> None:
+        today = now.date()
+        self._try("휴장일", lambda: db.save_calendar(conn, "holiday", calendar.holiday_events(today)))
+        if not self.cfg.finnhub_api_key:
+            return
+        for ticker, name, market in db.watched_stocks(conn):
+            if market == "US":
+                self._try(f"{ticker} 실적 일정", lambda: db.save_calendar(
+                    conn, "earnings", calendar.finnhub_earnings_calendar(ticker, name, self.cfg.finnhub_api_key, today, self.http), ticker))
 
     def _refresh_codes(self, now: datetime) -> None:
         if self.codes_at and now - self.codes_at < CODES_EVERY:
