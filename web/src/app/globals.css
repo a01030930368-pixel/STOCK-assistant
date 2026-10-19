@@ -228,3 +228,8 @@ dl.facts dd { margin: 0; }
   .cal-chip.earnings { background: var(--accent); }
 }
 .cal-num.up { color: var(--up); } .cal-num.down { color: var(--down); }
+
+/* 종목 한 줄 요약 */
+.summary-line { display: flex; flex-wrap: wrap; gap: 3px 14px; margin-top: 4px; font-size: 0.8rem; color: var(--sub); }
+.summary-line span { white-space: nowrap; }
+h1 + .summary-line { font-size: 0.95rem; margin: -6px 0 18px; }

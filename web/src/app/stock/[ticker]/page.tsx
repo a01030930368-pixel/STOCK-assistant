@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { addPeer, deletePeer } from "@/app/actions";
 import { query } from "@/lib/db";
+import { loadSummaries } from "@/lib/summaryData";
+import SummaryLine from "@/app/_components/SummaryLine";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
 
 export const dynamic = "force-dynamic";
@@ -40,12 +42,14 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
     `SELECT DISTINCT ON (ticker) * FROM stock_financials WHERE ticker = ANY($1) ORDER BY ticker, period DESC`,
     [peers.map((p) => p.peer_ticker)],
   );
+  const summary = (await loadSummaries([ticker])).get(ticker);
   const peerMargin = median(peerLatest.map(operatingMargin));
   const latestMargin = financials[0] ? operatingMargin(financials[0]) : null;
 
   return (
     <>
       <h1>{stock.name} <span className="muted">{stock.ticker} · {stock.market}</span></h1>
+      <SummaryLine parts={summary} />
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}
 
       <h2>재무 요약</h2>

@@ -3,6 +3,9 @@ import { distancePct, scopeOf, totalOf, type Account, type Scope } from "@/lib/b
 import { query } from "@/lib/db";
 import { asOf, fixedPct, signClass, usd, won } from "@/lib/format";
 import NewsTabs from "./_components/NewsTabs";
+import SummaryLine from "./_components/SummaryLine";
+import { loadSummaries } from "@/lib/summaryData";
+import type { Part } from "@/lib/summary";
 import EventLine, { type CalendarEvent } from "./_components/EventLine";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +32,7 @@ function account(s: Summary | undefined, cash: Cash | undefined): Account | null
   return { eval: Number(s.total_eval), buy: Number(s.total_buy), pnl: Number(s.total_pnl), cash: left };
 }
 
-function HoldingRows({ rows }: { rows: Holding[] }) {
+function HoldingRows({ rows, summaries }: { rows: Holding[]; summaries: Map<string, Part[]> }) {
   return (
     <div className="list">
       {rows.map((h) => {
@@ -46,6 +49,7 @@ function HoldingRows({ rows }: { rows: Holding[] }) {
                   <Link href={`/journal/buy?${new URLSearchParams({ ticker: h.ticker, name: h.name, market: h.market })}`}>일지 작성</Link>
                 )}
               </div>
+              <SummaryLine parts={summaries.get(h.ticker)} />
             </div>
             <div className="side">
               <span className="num">{price(h.eval_amount)}</span>
@@ -133,6 +137,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
     [scope],
   ).catch(() => []);
 
+  const summaries = await loadSummaries();
   const krCash = cash.find((c) => c.market === "KR");
   const usCash = cash.find((c) => c.market === "US");
   const rate = usSummary ? Number(usSummary.exch_rate) : 0;
@@ -189,7 +194,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
               groups.map(([label, rows]) => rows.length > 0 && (
                 <div key={label}>
                   {label && <div className="group-label">{label}</div>}
-                  <HoldingRows rows={rows} />
+                  <HoldingRows rows={rows} summaries={summaries} />
                 </div>
               ))
             )}
