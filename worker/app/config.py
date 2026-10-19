@@ -11,6 +11,8 @@ class Config:
     telegram_bot_token: str
     telegram_chat_id: str
     poll_seconds: int
+    ecos_api_key: str = ""
+    fred_api_key: str = ""
 
     @property
     def kiwoom_base_url(self) -> str:
@@ -26,4 +28,6 @@ def load() -> Config:
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
         poll_seconds=int(os.environ.get("POLL_SECONDS", "60")),
+        ecos_api_key=os.environ.get("ECOS_API_KEY", ""),
+        fred_api_key=os.environ.get("FRED_API_KEY", ""),
     )

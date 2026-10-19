@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { pool, query } from "@/lib/db";
+import { optionalNumber, validateMacro, type MacroInput } from "@/lib/macro";
 import { averagePrice, holdingDays, remainingQuantity, returnPct, validateBuy, type BuyInput, type Fill } from "@/lib/journal";
 
 // values: 오류가 났을 때 입력한 값을 폼에 되돌려 주기 위해 사용합니다.
@@ -14,7 +15,7 @@ const echo = (form: FormData) =>
 const text = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
 const num = (form: FormData, key: string) => Number(text(form, key).replace(/,/g, ""));
 
-// 그날의 매크로 스냅샷이 있으면 연결합니다. 스냅샷 수집은 2단계에서 추가됩니다.
+// 매매일 당시(그날 또는 그 전 가장 최근)의 매크로 메모를 연결합니다.
 async function snapshotFor(date: string): Promise<number | null> {
   const [row] = await query<{ id: number }>(
     "SELECT id FROM macro_snapshots WHERE snapshot_date <= $1 ORDER BY snapshot_date DESC LIMIT 1",
@@ -145,4 +146,34 @@ export async function saveNotes(form: FormData) {
   const positionId = num(form, "positionId");
   await query("UPDATE positions SET notes = $1 WHERE id = $2", [text(form, "notes"), positionId]);
   revalidatePath(`/journal/${positionId}`);
+}
+
+export async function saveMacro(_prev: FormState, form: FormData): Promise<FormState> {
+  const input: MacroInput = {
+    snapshotDate: text(form, "snapshotDate"),
+    krBaseRate: optionalNumber(text(form, "krBaseRate")),
+    usBaseRate: optionalNumber(text(form, "usBaseRate")),
+    usdkrw: optionalNumber(text(form, "usdkrw")),
+    gdpOutlook: text(form, "gdpOutlook"),
+    inflation: optionalNumber(text(form, "inflation")),
+    usInflation: optionalNumber(text(form, "usInflation")),
+    keyVariables: text(form, "keyVariables"),
+    implications: text(form, "implications"),
+  };
+  const errors = validateMacro(input);
+  if (errors.length) return { errors, values: echo(form) };
+
+  // 같은 날짜에 다시 저장하면 그날 메모를 고칩니다.
+  await query(
+    `INSERT INTO macro_snapshots (snapshot_date, kr_base_rate, us_base_rate, usdkrw, gdp_outlook, inflation, us_inflation,
+       key_variables, implications)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (snapshot_date) DO UPDATE SET kr_base_rate = EXCLUDED.kr_base_rate, us_base_rate = EXCLUDED.us_base_rate,
+       usdkrw = EXCLUDED.usdkrw, gdp_outlook = EXCLUDED.gdp_outlook, inflation = EXCLUDED.inflation,
+       us_inflation = EXCLUDED.us_inflation, key_variables = EXCLUDED.key_variables, implications = EXCLUDED.implications`,
+    [input.snapshotDate, input.krBaseRate, input.usBaseRate, input.usdkrw, input.gdpOutlook, input.inflation,
+      input.usInflation, input.keyVariables, input.implications],
+  );
+  revalidatePath("/macro");
+  redirect("/macro");
 }
