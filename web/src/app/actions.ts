@@ -177,3 +177,24 @@ export async function saveMacro(_prev: FormState, form: FormData): Promise<FormS
   revalidatePath("/macro");
   redirect("/macro");
 }
+
+export async function addPeer(form: FormData) {
+  const ticker = text(form, "ticker").toUpperCase();
+  const peer = text(form, "peerTicker").toUpperCase();
+  const name = text(form, "peerName") || peer;
+  const market = text(form, "peerMarket") === "US" ? "US" : "KR";
+  if (ticker && peer && peer !== ticker) {
+    await query(
+      `INSERT INTO stock_peers (ticker, peer_ticker, peer_name, peer_market) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (ticker, peer_ticker) DO UPDATE SET peer_name = EXCLUDED.peer_name, peer_market = EXCLUDED.peer_market`,
+      [ticker, peer, name, market],
+    );
+  }
+  revalidatePath(`/stock/${ticker}`);
+}
+
+export async function deletePeer(form: FormData) {
+  const ticker = text(form, "ticker").toUpperCase();
+  await query("DELETE FROM stock_peers WHERE ticker = $1 AND peer_ticker = $2", [ticker, text(form, "peerTicker").toUpperCase()]);
+  revalidatePath(`/stock/${ticker}`);
+}

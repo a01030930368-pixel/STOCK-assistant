@@ -133,3 +133,45 @@ CREATE TABLE macro_indicators (
   as_of       TEXT NOT NULL,
   fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 종목 정보(뉴스·실적·재무). worker/app/db.py의 MIGRATIONS와 같아야 합니다.
+CREATE TABLE stock_news (
+  ticker        TEXT NOT NULL,
+  url           TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  source        TEXT NOT NULL,
+  published_at  TIMESTAMPTZ NOT NULL,
+  summary       TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (ticker, url)
+);
+
+CREATE TABLE stock_earnings (
+  ticker        TEXT NOT NULL,
+  period        TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  url           TEXT NOT NULL,
+  reported_on   DATE,
+  eps_actual    NUMERIC(14, 4),
+  eps_estimate  NUMERIC(14, 4),
+  PRIMARY KEY (ticker, url, title)
+);
+
+CREATE TABLE stock_financials (
+  ticker               TEXT NOT NULL,
+  period               TEXT NOT NULL,
+  revenue              NUMERIC(24, 2),
+  operating_income     NUMERIC(24, 2),
+  liabilities          NUMERIC(24, 2),
+  equity               NUMERIC(24, 2),
+  operating_cash_flow  NUMERIC(24, 2),
+  fetched_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (ticker, period)
+);
+
+CREATE TABLE stock_peers (
+  ticker       TEXT NOT NULL,
+  peer_ticker  TEXT NOT NULL,
+  peer_name    TEXT NOT NULL,
+  peer_market  TEXT NOT NULL CHECK (peer_market IN ('KR', 'US')),
+  PRIMARY KEY (ticker, peer_ticker)
+);
