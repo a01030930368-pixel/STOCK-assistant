@@ -21,6 +21,13 @@ def test_build_prompt_includes_journal_and_skips_missing():
     assert "- 10-19 IonQ 신규 계약" in text
 
 
+def test_build_prompt_lists_this_weeks_macro_events():
+    text = ai.build_prompt({"ticker": "IONQ", "name": "아이온큐", "market": "US",
+                            "macro": ["2026-10-28 FOMC 금리 결정 한국 시간 다음 날 03:00"]})
+    assert "이번 주 시장 일정: 2026-10-28 FOMC 금리 결정" in text
+    assert "이번 주 시장 일정" not in ai.build_prompt({"ticker": "IONQ", "name": "아이온큐", "market": "US"})
+
+
 def test_build_prompt_without_journal():
     assert "매매일지 기록 없음" in ai.build_prompt({"ticker": "005930", "name": "삼성전자", "market": "KR"})
 
