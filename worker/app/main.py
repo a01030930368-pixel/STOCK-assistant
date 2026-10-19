@@ -65,8 +65,6 @@ def main() -> None:
         log.warning("ECOS·FRED 키가 없어 매크로 지표 자동 수집을 건너뜁니다.")
     http = httpx.Client(timeout=30)
     research = ResearchJob(cfg, http)
-    if not research.enabled():
-        log.warning("뉴스·실적·재무 키가 없어 종목 정보 수집을 건너뜁니다.")
     first = True
     last_macro: datetime | None = None
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:
@@ -83,11 +81,10 @@ def main() -> None:
                 except Exception:
                     log.exception("동기화 실패")
                 first = False
-            if research.enabled():
-                try:
-                    research.run(conn, now)
-                except Exception:
-                    log.exception("종목 정보 수집 실패")
+            try:
+                research.run(conn, now)
+            except Exception:
+                log.exception("종목 정보 수집 실패")
             time.sleep(cfg.poll_seconds)
 
 

@@ -29,10 +29,6 @@ class ResearchJob:
     def user_agent(self) -> str:
         return f"STOCK-assistant {self.cfg.sec_contact_email}"
 
-    def enabled(self) -> bool:
-        c = self.cfg
-        return bool(c.dart_api_key or (c.naver_client_id and c.naver_client_secret) or c.finnhub_api_key or c.sec_contact_email)
-
     def run(self, conn: psycopg.Connection, now: datetime | None = None) -> None:
         now = now or datetime.now(timezone.utc)
         if self.last_news is None or now - self.last_news >= NEWS_EVERY:
@@ -56,6 +52,9 @@ class ResearchJob:
             if market == "KR" and c.naver_client_id and c.naver_client_secret:
                 self._try(f"{name} 뉴스", lambda: db.save_news(
                     conn, research.naver_news(ticker, name, c.naver_client_id, c.naver_client_secret, self.http)))
+            elif market == "KR":
+                # 네이버 키가 없으면 키 없이 쓰는 구글 뉴스로 가져옵니다.
+                self._try(f"{name} 뉴스", lambda: db.save_news(conn, research.google_news(ticker, name, self.http)))
             elif market == "US" and c.finnhub_api_key:
                 self._try(f"{ticker} 뉴스", lambda: db.save_news(
                     conn, research.finnhub_news(ticker, c.finnhub_api_key, now.date(), self.http)))

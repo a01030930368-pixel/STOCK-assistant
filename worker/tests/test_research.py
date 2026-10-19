@@ -13,9 +13,29 @@ def client(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
+def test_google_news_parses_rss():
+    rss = """<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>
+      <item><title>삼성전자, 3분기 &amp; 실적 - 한국경제</title><link>https://news.google.com/rss/articles/a</link>
+        <pubDate>Sun, 18 Oct 2026 23:00:00 GMT</pubDate><source url="https://www.hankyung.com">한국경제</source></item>
+      <item><title>새 소식 - 연합뉴스</title><link>https://news.google.com/rss/articles/b</link>
+        <pubDate>Mon, 19 Oct 2026 01:00:00 GMT</pubDate><source url="https://www.yna.co.kr">연합뉴스</source></item>
+    </channel></rss>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["q"] == '"삼성전자" when:7d'
+        assert request.url.params["hl"] == "ko"
+        return httpx.Response(200, content=rss.encode())
+
+    news = research.google_news("005930", "삼성전자", client(handler))
+    assert [n.title for n in news] == ["새 소식", "삼성전자, 3분기 & 실적"]
+    assert news[1].source == "한국경제"
+    assert news[1].url == "https://news.google.com/rss/articles/a"
+
+
 def test_naver_news_strips_markup():
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers["X-Naver-Client-Id"] == "id"
+        assert request.url.host == "naverapihub.apigw.ntruss.com"
+        assert request.headers["X-NCP-APIGW-API-KEY-ID"] == "id"
         assert request.url.params["query"] == "삼성전자"
         return httpx.Response(200, json={"items": [{
             "title": "<b>삼성전자</b>, 3분기 &quot;깜짝&quot; 실적", "originallink": "https://news.example/1",
