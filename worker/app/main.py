@@ -22,11 +22,19 @@ def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | No
             db.save_balance(conn, kiwoom.domestic_balance())
         except Exception:
             log.exception("국내 잔고 동기화 실패")
+        try:
+            db.save_cash(conn, "KR", kiwoom.kr_cash())
+        except Exception:
+            log.exception("국내 예수금 동기화 실패")
     if kiwoom and us:
         try:
             db.save_us_balance(conn, kiwoom.us_balance())
         except Exception:
             log.exception("미국 잔고 동기화 실패")
+        try:
+            db.save_cash(conn, "US", kiwoom.us_cash())
+        except Exception:
+            log.exception("미국 예수금 동기화 실패")
     prices = db.current_prices(conn)
     for alert, price in alerts.due(db.active_alerts(conn), prices):
         text = alerts.message(alert, price)

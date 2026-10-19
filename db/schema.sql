@@ -175,3 +175,13 @@ CREATE TABLE stock_peers (
   peer_market  TEXT NOT NULL CHECK (peer_market IN ('KR', 'US')),
   PRIMARY KEY (ticker, peer_ticker)
 );
+
+-- 계좌별 남은 예수금. 국내(KR)는 원, 미국(US)은 달러.
+CREATE TABLE cash_balances (
+  market      TEXT PRIMARY KEY CHECK (market IN ('KR', 'US')),
+  currency    TEXT NOT NULL,
+  deposit     NUMERIC(20, 4) NOT NULL,
+  d2_deposit  NUMERIC(20, 4),
+  orderable   NUMERIC(20, 4),
+  synced_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);

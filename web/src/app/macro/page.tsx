@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { today } from "@/lib/format";
+import { asOf, fixedPct, today } from "@/lib/format";
 import { rateGap } from "@/lib/macro";
 import MacroCard, { SNAPSHOT_COLUMNS, type Snapshot } from "./MacroCard";
 import MacroForm from "./MacroForm";
@@ -48,11 +48,11 @@ export default async function MacroPage() {
             {Object.entries(LABELS).map(([code, label]) => (
               <div key={code}>
                 <div className="muted">{label}</div>
-                <strong>{latest[code] ? `${Number(latest[code].value).toLocaleString("ko-KR")}${code === "usdkrw" ? "원" : "%"}` : "-"}</strong>
-                {latest[code] && <div className="muted">{latest[code].as_of} 기준</div>}
+                <strong className="num">{!latest[code] ? "-" : code === "usdkrw" ? `${Number(latest[code].value).toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}원` : fixedPct(latest[code].value)}</strong>
+                {latest[code] && <div className="muted">{asOf(latest[code].as_of)} 기준</div>}
               </div>
             ))}
-            <div><div className="muted">한미 금리차</div><strong>{gap === null ? "-" : `${gap}%p`}</strong></div>
+            <div><div className="muted">한미 금리차</div><strong className="num">{gap === null ? "-" : `${gap.toFixed(2)}%p`}</strong></div>
           </div>
         </div>
       )}
