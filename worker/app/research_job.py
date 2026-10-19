@@ -84,7 +84,7 @@ class ResearchJob:
             if market == "KR" and self.kiwoom:
                 self._try(f"{name} 일봉", lambda: db.save_prices(conn, ticker, self.kiwoom.kr_daily(ticker, base)))
             elif market == "US":
-                self._try(f"{ticker} 일봉", lambda: db.save_prices(conn, ticker, prices.stooq_daily(ticker, self.http)))
+                self._try(f"{ticker} 일봉", lambda: db.save_prices(conn, ticker, prices.us_daily(ticker, self.http)))
 
     def _calendar(self, conn: psycopg.Connection, now: datetime) -> None:
         today = now.date()

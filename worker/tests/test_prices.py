@@ -5,7 +5,8 @@ import httpx
 import pytest
 
 from app.kiwoom import KiwoomClient
-from app.prices import Candle, parse_kr_daily, parse_stooq
+from app import prices
+from app.prices import Candle, parse_kr_daily, parse_stooq, parse_yahoo_daily
 
 D = Decimal
 
@@ -47,3 +48,23 @@ def test_kr_daily_calls_ka10081():
     client = KiwoomClient("https://api.kiwoom.com", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
     assert [(c.day, c.close) for c in client.kr_daily("005930", "20261019")] == [(date(2026, 10, 17), D(68400))]
     assert seen == [("/api/dostk/chart", "ka10081")]
+
+
+def test_parse_yahoo_daily_uses_new_york_dates():
+    # 2025-10-15, 10-16 09:30 ET
+    body = {"chart": {"result": [{"timestamp": [1760535000, 1760621400], "indicators": {"quote": [
+        {"open": [38, 40], "high": [40, 42], "low": [37, 39], "close": [39.5, 41.1], "volume": [90, 100]}]}}]}}
+    assert parse_yahoo_daily(body) == [
+        Candle(date(2025, 10, 15), D(38), D(40), D(37), D("39.5"), D(90)),
+        Candle(date(2025, 10, 16), D(40), D(42), D(39), D("41.1"), D(100)),
+    ]
+
+
+def test_us_daily_falls_back_to_stooq():
+    def handler(req: httpx.Request) -> httpx.Response:
+        if "yahoo" in req.url.host:
+            return httpx.Response(429)
+        return httpx.Response(200, text="Date,Open,High,Low,Close,Volume\n2026-10-16,40,42,39,41.1,100\n")
+
+    out = prices.us_daily("SOUN", httpx.Client(transport=httpx.MockTransport(handler)))
+    assert [c.day for c in out] == [date(2026, 10, 16)]

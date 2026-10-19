@@ -12,6 +12,7 @@ import httpx
 KST = ZoneInfo("Asia/Seoul")
 YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/"
 KEEP_DAYS = 8
+UA = "Mozilla/5.0 (LODESTAR personal dashboard)"
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ def parse_yahoo(body: dict) -> list[MinuteBar]:
     result = ((body.get("chart") or {}).get("result") or [None])[0]
     if not result:
         err = (body.get("chart") or {}).get("error") or {}
-        raise ValueError(f"야후 분봉 응답이 비어 있습니다: {err.get('description', '')[:60]}")
+        raise ValueError(f"야후 차트 응답이 비어 있습니다: {err.get('description', '')[:60]}")
     q = (result.get("indicators", {}).get("quote") or [{}])[0]
     out = []
     for i, t in enumerate(result.get("timestamp") or []):
@@ -56,6 +57,6 @@ def parse_yahoo(body: dict) -> list[MinuteBar]:
 
 def yahoo_minutes(ticker: str, http: httpx.Client) -> list[MinuteBar]:
     res = http.get(f"{YAHOO}{ticker.upper()}", params={"interval": "1m", "range": "5d"},
-                   headers={"User-Agent": "Mozilla/5.0 (LODESTAR personal dashboard)"})
+                   headers={"User-Agent": UA})
     res.raise_for_status()
     return parse_yahoo(res.json())
