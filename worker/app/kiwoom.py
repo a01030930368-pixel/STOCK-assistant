@@ -119,6 +119,54 @@ def parse_us_balance(body: dict) -> UsBalance:
     )
 
 
+@dataclass(frozen=True)
+class Cash:
+    """계좌의 남은 예수금. 국내는 원, 미국은 달러입니다. 알 수 없는 값은 None."""
+    currency: str
+    deposit: Decimal
+    d2_deposit: Decimal | None
+    orderable: Decimal | None
+
+
+def parse_kr_cash(body: dict) -> Cash:
+    # kt00001 예수금상세현황: entr 예수금, d2_entra D+2 추정예수금, ord_alow_amt 주문가능금액
+    return Cash(
+        currency="KRW",
+        deposit=parse_number(body.get("entr")),
+        d2_deposit=parse_number(body.get("d2_entra")),
+        orderable=parse_number(body.get("ord_alow_amt")),
+    )
+
+
+def _usd_rows(body: dict) -> list[dict]:
+    rows = [body]
+    for value in body.values():
+        if isinstance(value, list):
+            rows += [r for r in value if isinstance(r, dict) and str(r.get("crnc_code", "USD")).strip().upper() == "USD"]
+    return rows
+
+
+def _first(rows: list[dict], words: tuple[str, ...]) -> Decimal | None:
+    for row in rows:
+        for key, value in row.items():
+            if any(w in key for w in words) and not isinstance(value, (list, dict)):
+                return parse_number(value)
+    return None
+
+
+def parse_us_cash(body: dict) -> Cash:
+    """ust21110 해외주식 예수금. 응답 항목 이름이 공개 문서로 확인되지 않아 이름 패턴으로 찾습니다.
+
+    못 찾으면 항목 이름(값 제외)을 담아 오류를 내서, 로그를 보고 고칠 수 있게 합니다.
+    """
+    rows = _usd_rows(body)
+    deposit = _first(rows, ("entr", "dpst", "dps"))
+    if deposit is None:
+        keys = sorted({k for row in rows for k in row})
+        raise ValueError(f"미국 예수금 항목을 찾지 못했습니다. 응답 항목: {', '.join(keys)}")
+    return Cash(currency="USD", deposit=deposit, d2_deposit=None, orderable=_first(rows, ("ord_alow", "ord_psbl", "orderable")))
+
+
 class KiwoomClient:
     def __init__(self, base_url: str, appkey: str, secretkey: str, http: httpx.Client | None = None):
         self._base_url = base_url
@@ -169,3 +217,11 @@ class KiwoomClient:
     def us_balance(self) -> UsBalance:
         # ust21070 미국주식 원장잔고확인, 빈 값이면 전체 종목
         return parse_us_balance(self._post("/api/us/acnt", "ust21070", {"stex_tp": "", "stk_cd": ""}))
+
+    def kr_cash(self) -> Cash:
+        # kt00001 예수금상세현황요청, qry_tp=3 추정조회
+        return parse_kr_cash(self._post("/api/dostk/acnt", "kt00001", {"qry_tp": "3"}))
+
+    def us_cash(self) -> Cash:
+        # ust21110 해외주식 예수금 조회
+        return parse_us_cash(self._post("/api/us/acnt", "ust21110", {}))

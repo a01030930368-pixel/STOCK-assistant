@@ -2,7 +2,18 @@ from decimal import Decimal
 
 import httpx
 
-from app.kiwoom import KiwoomClient, parse_balance, parse_number, parse_price, parse_us_balance, split_ticker
+import pytest
+
+from app.kiwoom import (
+    KiwoomClient,
+    parse_balance,
+    parse_kr_cash,
+    parse_number,
+    parse_price,
+    parse_us_balance,
+    parse_us_cash,
+    split_ticker,
+)
 
 SAMPLE = {
     "tot_pur_amt": "000000001400000",
@@ -133,3 +144,41 @@ def test_us_balance_calls_ust21070():
     client = KiwoomClient("https://api.kiwoom.com", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
     assert client.us_balance().holdings[0].ticker == "AAPL"
     assert seen == [("/api/us/acnt", "ust21070")]
+
+
+def test_parse_kr_cash():
+    cash = parse_kr_cash({"entr": "000000001250000", "d2_entra": "000000001180000", "ord_alow_amt": "000000001180000", "return_code": 0})
+    assert cash.currency == "KRW"
+    assert cash.deposit == Decimal(1250000)
+    assert cash.d2_deposit == Decimal(1180000)
+    assert cash.orderable == Decimal(1180000)
+
+
+def test_parse_us_cash_finds_usd_row():
+    body = {"list": [{"crnc_code": "JPY", "entr": "500"}, {"crnc_code": "USD", "entr": "412.35", "ord_alow_amt": "400.00"}], "return_code": 0}
+    cash = parse_us_cash(body)
+    assert cash.currency == "USD"
+    assert cash.deposit == Decimal("412.35")
+    assert cash.orderable == Decimal("400.00")
+
+
+def test_parse_us_cash_reports_key_names_only():
+    with pytest.raises(ValueError) as err:
+        parse_us_cash({"unknown_amt": "123.45", "return_code": 0})
+    assert "unknown_amt" in str(err.value)
+    assert "123.45" not in str(err.value)
+
+
+def test_cash_calls_kt00001_and_ust21110():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/token":
+            return httpx.Response(200, json={"token": "t", "expires_dt": "20991231235959", "return_code": 0})
+        seen.append((request.url.path, request.headers["api-id"]))
+        return httpx.Response(200, json={"entr": "1000", "return_code": 0})
+
+    client = KiwoomClient("https://api.kiwoom.com", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
+    assert client.kr_cash().deposit == Decimal(1000)
+    assert client.us_cash().deposit == Decimal(1000)
+    assert seen == [("/api/dostk/acnt", "kt00001"), ("/api/us/acnt", "ust21110")]

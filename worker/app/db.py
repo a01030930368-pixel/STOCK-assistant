@@ -3,7 +3,7 @@ from decimal import Decimal
 import psycopg
 
 from .alerts import Alert
-from .kiwoom import Balance, UsBalance
+from .kiwoom import Balance, Cash, UsBalance
 from .macro import Indicator
 from .research import Earnings, Financials, News
 
@@ -63,6 +63,14 @@ MIGRATIONS = [
       peer_market  TEXT NOT NULL CHECK (peer_market IN ('KR', 'US')),
       PRIMARY KEY (ticker, peer_ticker)
     )""",
+    """CREATE TABLE IF NOT EXISTS cash_balances (
+      market      TEXT PRIMARY KEY CHECK (market IN ('KR', 'US')),
+      currency    TEXT NOT NULL,
+      deposit     NUMERIC(20, 4) NOT NULL,
+      d2_deposit  NUMERIC(20, 4),
+      orderable   NUMERIC(20, 4),
+      synced_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
 
 
@@ -107,6 +115,16 @@ def save_us_balance(conn: psycopg.Connection, balance: UsBalance) -> None:
                  exch_rate = EXCLUDED.exch_rate, synced_at = now()""",
             (balance.total_buy, balance.total_eval, balance.total_pnl, balance.total_pnl_pct, balance.exch_rate),
         )
+
+
+def save_cash(conn: psycopg.Connection, market: str, cash: Cash) -> None:
+    conn.execute(
+        """INSERT INTO cash_balances (market, currency, deposit, d2_deposit, orderable, synced_at)
+           VALUES (%s, %s, %s, %s, %s, now())
+           ON CONFLICT (market) DO UPDATE SET currency = EXCLUDED.currency, deposit = EXCLUDED.deposit,
+             d2_deposit = EXCLUDED.d2_deposit, orderable = EXCLUDED.orderable, synced_at = now()""",
+        (market, cash.currency, cash.deposit, cash.d2_deposit, cash.orderable),
+    )
 
 
 def save_indicators(conn: psycopg.Connection, indicators: list[Indicator]) -> None:
