@@ -18,6 +18,9 @@ class Config:
     naver_client_secret: str = ""
     finnhub_api_key: str = ""
     sec_contact_email: str = ""
+    anthropic_api_key: str = ""
+    gemini_api_key: str = ""
+    ai_model: str = ""
 
     @property
     def kiwoom_base_url(self) -> str:
@@ -40,4 +43,7 @@ def load() -> Config:
         naver_client_secret=os.environ.get("NAVER_CLIENT_SECRET", ""),
         finnhub_api_key=os.environ.get("FINNHUB_API_KEY", ""),
         sec_contact_email=os.environ.get("SEC_CONTACT_EMAIL", ""),
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
+        ai_model=os.environ.get("AI_MODEL", ""),
     )

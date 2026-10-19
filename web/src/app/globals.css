@@ -305,3 +305,9 @@ h1 + .summary-line { font-size: 0.95rem; margin: -6px 0 18px; }
   .chart-tools .segment.views { width: 100%; }
   .chart-tools .segment.views button { flex: 1; padding: 5px 0; font-size: 0.78rem; }
 }
+
+/* AI 한마디 */
+.ai-note p { margin: 6px 0 4px; color: var(--sub); font-size: 0.9rem; line-height: 1.55; }
+.ai-note .meta { color: var(--muted); font-size: 0.74rem; }
+.ai-panel { margin: 12px 0 4px; max-width: 760px; }
+.ai-note .row2 { display: flex; justify-content: space-between; align-items: center; gap: 10px; }

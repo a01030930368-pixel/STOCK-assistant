@@ -264,3 +264,14 @@ CREATE TABLE minute_bars (
   volume  NUMERIC(20, 0) NOT NULL DEFAULT 0,
   PRIMARY KEY (ticker, ts)
 );
+
+-- AI 한마디: 보유 종목별 하루 한 번 (ANTHROPIC_API_KEY가 있을 때만)
+CREATE TABLE ai_comments (
+  ticker      TEXT NOT NULL,
+  day         DATE NOT NULL,
+  tone        TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  model       TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (ticker, day)
+);
