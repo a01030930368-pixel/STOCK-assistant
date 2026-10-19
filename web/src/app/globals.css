@@ -186,3 +186,10 @@ dl.facts dd { margin: 0; }
   .holdings .list-item .side .sub { display: none; }
   .holdings .list-item .sub { white-space: nowrap; }
 }
+.segment.small { display: flex; margin-bottom: 12px; }
+.segment.small button { flex: 1; }
+.segment button { background: none; border: 0; padding: 5px 16px; border-radius: 6px; color: var(--muted); font-size: 0.86rem; font-weight: 500; min-height: 30px; }
+.segment button:hover { color: var(--fg); filter: none; }
+.segment button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.link-toggle { background: none; border: 0; padding: 0; color: var(--accent); font-size: 0.78rem; font-weight: 500; }
+.link-toggle:hover { text-decoration: underline; filter: none; }

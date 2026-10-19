@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import psycopg
 
-from . import db, research
+from . import db, research, translate
 from .config import Config
 
 log = logging.getLogger("worker")
@@ -58,6 +58,19 @@ class ResearchJob:
             elif market == "US" and c.finnhub_api_key:
                 self._try(f"{ticker} 뉴스", lambda: db.save_news(
                     conn, research.finnhub_news(ticker, c.finnhub_api_key, now.date(), self.http)))
+        self._translate(conn)
+
+    def _translate(self, conn: psycopg.Connection) -> None:
+        # 한글이 든 제목(국내 뉴스)은 원문을 그대로 한국어 제목으로 둡니다.
+        for ticker, url, title in db.untranslated_news(conn):
+            if not translate.needs_translation(title):
+                db.save_title_ko(conn, ticker, url, title)
+                continue
+            try:
+                db.save_title_ko(conn, ticker, url, translate.to_korean(title, self.http))
+            except Exception as e:
+                log.warning("뉴스 제목 번역 실패, 다음 시간에 다시 합니다: %s", e)
+                return
 
     def _refresh_codes(self, now: datetime) -> None:
         if self.codes_at and now - self.codes_at < CODES_EVERY:

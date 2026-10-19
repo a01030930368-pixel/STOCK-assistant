@@ -142,6 +142,7 @@ CREATE TABLE stock_news (
   source        TEXT NOT NULL,
   published_at  TIMESTAMPTZ NOT NULL,
   summary       TEXT NOT NULL DEFAULT '',
+  title_ko      TEXT,  -- 한국어 제목(미국 뉴스는 번역, 국내 뉴스는 원문)
   PRIMARY KEY (ticker, url)
 );
 
