@@ -1,6 +1,6 @@
-"""AI 한마디. 보유 종목마다 하루 한 번, 내 매매일지·가격·뉴스·실적을 Claude API에 보내 보유 관점의 짧은 코멘트를 받습니다.
+"""AI 한마디. 보유 종목마다 하루 한 번, 내 매매일지·가격·뉴스·실적을 AI에 보내 보유 관점의 짧은 코멘트를 받습니다.
 
-ANTHROPIC_API_KEY가 없으면 아무것도 하지 않습니다. 매수·매도 지시가 아니라, 내가 세운 계획과 지금 상황을 비교해 주는 메모입니다.
+GEMINI_API_KEY(구글 무료 키)가 있으면 Gemini를, 없고 ANTHROPIC_API_KEY(유료)가 있으면 Claude를 씁니다. 둘 다 없으면 아무것도 하지 않습니다. 매수·매도 지시가 아니라, 내가 세운 계획과 지금 상황을 비교해 주는 메모입니다.
 """
 import json
 import re
@@ -9,7 +9,9 @@ from dataclasses import dataclass
 import httpx
 
 API = "https://api.anthropic.com/v1/messages"
+GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/"
 DEFAULT_MODEL = "claude-haiku-5-5"
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 TONES = ("긍정", "중립", "주의")
 
 SYSTEM = """너는 개인 투자자의 대시보드에 들어가는 '보유 관점 한마디'를 쓰는 조수다.
@@ -82,3 +84,22 @@ def ask(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
         raise RuntimeError(f"Claude API 오류 {res.status_code}: {res.text[:120]}")
     text = "".join(b.get("text", "") for b in res.json().get("content", []) if b.get("type") == "text")
     return parse(text)
+
+
+def ask_gemini(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
+    # 키는 주소가 아니라 헤더로 보내서 오류 메시지·로그에 남지 않게 합니다.
+    res = http.post(
+        f"{GEMINI_API}{model}:generateContent",
+        headers={"x-goog-api-key": key, "content-type": "application/json"},
+        json={
+            "systemInstruction": {"parts": [{"text": SYSTEM}]},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 2048, "responseMimeType": "application/json"},
+        },
+        timeout=60,
+    )
+    if res.status_code >= 400:
+        raise RuntimeError(f"Gemini API 오류 {res.status_code}: {res.text[:160]}")
+    cands = res.json().get("candidates") or []
+    parts = ((cands[0].get("content") or {}).get("parts") or []) if cands else []
+    return parse("".join(p.get("text", "") for p in parts if not p.get("thought")))

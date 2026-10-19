@@ -74,7 +74,7 @@ def main() -> None:
     logsafe.setup([
         cfg.kiwoom_appkey, cfg.kiwoom_secretkey, cfg.telegram_bot_token,
         cfg.ecos_api_key, cfg.fred_api_key, cfg.dart_api_key,
-        cfg.naver_client_id, cfg.naver_client_secret, cfg.finnhub_api_key, cfg.anthropic_api_key,
+        cfg.naver_client_id, cfg.naver_client_secret, cfg.finnhub_api_key, cfg.anthropic_api_key, cfg.gemini_api_key,
     ])
     kiwoom = None
     if cfg.kiwoom_appkey and cfg.kiwoom_secretkey:

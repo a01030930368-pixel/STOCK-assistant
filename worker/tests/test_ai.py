@@ -59,9 +59,29 @@ def test_target_day_after_close_only():
     assert target_day("KR", datetime(2026, 10, 18, 9, 0, tzinfo=timezone.utc)) is None  # 일요일
 
 
-def cfg(key="k"):
+def cfg(key="k", gemini=""):
     return Config(database_url="", kiwoom_appkey="", kiwoom_secretkey="", kiwoom_mock=True, telegram_bot_token="",
-                  telegram_chat_id="", poll_seconds=60, anthropic_api_key=key)
+                  telegram_chat_id="", poll_seconds=60, anthropic_api_key=key, gemini_api_key=gemini)
+
+
+def test_ask_gemini_uses_header_key_and_skips_thoughts():
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["url"], seen["key"] = str(req.url), req.headers["x-goog-api-key"]
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [
+            {"text": "생각 중", "thought": True}, {"text": '{"tone": "긍정", "comment": "계획대로 가고 있어요."}'}]}}]})
+
+    c = ai.ask_gemini("p", "g-key", "gemini-flash-latest", httpx.Client(transport=httpx.MockTransport(handler)))
+    assert c == ai.Comment("긍정", "계획대로 가고 있어요.")
+    assert seen["url"].endswith("/models/gemini-flash-latest:generateContent") and "g-key" not in seen["url"]
+    assert seen["key"] == "g-key"
+
+
+def test_job_prefers_free_gemini_key():
+    job = AiJob(cfg(key="paid", gemini="free"), None)
+    assert (job.key, job.model, job.ask) == ("free", ai.DEFAULT_GEMINI_MODEL, ai.ask_gemini)
+    assert AiJob(cfg(), None).ask is ai.ask
 
 
 def test_job_writes_once_per_day_and_first_time_immediately(monkeypatch):

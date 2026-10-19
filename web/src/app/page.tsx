@@ -236,7 +236,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
           <div className="panel">
             <div className="panel-title">AI 한마디</div>
             {comments.filter((c) => scope === "all" || c.market === scope).length === 0 ? (
-              <div className="muted">.env에 ANTHROPIC_API_KEY를 넣으면 장 마감 뒤 보유 종목마다 하루 한 번 점검 메모를 써 드려요.</div>
+              <div className="muted">.env에 GEMINI_API_KEY(구글 무료 키)를 넣으면 장 마감 뒤 보유 종목마다 하루 한 번 점검 메모를 써 드려요.</div>
             ) : (
               <ul className="feed">
                 {comments.filter((c) => scope === "all" || c.market === scope).map((c) => (
