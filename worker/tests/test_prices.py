@@ -5,21 +5,29 @@ import httpx
 import pytest
 
 from app.kiwoom import KiwoomClient
-from app.prices import parse_kr_daily, parse_stooq
+from app.prices import Candle, parse_kr_daily, parse_stooq
+
+D = Decimal
 
 
 def test_parse_kr_daily_sorts_and_drops_signs():
     body = {"stk_dt_pole_chart_qry": [
-        {"dt": "20261017", "cur_prc": "+68400"},
+        {"dt": "20261017", "cur_prc": "+68400", "open_pric": "+67000", "high_pric": "+69000", "low_pric": "-66500", "trde_qty": "1200"},
         {"dt": "20261016", "cur_prc": "-67900"},
         {"dt": "", "cur_prc": "1"},
     ]}
-    assert parse_kr_daily(body) == [(date(2026, 10, 16), Decimal(67900)), (date(2026, 10, 17), Decimal(68400))]
+    assert parse_kr_daily(body) == [
+        Candle(date(2026, 10, 16), D(67900), D(67900), D(67900), D(67900), D(0)),
+        Candle(date(2026, 10, 17), D(67000), D(69000), D(66500), D(68400), D(1200)),
+    ]
 
 
 def test_parse_stooq_csv():
     text = "Date,Open,High,Low,Close,Volume\n2026-10-16,40,42,39,41.1,100\n2026-10-15,38,40,37,39.5,90\n"
-    assert parse_stooq(text) == [(date(2026, 10, 15), Decimal("39.5")), (date(2026, 10, 16), Decimal("41.1"))]
+    assert parse_stooq(text) == [
+        Candle(date(2026, 10, 15), D(38), D(40), D(37), D("39.5"), D(90)),
+        Candle(date(2026, 10, 16), D(40), D(42), D(39), D("41.1"), D(100)),
+    ]
 
 
 def test_parse_stooq_reports_non_csv():
@@ -37,5 +45,5 @@ def test_kr_daily_calls_ka10081():
         return httpx.Response(200, json={"stk_dt_pole_chart_qry": [{"dt": "20261017", "cur_prc": "68400"}], "return_code": 0})
 
     client = KiwoomClient("https://api.kiwoom.com", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
-    assert client.kr_daily("005930", "20261019") == [(date(2026, 10, 17), Decimal(68400))]
+    assert [(c.day, c.close) for c in client.kr_daily("005930", "20261019")] == [(date(2026, 10, 17), D(68400))]
     assert seen == [("/api/dostk/chart", "ka10081")]

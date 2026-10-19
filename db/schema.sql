@@ -202,7 +202,11 @@ CREATE TABLE calendar_events (
 CREATE TABLE price_history (
   ticker  TEXT NOT NULL,
   day     DATE NOT NULL,
+  open    NUMERIC(18, 4),
+  high    NUMERIC(18, 4),
+  low     NUMERIC(18, 4),
   close   NUMERIC(18, 4) NOT NULL,
+  volume  NUMERIC(20, 0),
   PRIMARY KEY (ticker, day)
 );
 
