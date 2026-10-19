@@ -86,20 +86,31 @@ def ask(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
     return parse(text)
 
 
+# 고른 모델이 붐비거나(503) 한도에 걸리면(429) 다음 무료 모델로 넘어갑니다.
+GEMINI_FALLBACKS = ("gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite")
+RETRY_STATUS = {404, 429, 500, 503}
+
+
 def ask_gemini(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
-    # 키는 주소가 아니라 헤더로 보내서 오류 메시지·로그에 남지 않게 합니다.
-    res = http.post(
-        f"{GEMINI_API}{model}:generateContent",
-        headers={"x-goog-api-key": key, "content-type": "application/json"},
-        json={
-            "systemInstruction": {"parts": [{"text": SYSTEM}]},
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": 2048, "responseMimeType": "application/json"},
-        },
-        timeout=60,
-    )
-    if res.status_code >= 400:
-        raise RuntimeError(f"Gemini API 오류 {res.status_code}: {res.text[:160]}")
-    cands = res.json().get("candidates") or []
-    parts = ((cands[0].get("content") or {}).get("parts") or []) if cands else []
-    return parse("".join(p.get("text", "") for p in parts if not p.get("thought")))
+    errors = []
+    for m in dict.fromkeys((model, *GEMINI_FALLBACKS)):
+        # 키는 주소가 아니라 헤더로 보내서 오류 메시지·로그에 남지 않게 합니다.
+        res = http.post(
+            f"{GEMINI_API}{m}:generateContent",
+            headers={"x-goog-api-key": key, "content-type": "application/json"},
+            json={
+                "systemInstruction": {"parts": [{"text": SYSTEM}]},
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 2048, "responseMimeType": "application/json"},
+            },
+            timeout=60,
+        )
+        if res.status_code in RETRY_STATUS:
+            errors.append(f"{m} {res.status_code}")
+            continue
+        if res.status_code >= 400:
+            raise RuntimeError(f"Gemini API 오류 {res.status_code}: {res.text[:160]}")
+        cands = res.json().get("candidates") or []
+        parts = ((cands[0].get("content") or {}).get("parts") or []) if cands else []
+        return parse("".join(p.get("text", "") for p in parts if not p.get("thought")))
+    raise RuntimeError("Gemini가 붐벼 다음에 다시 시도합니다: " + ", ".join(errors))

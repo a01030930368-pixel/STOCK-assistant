@@ -1,6 +1,6 @@
 """AI 한마디 일정. 각 시장 장 마감 30분 뒤 보유 종목마다 하루 한 번 씁니다. 한 번도 쓴 적 없는 종목은 바로 씁니다."""
 import logging
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -12,6 +12,7 @@ from .market import is_holiday
 
 log = logging.getLogger("worker")
 
+RETRY_AFTER = timedelta(minutes=20)  # 실패한 종목은 이만큼 쉬었다가 다시 시도합니다.
 AFTER = {"KR": (ZoneInfo("Asia/Seoul"), time(16, 0)), "US": (ZoneInfo("America/New_York"), time(16, 30))}
 
 
@@ -33,6 +34,7 @@ class AiJob:
             self.key, self.model, self.ask = cfg.gemini_api_key, cfg.ai_model or ai.DEFAULT_GEMINI_MODEL, ai.ask_gemini
         else:
             self.key, self.model, self.ask = cfg.anthropic_api_key, cfg.ai_model or ai.DEFAULT_MODEL, ai.ask
+        self.failed: dict[str, datetime] = {}
 
     def run(self, conn: psycopg.Connection, now: datetime | None = None) -> None:
         if not self.key:
@@ -46,8 +48,12 @@ class AiJob:
                 day = day or now.astimezone(AFTER[market][0]).date()
             elif day is None or last >= day:
                 continue
+            if now - self.failed.get(ticker, datetime.min.replace(tzinfo=timezone.utc)) < RETRY_AFTER:
+                continue
             try:
                 c = self.ask(ai.build_prompt(db.ai_context(conn, ticker, name, market)), self.key, self.model, self.http)
                 db.save_ai_comment(conn, ticker, day, c.tone, c.body, self.model)
+                self.failed.pop(ticker, None)
             except Exception as e:
+                self.failed[ticker] = now
                 log.warning("%s AI 한마디 실패: %s", name, e)

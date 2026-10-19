@@ -236,7 +236,11 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
           <div className="panel">
             <div className="panel-title">AI 한마디</div>
             {comments.filter((c) => scope === "all" || c.market === scope).length === 0 ? (
-              <div className="muted">.env에 GEMINI_API_KEY(구글 무료 키)를 넣으면 장 마감 뒤 보유 종목마다 하루 한 번 점검 메모를 써 드려요.</div>
+              <div className="muted">
+                {process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY
+                  ? "첫 메모를 쓰는 중이에요. AI 서버가 붐비면 20분 뒤에 다시 시도해요."
+                  : ".env에 GEMINI_API_KEY(구글 무료 키)를 넣으면 장 마감 뒤 보유 종목마다 하루 한 번 점검 메모를 써 드려요."}
+              </div>
             ) : (
               <ul className="feed">
                 {comments.filter((c) => scope === "all" || c.market === scope).map((c) => (

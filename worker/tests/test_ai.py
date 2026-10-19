@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -98,3 +98,43 @@ def test_job_writes_once_per_day_and_first_time_immediately(monkeypatch):
     saved.clear()
     AiJob(cfg(""), None).run(None, now)
     assert saved == []
+
+
+def test_ask_gemini_falls_back_when_model_is_busy():
+    tried = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        model = req.url.path.split("/")[-1].split(":")[0]
+        tried.append(model)
+        if model == "gemini-flash-latest":
+            return httpx.Response(503, json={"error": {"status": "UNAVAILABLE"}})
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": '{"tone": "중립", "comment": "ok"}'}]}}]})
+
+    c = ai.ask_gemini("p", "k", "gemini-flash-latest", httpx.Client(transport=httpx.MockTransport(handler)))
+    assert c.body == "ok" and tried == ["gemini-flash-latest", ai.GEMINI_FALLBACKS[0]]
+
+
+def test_ask_gemini_gives_up_after_all_models_busy():
+    client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(503)))
+    with pytest.raises(RuntimeError, match="붐벼"):
+        ai.ask_gemini("p", "k", "gemini-flash-latest", client)
+
+
+def test_job_waits_before_retrying_a_failed_stock(monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.ai_job.db.held_stocks", lambda conn: [("IONQ", "아이온큐", "US")])
+    monkeypatch.setattr("app.ai_job.db.ai_comment_days", lambda conn: {})
+    monkeypatch.setattr("app.ai_job.db.ai_context", lambda conn, t, n, m: {"ticker": t, "name": n, "market": m})
+
+    def busy(p, k, m, h):
+        calls.append(1)
+        raise RuntimeError("503")
+
+    monkeypatch.setattr("app.ai_job.ai.ask", busy)
+    job = AiJob(cfg(), None)
+    now = datetime(2026, 10, 20, 3, 0, tzinfo=timezone.utc)
+    job.run(None, now)
+    job.run(None, now + timedelta(minutes=1))
+    assert len(calls) == 1
+    job.run(None, now + timedelta(minutes=21))
+    assert len(calls) == 2
