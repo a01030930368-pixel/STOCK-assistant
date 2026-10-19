@@ -222,6 +222,11 @@ class KiwoomClient:
         # kt00001 예수금상세현황요청, qry_tp=3 추정조회
         return parse_kr_cash(self._post("/api/dostk/acnt", "kt00001", {"qry_tp": "3"}))
 
+    def kr_minutes(self, ticker: str) -> list:
+        # ka10080 주식분봉차트조회요청, 1분봉(수정주가). 최근 것부터 한 번에 약 900개
+        from .intraday import parse_kr_minutes
+        return parse_kr_minutes(self._post("/api/dostk/chart", "ka10080", {"stk_cd": ticker, "tic_scope": "1", "upd_stkpr_tp": "1"}))
+
     def value_rank(self, market_code: str) -> list:
         # ka10032 거래대금상위요청. 001 코스피, 101 코스닥, 관리종목 제외, KRX 기준
         from .screener import parse_value_rank

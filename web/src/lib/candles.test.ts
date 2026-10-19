@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregate, bucketOf, rsi, sma, type Candle } from "./candles";
+import { aggregate, aggregateMinutes, bucketOf, rsi, sma, wallClock, type Candle, type MinuteCandle } from "./candles";
 
 const c = (day: string, open: number, high: number, low: number, close: number, volume: number | null = 10): Candle => ({ day, open, high, low, close, volume });
 
@@ -26,5 +26,24 @@ describe("candles", () => {
     const up = Array.from({ length: 20 }, (_, i) => i + 1);
     expect(rsi(up)[19]).toBe(100);
     expect(rsi(up)[13]).toBeNull();
+  });
+});
+
+describe("minute candles", () => {
+  const m = (hh: number, mm: number, close: number, volume = 1): MinuteCandle => {
+    const t = Date.UTC(2026, 9, 20, hh, mm) / 1000;
+    return { t, open: close, high: close + 1, low: close - 1, close, volume };
+  };
+
+  it("converts to market wall clock", () => {
+    expect(wallClock(new Date("2026-10-20T00:01:00Z"), "Asia/Seoul")).toBe(Date.UTC(2026, 9, 20, 9, 1) / 1000);
+    expect(wallClock(new Date("2026-10-20T13:30:00Z"), "America/New_York")).toBe(Date.UTC(2026, 9, 20, 9, 30) / 1000);
+  });
+
+  it("buckets from the session open", () => {
+    const us = aggregateMinutes([m(9, 30, 10), m(10, 29, 12, 2), m(10, 30, 11)], 60, 9.5 * 3600);
+    expect(us.map((b) => [new Date(b.t * 1000).toISOString().slice(11, 16), b.close, b.volume, b.high])).toEqual([["09:30", 12, 3, 13], ["10:30", 11, 1, 12]]);
+    const kr = aggregateMinutes([m(9, 0, 1), m(9, 2, 2), m(9, 3, 3)], 3, 9 * 3600);
+    expect(kr.map((b) => b.close)).toEqual([2, 3]);
   });
 });

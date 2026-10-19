@@ -57,3 +57,41 @@ export function rsi(values: number[], n = 14): (number | null)[] {
   }
   return out;
 }
+
+// 분봉. t는 그 시장 현지 시각을 UTC인 것처럼 적은 초 단위 값입니다(차트가 현지 시각으로 보이게).
+export type MinuteCandle = { t: number; open: number; high: number; low: number; close: number; volume: number };
+export const MINUTES = [1, 3, 5, 15, 30, 60] as const;
+
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+export function wallClock(ts: Date, timeZone: string): number {
+  let f = formatters.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    formatters.set(timeZone, f);
+  }
+  const p = Object.fromEntries(f.formatToParts(ts).map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) / 1000;
+}
+
+// N분봉은 장 시작 시각(국내 9:00, 미국 9:30)부터 N분씩 끊습니다. HTS와 같은 방식입니다.
+export function aggregateMinutes(bars: MinuteCandle[], size: number, openSec: number): MinuteCandle[] {
+  if (size === 1) return bars;
+  const step = size * 60;
+  const out: MinuteCandle[] = [];
+  for (const b of bars) {
+    const dayStart = Math.floor(b.t / 86400) * 86400;
+    const base = b.t >= dayStart + openSec ? dayStart + openSec : dayStart;
+    const t = base + Math.floor((b.t - base) / step) * step;
+    const last = out[out.length - 1];
+    if (last && last.t === t) {
+      last.high = Math.max(last.high, b.high);
+      last.low = Math.min(last.low, b.low);
+      last.close = b.close;
+      last.volume += b.volume;
+    } else {
+      out.push({ ...b, t });
+    }
+  }
+  return out;
+}
