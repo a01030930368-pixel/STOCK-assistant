@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { pool, query } from "@/lib/db";
 import { optionalNumber, validateMacro, type MacroInput } from "@/lib/macro";
+import { rulesFromForm } from "@/lib/screener";
 import { averagePrice, holdingDays, remainingQuantity, returnPct, validateBuy, type BuyInput, type Fill } from "@/lib/journal";
 
 // values: 오류가 났을 때 입력한 값을 폼에 되돌려 주기 위해 사용합니다.
@@ -213,4 +214,25 @@ export async function deleteChartMemo(form: FormData) {
   const ticker = text(form, "ticker").toUpperCase();
   await query("DELETE FROM chart_memos WHERE id = $1 AND ticker = $2", [num(form, "id"), ticker]);
   revalidatePath(`/stock/${ticker}`);
+}
+
+export async function savePreset(form: FormData) {
+  const id = num(form, "id");
+  const name = text(form, "name").slice(0, 40) || "내 조건";
+  const rules = JSON.stringify(rulesFromForm((k) => text(form, k)));
+  let target = id;
+  if (id > 0) {
+    await query("UPDATE screener_presets SET name = $2, rules = $3 WHERE id = $1", [id, name, rules]);
+  } else {
+    const [row] = await query<{ id: number }>("INSERT INTO screener_presets (name, rules) VALUES ($1, $2) RETURNING id", [name, rules]);
+    target = row.id;
+  }
+  revalidatePath("/screener");
+  redirect(`/screener?p=${target}`);
+}
+
+export async function deletePreset(form: FormData) {
+  await query("DELETE FROM screener_presets WHERE id = $1", [num(form, "id")]);
+  revalidatePath("/screener");
+  redirect("/screener");
 }
