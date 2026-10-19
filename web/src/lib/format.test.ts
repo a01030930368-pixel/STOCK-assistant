@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asOf, fixedPct } from "./format";
+import { asOf, fixedPct, usd } from "./format";
 
 describe("fixedPct", () => {
   it("keeps two decimals so 3 and 3.25 look alike", () => {
@@ -14,5 +14,12 @@ describe("asOf", () => {
     expect(asOf("202609")).toBe("2026.09");
     expect(asOf("20261019")).toBe("2026.10.19");
     expect(asOf("2026-10-18")).toBe("2026.10.18");
+  });
+});
+
+describe("usd", () => {
+  it("puts the minus sign before the dollar sign", () => {
+    expect(usd(-46.6)).toBe("-$46.60");
+    expect(usd("1644")).toBe("$1,644.00");
   });
 });

@@ -1,109 +1,230 @@
 import Link from "next/link";
+import { distancePct, scopeOf, totalOf, type Account, type Scope } from "@/lib/board";
 import { query } from "@/lib/db";
-import { signClass, usd, won } from "@/lib/format";
+import { asOf, fixedPct, signClass, usd, won } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 type Holding = {
   ticker: string; name: string; market: "KR" | "US"; quantity: string; avg_price: string; cur_price: string;
-  eval_amount: string; pnl: string; pnl_pct: string; synced_at: Date; position_id: number | null;
+  eval_amount: string; pnl: string; pnl_pct: string; position_id: number | null;
 };
-type Summary = { total_buy: string; total_eval: string; total_pnl: string; total_pnl_pct: string; est_deposit: string; synced_at: Date };
-type UsSummary = { total_buy: string; total_eval: string; total_pnl: string; total_pnl_pct: string; exch_rate: string; synced_at: Date };
+type Summary = { total_buy: string; total_eval: string; total_pnl: string; total_pnl_pct: string; synced_at: Date };
+type UsSummary = Summary & { exch_rate: string };
+type Cash = { market: "KR" | "US"; deposit: string; d2_deposit: string | null; orderable: string | null; synced_at: Date };
+type AlertRow = { ticker: string; name: string; market: "KR" | "US"; kind: "stop" | "target" | "custom"; direction: "below" | "above"; price: string; cur_price: string };
+type News = { ticker: string; url: string; title: string; source: string; published_at: Date };
+type Filing = { ticker: string; name: string; title: string; url: string; reported_day: string };
 
-function syncedAt(date: Date): string {
-  return date.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+const signed = (v: number, text: string) => (v > 0 ? `+${text}` : text);
+const krw = (v: number | string) => `${won(v)}원`;
+const money = (market: "KR" | "US") => (market === "KR" ? (v: string | number) => `${won(v, 2)}원` : usd);
+const kst = (d: Date) => d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+
+function account(s: Summary | undefined, cash: Cash | undefined): Account | null {
+  if (!s) return null;
+  const left = cash ? Number(cash.d2_deposit ?? cash.deposit) : null;
+  return { eval: Number(s.total_eval), buy: Number(s.total_buy), pnl: Number(s.total_pnl), cash: left };
 }
 
-function Holdings({ holdings, price }: { holdings: Holding[]; price: (v: string) => string }) {
+function HoldingRows({ rows }: { rows: Holding[] }) {
   return (
     <div className="list">
-      {holdings.length === 0 && <div className="list-empty">보유 종목이 없습니다.</div>}
-      {holdings.map((h) => (
-        <div className="list-item" key={h.ticker}>
-          <div className="main">
-            <Link className="title" href={`/stock/${encodeURIComponent(h.ticker)}`}>{h.name}</Link>{" "}
-            <span className="chip">{h.ticker}</span>
-            <div className="sub">
-              {won(h.quantity, 4)}주 · 평단 {price(h.avg_price)} · 현재 {price(h.cur_price)} ·{" "}
-              {h.position_id ? (
-                <Link href={`/journal/${h.position_id}`}>매매일지</Link>
-              ) : (
-                <Link href={`/journal/buy?${new URLSearchParams({ ticker: h.ticker, name: h.name, market: h.market })}`}>일지 작성</Link>
-              )}
+      {rows.map((h) => {
+        const price = money(h.market);
+        return (
+          <div className="list-item" key={h.ticker}>
+            <div className="main">
+              <Link className="title" href={`/stock/${encodeURIComponent(h.ticker)}`}>{h.name}</Link>
+              <div className="sub">
+                <span className="num">{h.ticker} · {won(h.quantity, 4)}주</span> ·{" "}
+                {h.position_id ? (
+                  <Link href={`/journal/${h.position_id}`}>매매일지</Link>
+                ) : (
+                  <Link href={`/journal/buy?${new URLSearchParams({ ticker: h.ticker, name: h.name, market: h.market })}`}>일지 작성</Link>
+                )}
+              </div>
+            </div>
+            <div className="side">
+              <span className="num">{price(h.eval_amount)}</span>
+              <span className="sub num">{price(h.cur_price)} / 평단 {price(h.avg_price)}</span>
+              <span className={`badge ${signClass(h.pnl_pct)}`}>{signed(Number(h.pnl_pct), fixedPct(h.pnl_pct))}</span>
             </div>
           </div>
-          <div className="side">
-            <span className="num">{price(h.eval_amount)}</span>
-            <span className={`badge ${signClass(h.pnl_pct)}`}>{signed(h.pnl_pct)}%</span>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-const signed = (v: string | number) => (Number(v) > 0 ? `+${v}` : `${v}`);
+function AccountCard({ title, market, scope, summary, cash, fmt }: {
+  title: string; market: "KR" | "US"; scope: Scope; summary: Summary | undefined; cash: Cash | undefined; fmt: (v: number | string) => string;
+}) {
+  const dim = scope !== "all" && scope !== market;
+  return (
+    <div className={`panel account${dim ? " dim" : ""}`}>
+      <div className="panel-title">{title}</div>
+      {summary ? (
+        <dl>
+          <dt>주식 평가</dt><dd>{fmt(summary.total_eval)}</dd>
+          <dt>평가손익</dt>
+          <dd className={signClass(summary.total_pnl)}>
+            {signed(Number(summary.total_pnl), fmt(summary.total_pnl))} <span className="muted">({signed(Number(summary.total_pnl_pct), fixedPct(summary.total_pnl_pct))})</span>
+          </dd>
+          <dt>남은 예수금</dt>
+          <dd className="cash">{cash ? fmt(cash.d2_deposit ?? cash.deposit) : "확인 중"}</dd>
+        </dl>
+      ) : (
+        <div className="muted">아직 잔고를 불러오지 않았습니다.</div>
+      )}
+      {cash && (
+        <div className="foot">
+          D+2 기준 · 오늘 예수금 {fmt(cash.deposit)}
+          {cash.orderable !== null && ` · 주문가능 ${fmt(cash.orderable)}`}
+        </div>
+      )}
+    </div>
+  );
+}
 
-export default async function PortfolioPage() {
-  const [summary] = await query<Summary>("SELECT * FROM account_summary WHERE id = 1");
-  // 예전 DB에는 워커가 처음 돌기 전까지 이 테이블이 없을 수 있습니다.
+export default async function PortfolioPage({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
+  const scope = scopeOf((await searchParams).m);
+  const [krSummary] = await query<Summary>("SELECT * FROM account_summary WHERE id = 1");
+  // 예전 DB에는 워커가 처음 돌기 전까지 아래 테이블들이 없을 수 있습니다.
   const [usSummary] = await query<UsSummary>("SELECT * FROM us_account_summary WHERE id = 1").catch(() => []);
+  const cash = await query<Cash>("SELECT * FROM cash_balances").catch(() => []);
   const holdings = await query<Holding>(
     `SELECT h.*, p.id AS position_id FROM holdings h
      LEFT JOIN positions p ON p.ticker = h.ticker AND p.status = 'open'
-     ORDER BY h.eval_amount DESC`,
+     ORDER BY h.market, h.eval_amount DESC`,
   );
+  const alerts = await query<AlertRow>(
+    `SELECT a.ticker, a.name, h.market, a.kind, a.direction, a.price, h.cur_price
+     FROM alerts a JOIN holdings h ON h.ticker = a.ticker WHERE a.active`,
+  );
+  const tickers = holdings.filter((h) => scope === "all" || h.market === scope).map((h) => h.ticker);
+  const news = await query<News>(
+    "SELECT ticker, url, title, source, published_at FROM stock_news WHERE ticker = ANY($1) ORDER BY published_at DESC LIMIT 6",
+    [tickers],
+  ).catch(() => []);
+  const filings = await query<Filing>(
+    `SELECT e.ticker, h.name, e.title, e.url, to_char(e.reported_on, 'YYYYMMDD') AS reported_day
+     FROM stock_earnings e JOIN holdings h ON h.ticker = e.ticker
+     WHERE e.ticker = ANY($1) AND e.reported_on >= CURRENT_DATE - 14 ORDER BY e.reported_on DESC LIMIT 3`,
+    [tickers],
+  ).catch(() => []);
+
+  const krCash = cash.find((c) => c.market === "KR");
+  const usCash = cash.find((c) => c.market === "US");
   const rate = usSummary ? Number(usSummary.exch_rate) : 0;
-  const kr = holdings.filter((h) => h.market === "KR");
-  const us = holdings.filter((h) => h.market === "US");
+  const total = totalOf(scope, account(krSummary, krCash), account(usSummary, usCash), rate);
+  const fmtTotal = total.currency === "USD" ? usd : krw;
+  const shown = holdings.filter((h) => scope === "all" || h.market === scope);
+  const near = alerts
+    .filter((a) => scope === "all" || a.market === scope)
+    .map((a) => ({ ...a, dist: distancePct({ kind: a.kind, direction: a.direction, price: Number(a.price), cur: Number(a.cur_price) }) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, 5);
+  const groups: [string, Holding[]][] = scope === "all"
+    ? [["국내", shown.filter((h) => h.market === "KR")], ["해외", shown.filter((h) => h.market === "US")]]
+    : [["", shown]];
+  const tabs: [Scope, string][] = [["all", "전체"], ["KR", "국내"], ["US", "해외"]];
 
   return (
     <>
-      <div className="page-head">
-        <h1>내 포트폴리오</h1>
-        {summary && <span className="muted">마지막 동기화 {syncedAt(summary.synced_at)}</span>}
+      <div className="board-head">
+        <h1>포트폴리오</h1>
+        <nav className="segment" aria-label="계좌 범위">
+          {tabs.map(([id, label]) => (
+            <Link key={id} href={id === "all" ? "/" : `/?m=${id}`} aria-current={id === scope ? "page" : undefined}>{label}</Link>
+          ))}
+        </nav>
       </div>
 
-      <div className="section-head"><h2>국내 주식</h2><span className="muted">{kr.length}종목</span></div>
-      {summary ? (
-        <div className="stats">
-          <div className="stat hero"><div className="stat-label">평가금액</div><div className="stat-value">{won(summary.total_eval)}원</div></div>
-          <div className="stat">
-            <div className="stat-label">평가손익</div>
-            <div className={`stat-value ${signClass(summary.total_pnl)}`}>{signed(won(summary.total_pnl))}원</div>
-            <div className="stat-sub"><span className={`badge ${signClass(summary.total_pnl_pct)}`}>{signed(summary.total_pnl_pct)}%</span></div>
+      <div className="board">
+        <section>
+          <div className="panel total">
+            <div className="label">총자산 · 주식과 예수금 합계{scope === "all" && rate > 0 ? " · 원화 환산" : ""}</div>
+            <div className="value">{fmtTotal(total.total)}</div>
+            <div className={`pl ${signClass(total.pnl)}`}>
+              {signed(total.pnl, fmtTotal(total.pnl))}　{signed(total.pnlPct, fixedPct(total.pnlPct))}
+            </div>
+            <div className="rule" />
+            <div className="split">
+              <div><div className="label">원화 예수금</div><div className="num">{krCash ? krw(krCash.d2_deposit ?? krCash.deposit) : "-"}</div></div>
+              <div><div className="label">달러 예수금</div><div className="num">{usCash ? usd(usCash.d2_deposit ?? usCash.deposit) : "-"}</div></div>
+            </div>
           </div>
-          <div className="stat"><div className="stat-label">추정예탁자산</div><div className="stat-value">{won(summary.est_deposit)}원</div></div>
-        </div>
-      ) : (
-        <p className="card muted">아직 키움 잔고를 불러오지 않았습니다. .env에 키움 앱키를 넣고 워커를 실행하세요.</p>
-      )}
-      <Holdings holdings={kr} price={(v) => `${won(v, 2)}원`} />
+          <AccountCard title="국내 주식 계좌" market="KR" scope={scope} summary={krSummary} cash={krCash} fmt={krw} />
+          <AccountCard title="해외 주식 계좌" market="US" scope={scope} summary={usSummary} cash={usCash} fmt={usd} />
+        </section>
 
-      <div className="section-head"><h2>미국 주식</h2><span className="muted">{us.length}종목</span></div>
-      {usSummary ? (
-        <div className="stats">
-          <div className="stat hero">
-            <div className="stat-label">평가금액</div>
-            <div className="stat-value">{usd(usSummary.total_eval)}</div>
-            {rate > 0 && <div className="stat-sub">약 {won(Number(usSummary.total_eval) * rate)}원</div>}
+        <section>
+          <div className="panel flush holdings">
+            <div className="panel-title">보유 종목 <span className="muted">{shown.length}종목</span></div>
+            {shown.length === 0 ? (
+              <div className="list-empty">
+                {krSummary || usSummary ? "보유 종목이 없습니다." : "아직 키움 잔고를 불러오지 않았습니다. .env에 키움 앱키를 넣고 워커를 실행하세요."}
+              </div>
+            ) : (
+              groups.map(([label, rows]) => rows.length > 0 && (
+                <div key={label}>
+                  {label && <div className="group-label">{label}</div>}
+                  <HoldingRows rows={rows} />
+                </div>
+              ))
+            )}
           </div>
-          <div className="stat">
-            <div className="stat-label">평가손익</div>
-            <div className={`stat-value ${signClass(usSummary.total_pnl)}`}>{Number(usSummary.total_pnl) > 0 ? "+" : ""}{usd(usSummary.total_pnl)}</div>
-            <div className="stat-sub"><span className={`badge ${signClass(usSummary.total_pnl_pct)}`}>{signed(usSummary.total_pnl_pct)}%</span></div>
+        </section>
+
+        <section className="side-right">
+          <div className="panel check">
+            <div className="panel-title">확인할 것</div>
+            {near.length === 0 && filings.length === 0 ? (
+              <div className="muted">켜진 손절·익절 알림이 없습니다. 매매일지에서 매수를 기록하면 생깁니다.</div>
+            ) : (
+              <ul className="feed">
+                {near.map((a) => (
+                  <li key={`${a.ticker}-${a.kind}-${a.price}`}>
+                    <div className="row2">
+                      <Link href={`/stock/${encodeURIComponent(a.ticker)}`}>{a.name}</Link>
+                      <span className={`badge ${a.kind === "stop" ? "warn" : "gold"}`}>
+                        {a.kind === "stop" ? "손절" : a.kind === "target" ? "익절" : "알림"}까지 {fixedPct(a.dist, 1)}
+                      </span>
+                    </div>
+                    <div className="meta num">현재 {money(a.market)(a.cur_price)} → {money(a.market)(a.price)}</div>
+                  </li>
+                ))}
+                {filings.map((f) => (
+                  <li key={f.url + f.title}>
+                    <div className="row2"><a href={f.url} target="_blank" rel="noopener noreferrer">{f.name} 실적 발표</a><span className="badge">{asOf(f.reported_day)}</span></div>
+                    <div className="meta">{f.title}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          <div className="stat">
-            <div className="stat-label">적용 환율</div>
-            <div className="stat-value">{rate > 0 ? `${won(rate, 2)}원` : "-"}</div>
-            <div className="stat-sub">동기화 {syncedAt(usSummary.synced_at)}</div>
+          <div className="panel">
+            <div className="panel-title">다가오는 일정</div>
+            <div className="muted">실적 발표일·휴장일 캘린더는 다음 단계에서 붙일 예정이에요.</div>
           </div>
-        </div>
-      ) : (
-        <p className="card muted">아직 미국 잔고를 불러오지 않았습니다. 워커가 시작할 때와 미국 장중에 불러옵니다.</p>
-      )}
-      <Holdings holdings={us} price={usd} />
+          <div className="panel">
+            <div className="panel-title">최신 뉴스</div>
+            {news.length === 0 ? (
+              <div className="muted">보유 종목 뉴스가 아직 없습니다.</div>
+            ) : (
+              <ul className="feed">
+                {news.map((n) => (
+                  <li key={n.ticker + n.url}>
+                    <a href={n.url} target="_blank" rel="noopener noreferrer">{n.title}</a>
+                    <div className="meta">{n.ticker} · {n.source} · {kst(n.published_at)}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      </div>
     </>
   );
 }

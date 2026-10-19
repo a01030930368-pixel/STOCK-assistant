@@ -12,7 +12,8 @@ export function today(): string {
 }
 
 export function usd(value: string | number): string {
-  return `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const n = Number(value);
+  return `${n < 0 ? "-" : ""}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // 퍼센트를 소수점 자리수를 고정해 보여 줍니다(예: 3 → "3.00%").
