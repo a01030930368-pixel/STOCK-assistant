@@ -70,8 +70,8 @@ def parse_yahoo_daily(body: dict) -> list[Candle]:
     return [Candle(d, b.open, b.high, b.low, b.close, b.volume) for d, b in sorted(out.items())][-KEEP_DAYS:]
 
 
-def yahoo_daily(ticker: str, http: httpx.Client) -> list[Candle]:
-    res = http.get(f"{intraday.YAHOO}{ticker.upper()}", params={"interval": "1d", "range": "5y"},
+def yahoo_daily(ticker: str, http: httpx.Client, span: str = "5y") -> list[Candle]:
+    res = http.get(f"{intraday.YAHOO}{ticker.upper()}", params={"interval": "1d", "range": span},
                    headers={"User-Agent": intraday.UA})
     res.raise_for_status()
     return parse_yahoo_daily(res.json())
