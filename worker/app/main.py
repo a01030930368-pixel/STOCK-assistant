@@ -9,6 +9,7 @@ import httpx
 
 from . import alerts, config, db, macro, telegram
 from .kiwoom import KiwoomClient
+from .research_job import ResearchJob
 from .market import kr_market_open, us_market_open
 
 log = logging.getLogger("worker")
@@ -62,7 +63,10 @@ def main() -> None:
         log.warning("키움 키가 없어 잔고 동기화를 건너뜁니다.")
     if not (cfg.ecos_api_key or cfg.fred_api_key):
         log.warning("ECOS·FRED 키가 없어 매크로 지표 자동 수집을 건너뜁니다.")
-    http = httpx.Client(timeout=10)
+    http = httpx.Client(timeout=30)
+    research = ResearchJob(cfg, http)
+    if not research.enabled():
+        log.warning("뉴스·실적·재무 키가 없어 종목 정보 수집을 건너뜁니다.")
     first = True
     last_macro: datetime | None = None
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:
@@ -79,6 +83,11 @@ def main() -> None:
                 except Exception:
                     log.exception("동기화 실패")
                 first = False
+            if research.enabled():
+                try:
+                    research.run(conn, now)
+                except Exception:
+                    log.exception("종목 정보 수집 실패")
             time.sleep(cfg.poll_seconds)
 
 

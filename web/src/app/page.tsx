@@ -21,12 +21,12 @@ function HoldingsTable({ holdings, price }: { holdings: Holding[]; price: (v: st
     <div className="table-wrap">
       <table>
         <thead>
-          <tr><th>종목</th><th className="num">수량</th><th className="num">평단</th><th className="num">현재가</th><th className="num">수익률</th><th>매매일지</th></tr>
+          <tr><th>종목 (눌러서 뉴스·재무)</th><th className="num">수량</th><th className="num">평단</th><th className="num">현재가</th><th className="num">수익률</th><th>매매일지</th></tr>
         </thead>
         <tbody>
           {holdings.map((h) => (
             <tr key={h.ticker}>
-              <td>{h.name} <span className="muted">{h.ticker}</span></td>
+              <td><Link href={`/stock/${encodeURIComponent(h.ticker)}`}>{h.name}</Link> <span className="muted">{h.ticker}</span></td>
               <td className="num">{won(h.quantity, 4)}</td>
               <td className="num">{price(h.avg_price)}</td>
               <td className="num">{price(h.cur_price)}</td>

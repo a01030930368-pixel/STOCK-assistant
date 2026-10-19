@@ -46,6 +46,7 @@ export default async function PositionPage({ params }: { params: Promise<{ id: s
   return (
     <>
       <h1>{position.name} <span className="muted">{position.ticker} · {position.market} · {position.status === "open" ? "보유 중" : "청산"}</span></h1>
+      <p><Link href={`/stock/${encodeURIComponent(position.ticker)}`}>뉴스·실적·재무 보기</Link></p>
       <Principles />
 
       <h2>내 생각</h2>
