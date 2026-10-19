@@ -10,6 +10,7 @@ import httpx
 from . import alerts, config, db, logsafe, macro, telegram
 from .kiwoom import KiwoomClient
 from .research_job import ResearchJob
+from .screener_job import ScreenerJob
 from .market import kr_market_open, us_market_open
 
 log = logging.getLogger("worker")
@@ -82,6 +83,7 @@ def main() -> None:
         log.warning("ECOS·FRED 키가 없어 매크로 지표 자동 수집을 건너뜁니다.")
     http = httpx.Client(timeout=30)
     research = ResearchJob(cfg, http, kiwoom)
+    screener = ScreenerJob(kiwoom)
     first = True
     last_macro: datetime | None = None
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:
@@ -102,6 +104,10 @@ def main() -> None:
                 research.run(conn, now)
             except Exception:
                 log.exception("종목 정보 수집 실패")
+            try:
+                screener.run(conn, now)
+            except Exception:
+                log.exception("검색기 갱신 실패")
             time.sleep(cfg.poll_seconds)
 
 

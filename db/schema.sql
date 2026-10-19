@@ -218,3 +218,37 @@ CREATE TABLE chart_memos (
   body        TEXT NOT NULL CHECK (length(trim(body)) > 0),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 종목 검색기: 국내 거래대금 상위 종목의 지표 (워커가 30분마다 통째로 바꿈)
+CREATE TABLE screener_stocks (
+  ticker         TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  market         TEXT NOT NULL,
+  day            DATE NOT NULL,
+  price          NUMERIC(18, 4) NOT NULL,
+  change_pct     NUMERIC(10, 2),
+  trade_value    NUMERIC(22, 0) NOT NULL,
+  volume_ratio   NUMERIC(10, 2),
+  rsi14          NUMERIC(6, 2),
+  ma5            NUMERIC(18, 4),
+  ma20           NUMERIC(18, 4),
+  ma20_gap_pct   NUMERIC(10, 2),
+  golden_cross   BOOLEAN NOT NULL DEFAULT false,
+  high_52w       NUMERIC(18, 4) NOT NULL,
+  near_high_pct  NUMERIC(10, 2) NOT NULL,
+  spark          NUMERIC[] NOT NULL DEFAULT '{}',
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 검색기 저장 조건
+CREATE TABLE screener_presets (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  rules       JSONB NOT NULL DEFAULT '{}',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO screener_presets (name, rules) VALUES
+  ('거래대금 터진 종목', '{"minValueEok": 1500, "volRatioMin": 1.5, "chgMin": -5, "chgMax": 10}'),
+  ('눌림목', '{"rsiMax": 35, "ma20": "below"}'),
+  ('신고가 근접', '{"nearHighPct": 5}'),
+  ('골든크로스', '{"goldenCross": true}');

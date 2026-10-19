@@ -222,6 +222,16 @@ class KiwoomClient:
         # kt00001 예수금상세현황요청, qry_tp=3 추정조회
         return parse_kr_cash(self._post("/api/dostk/acnt", "kt00001", {"qry_tp": "3"}))
 
+    def value_rank(self, market_code: str) -> list:
+        # ka10032 거래대금상위요청. 001 코스피, 101 코스닥, 관리종목 제외, KRX 기준
+        from .screener import parse_value_rank
+        return parse_value_rank(self._post("/api/dostk/rkinfo", "ka10032", {"mrkt_tp": market_code, "mang_stk_incls": "0", "stex_tp": "1"}))
+
+    def kr_bars(self, ticker: str, base_day: str) -> list:
+        # ka10081 일봉(수정주가). 검색기는 고가·거래량·거래대금까지 씁니다.
+        from .screener import parse_kr_bars
+        return parse_kr_bars(self._post("/api/dostk/chart", "ka10081", {"stk_cd": ticker, "base_dt": base_day, "upd_stkpr_tp": "1"}))
+
     def kr_daily(self, ticker: str, base_day: str) -> list:
         # ka10081 주식일봉차트조회요청. base_dt부터 과거로, 수정주가(upd_stkpr_tp=1) 기준
         from .prices import parse_kr_daily

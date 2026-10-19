@@ -100,6 +100,41 @@ MIGRATIONS = [
       body        TEXT NOT NULL CHECK (length(trim(body)) > 0),
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
+    """CREATE TABLE IF NOT EXISTS screener_stocks (
+      ticker         TEXT PRIMARY KEY,
+      name           TEXT NOT NULL,
+      market         TEXT NOT NULL,
+      day            DATE NOT NULL,
+      price          NUMERIC(18, 4) NOT NULL,
+      change_pct     NUMERIC(10, 2),
+      trade_value    NUMERIC(22, 0) NOT NULL,
+      volume_ratio   NUMERIC(10, 2),
+      rsi14          NUMERIC(6, 2),
+      ma5            NUMERIC(18, 4),
+      ma20           NUMERIC(18, 4),
+      ma20_gap_pct   NUMERIC(10, 2),
+      golden_cross   BOOLEAN NOT NULL DEFAULT false,
+      high_52w       NUMERIC(18, 4) NOT NULL,
+      near_high_pct  NUMERIC(10, 2) NOT NULL,
+      spark          NUMERIC[] NOT NULL DEFAULT '{}',
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    # 처음 만들 때만 기본 조건 4개를 넣습니다. 사용자가 지운 뒤 다시 생기지 않게 테이블이 없을 때만 실행합니다.
+    """DO $$ BEGIN
+      IF to_regclass('public.screener_presets') IS NULL THEN
+        CREATE TABLE screener_presets (
+          id          SERIAL PRIMARY KEY,
+          name        TEXT NOT NULL CHECK (length(trim(name)) > 0),
+          rules       JSONB NOT NULL DEFAULT '{}',
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        INSERT INTO screener_presets (name, rules) VALUES
+          ('거래대금 터진 종목', '{"minValueEok": 1500, "volRatioMin": 1.5, "chgMin": -5, "chgMax": 10}'),
+          ('눌림목', '{"rsiMax": 35, "ma20": "below"}'),
+          ('신고가 근접', '{"nearHighPct": 5}'),
+          ('골든크로스', '{"goldenCross": true}');
+      END IF;
+    END $$""",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -277,3 +312,21 @@ def snapshot_prices(conn: psycopg.Connection) -> None:
              high = GREATEST(COALESCE(price_history.high, EXCLUDED.close), EXCLUDED.close),
              low = LEAST(COALESCE(price_history.low, EXCLUDED.close), EXCLUDED.close)"""
     )
+
+
+def save_screener(conn: psycopg.Connection, market: str, rows) -> None:
+    """이번에 계산한 종목으로 그 시장 목록을 통째로 바꿉니다. 순위에서 빠진 종목은 사라집니다."""
+    from .screener import dec
+
+    with conn.transaction():
+        conn.execute("DELETE FROM screener_stocks WHERE market = %s", (market,))
+        for m in rows:
+            conn.execute(
+                """INSERT INTO screener_stocks (ticker, name, market, day, price, change_pct, trade_value, volume_ratio,
+                     rsi14, ma5, ma20, ma20_gap_pct, golden_cross, high_52w, near_high_pct, spark)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (ticker) DO NOTHING""",
+                (m.ticker, m.name, market, m.day, dec(m.price, 4), dec(m.change_pct), dec(m.trade_value, 0),
+                 dec(m.volume_ratio), dec(m.rsi14), dec(m.ma5, 4), dec(m.ma20, 4), dec(m.ma20_gap_pct), m.golden_cross,
+                 dec(m.high_52w, 4), dec(m.near_high_pct), [dec(v, 4) for v in m.spark]),
+            )
