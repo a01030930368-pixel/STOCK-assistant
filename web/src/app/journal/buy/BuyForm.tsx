@@ -3,15 +3,21 @@
 import { useActionState } from "react";
 import { createBuy, type FormState } from "@/app/actions";
 
-type Props = { ticker: string; name: string; market: string; today: string; quantity?: string; price?: string; fillKey?: string };
+type Props = {
+  ticker: string; name: string; market: string; today: string; quantity?: string; price?: string; fillKey?: string;
+  bookKey?: string; entryId?: number; initial?: Record<string, string>; // 일기장에서 열었거나 예전 일지를 고칠 때
+};
 
-export default function BuyForm({ ticker, name, market, today, quantity = "", price = "", fillKey = "" }: Props) {
+export default function BuyForm({ ticker, name, market, today, quantity = "", price = "", fillKey = "", bookKey = "", entryId, initial = {} }: Props) {
   const [state, action, pending] = useActionState<FormState, FormData>(createBuy, { errors: [] });
-  const v = (key: string, fallback = "") => state.values?.[key] ?? fallback;
+  const v = (key: string, fallback = "") => state.values?.[key] ?? initial[key] ?? fallback;
+  const fixed = Boolean(bookKey || entryId); // 일기장·고치기에서는 종목을 바꾸지 않아요
 
   return (
     <form action={action} className="stack">
       {fillKey && <input type="hidden" name="fillKey" value={fillKey} />}
+      {bookKey && <input type="hidden" name="bookKey" value={bookKey} />}
+      {entryId && <input type="hidden" name="entryId" value={entryId} />}
       {state.errors.length > 0 && (
         <div className="card errors">
           {state.errors.map((e) => <div key={e}>{e}</div>)}
@@ -19,14 +25,24 @@ export default function BuyForm({ ticker, name, market, today, quantity = "", pr
       )}
       <div className="row">
         <label>매수일<input type="date" name="tradeDate" defaultValue={v("tradeDate", today)} required /></label>
-        <label>종목명<input name="name" defaultValue={v("name", name)} required /></label>
-        <label>티커<input name="ticker" defaultValue={v("ticker", ticker)} required /></label>
-        <label>시장
-          <select name="market" defaultValue={v("market", market || "KR")}>
-            <option value="KR">국내</option>
-            <option value="US">미국</option>
-          </select>
-        </label>
+        {fixed ? (
+          <>
+            <input type="hidden" name="name" value={name} />
+            <input type="hidden" name="ticker" value={ticker} />
+            <input type="hidden" name="market" value={market} />
+          </>
+        ) : (
+          <>
+            <label>종목명<input name="name" defaultValue={v("name", name)} required /></label>
+            <label>티커<input name="ticker" defaultValue={v("ticker", ticker)} required /></label>
+            <label>시장
+              <select name="market" defaultValue={v("market", market || "KR")}>
+                <option value="KR">국내</option>
+                <option value="US">미국</option>
+              </select>
+            </label>
+          </>
+        )}
       </div>
       <div className="row">
         <label>수량<input name="quantity" defaultValue={v("quantity", quantity)} inputMode="decimal" required /></label>
@@ -55,8 +71,8 @@ export default function BuyForm({ ticker, name, market, today, quantity = "", pr
       </fieldset>
 
       <label>기대 시나리오<textarea name="scenario" defaultValue={v("scenario")} /></label>
-      <p className="muted">저장하면 손절·익절가에 도달할 때 텔레그램 알림이 자동으로 설정됩니다.</p>
-      <button type="submit" disabled={pending}>{pending ? "저장 중" : "매수 기록 저장"}</button>
+      <p className="muted">저장하면 손절·익절가에 도달할 때 텔레그램 알림이 자동으로 설정됩니다. 이미 다 판 종목은 알림을 만들지 않아요.</p>
+      <button type="submit" disabled={pending}>{pending ? "저장 중" : entryId ? "고친 내용 저장" : "매수 기록 저장"}</button>
     </form>
   );
 }

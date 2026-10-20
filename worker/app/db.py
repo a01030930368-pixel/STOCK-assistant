@@ -212,6 +212,17 @@ MIGRATIONS = [
     )""",
     "ALTER TABLE buy_entries ADD COLUMN IF NOT EXISTS fill_key TEXT",
     "ALTER TABLE sell_entries ADD COLUMN IF NOT EXISTS fill_key TEXT",
+    """CREATE TABLE IF NOT EXISTS book_reviews (
+      book_key        TEXT PRIMARY KEY,
+      stars           INT CHECK (stars BETWEEN 1 AND 5),
+      followed_rules  BOOLEAN,
+      thesis          TEXT NOT NULL DEFAULT '',
+      plan            TEXT NOT NULL DEFAULT '',
+      exit_timing     TEXT NOT NULL DEFAULT '',
+      lesson          TEXT NOT NULL DEFAULT '',
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "ALTER TABLE positions ADD COLUMN IF NOT EXISTS book_key TEXT",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:

@@ -6,6 +6,8 @@ import { pool, query } from "@/lib/db";
 import { optionalNumber, validateMacro, type MacroInput } from "@/lib/macro";
 import { rulesFromForm } from "@/lib/screener";
 import { averagePrice, holdingDays, remainingQuantity, returnPct, validateBuy, type BuyInput, type Fill } from "@/lib/journal";
+import type { Book } from "@/lib/books";
+import { loadBook } from "@/lib/booksData";
 
 // values: 오류가 났을 때 입력한 값을 폼에 되돌려 주기 위해 사용합니다.
 export type FormState = { errors: string[]; values?: Record<string, string> };
@@ -37,8 +39,39 @@ export async function deletePrinciple(form: FormData) {
   revalidatePath("/journal");
 }
 
-export async function createBuy(_prev: FormState, form: FormData): Promise<FormState> {
-  const input: BuyInput = {
+const bookHref = (key: string) => `/journal/books?b=${encodeURIComponent(key)}`;
+const DAY_MS = 86_400_000;
+
+// 일기장에서 쓴 일지는 그 권에 딸린 일지 묶음(positions.book_key)에 넣습니다.
+// 진행 중인 권이면 예전에 손으로 만든 보유 중 일지를 이어 씁니다.
+async function bookPosition(book: Book): Promise<number> {
+  const [own] = await query<{ id: number }>("SELECT id FROM positions WHERE book_key = $1 LIMIT 1", [book.key]);
+  if (own) return own.id;
+  if (!book.end) {
+    const [open] = await query<{ id: number }>(
+      "UPDATE positions SET book_key = $1 WHERE id = (SELECT id FROM positions WHERE ticker = $2 AND status = 'open' AND book_key IS NULL ORDER BY id LIMIT 1) RETURNING id",
+      [book.key, book.ticker],
+    );
+    if (open) return open.id;
+  }
+  const [row] = await query<{ id: number }>(
+    "INSERT INTO positions (ticker, name, market, status, closed_at, book_key) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+    [book.ticker, book.name, book.market, book.end ? "closed" : "open", book.end, book.key],
+  );
+  return row.id;
+}
+
+async function replaceAlerts(positionId: number, ticker: string, name: string, stop: number, target: number) {
+  await query("UPDATE alerts SET active = false WHERE position_id = $1 AND kind IN ('stop', 'target') AND active", [positionId]);
+  await query(
+    `INSERT INTO alerts (position_id, ticker, name, kind, direction, price) VALUES
+       ($1, $2, $3, 'stop', 'below', $4), ($1, $2, $3, 'target', 'above', $5)`,
+    [positionId, ticker, name, stop, target],
+  );
+}
+
+function buyInput(form: FormData): BuyInput {
+  return {
     tradeDate: text(form, "tradeDate"),
     ticker: text(form, "ticker").toUpperCase(),
     name: text(form, "name"),
@@ -53,12 +86,37 @@ export async function createBuy(_prev: FormState, form: FormData): Promise<FormS
     targetPrice: num(form, "targetPrice"),
     targetBasis: text(form, "targetBasis") === "percent" ? "percent" : "chart",
   };
+}
+
+export async function createBuy(_prev: FormState, form: FormData): Promise<FormState> {
+  const input = buyInput(form);
   const errors = validateBuy(input);
   if (errors.length) return { errors, values: echo(form) };
+  const entryId = num(form, "entryId");
+  if (entryId > 0) return updateBuy(entryId, input, text(form, "bookKey"));
 
+  const bookKey = text(form, "bookKey");
+  const book = bookKey ? await loadBook(bookKey) : undefined;
+  if (bookKey && !book) return { errors: ["일기장을 찾지 못했어요. 책장에서 다시 열어 주세요."], values: echo(form) };
   const snapshotId = await snapshotFor(input.tradeDate);
-  const client = await pool.connect();
   let positionId: number;
+  if (book) {
+    positionId = await bookPosition(book);
+    await query(
+      `INSERT INTO buy_entries (position_id, trade_date, quantity, price, reason, scenario, risk_1, risk_2, risk_3,
+         weight_pct, stop_price, target_price, target_basis, macro_snapshot_id, fill_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      [positionId, input.tradeDate, input.quantity, input.price, input.reason, input.scenario, ...input.risks,
+        input.weightPct, input.stopPrice, input.targetPrice, input.targetBasis, snapshotId, text(form, "fillKey") || null],
+    );
+    // 끝난 권의 옛 매수는 알림을 만들지 않고, 진행 중인 권의 가장 최근 매수만 알림을 바꿉니다.
+    const last = book.pages.filter((p) => p.side === "buy").at(-1);
+    if (!book.end && (!last || input.tradeDate >= last.day)) await replaceAlerts(positionId, book.ticker, book.name, input.stopPrice, input.targetPrice);
+    revalidatePath("/journal");
+    redirect(bookHref(book.key));
+  }
+
+  const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const existing = await client.query<{ id: number }>(
@@ -98,14 +156,56 @@ export async function createBuy(_prev: FormState, form: FormData): Promise<FormS
   redirect(`/journal/${positionId}`);
 }
 
+// 예전에 쓴 매수 일지 고치기. 종목은 그대로 두고 날짜·수량·가격과 체크리스트만 바꿉니다.
+async function updateBuy(id: number, input: BuyInput, bookKey: string): Promise<FormState> {
+  const [row] = await query<{ position_id: number }>(
+    `UPDATE buy_entries SET trade_date = $2, quantity = $3, price = $4, reason = $5, scenario = $6, risk_1 = $7, risk_2 = $8, risk_3 = $9,
+       weight_pct = $10, stop_price = $11, target_price = $12, target_basis = $13 WHERE id = $1 RETURNING position_id`,
+    [id, input.tradeDate, input.quantity, input.price, input.reason, input.scenario, ...input.risks,
+      input.weightPct, input.stopPrice, input.targetPrice, input.targetBasis],
+  );
+  if (!row) return { errors: ["고칠 매수 일지를 찾지 못했어요."] };
+  const [latest] = await query<{ id: number; ticker: string; name: string; status: string }>(
+    `SELECT b.id, p.ticker, p.name, p.status FROM buy_entries b JOIN positions p ON p.id = b.position_id
+     WHERE b.position_id = $1 ORDER BY b.trade_date DESC, b.id DESC LIMIT 1`,
+    [row.position_id],
+  );
+  if (latest?.id === id && latest.status === "open") await replaceAlerts(row.position_id, latest.ticker, latest.name, input.stopPrice, input.targetPrice);
+  revalidatePath("/journal");
+  revalidatePath(`/journal/${row.position_id}`);
+  redirect(bookKey ? bookHref(bookKey) : `/journal/${row.position_id}`);
+}
+
+type SellInput = { tradeDate: string; quantity: number; price: number; reasonType: string; reasonDetail: string; lesson: string; followed: string };
+
+function sellInput(form: FormData): SellInput {
+  return {
+    tradeDate: text(form, "tradeDate"), quantity: num(form, "quantity"), price: num(form, "price"), reasonType: text(form, "reasonType"),
+    reasonDetail: text(form, "reasonDetail"), lesson: text(form, "lesson"), followed: text(form, "followedRules"),
+  };
+}
+
+function sellErrors(s: SellInput, remaining: number | null): string[] {
+  const errors: string[] = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s.tradeDate)) errors.push("매도일을 입력하세요.");
+  if (remaining === null ? !(s.quantity > 0) : !(s.quantity > 0 && s.quantity <= remaining)) {
+    errors.push(remaining === null ? "매도 수량을 입력하세요." : `매도 수량은 0보다 크고 남은 수량(${remaining}) 이하여야 합니다.`);
+  }
+  if (!(s.price > 0)) errors.push("매도가를 입력하세요.");
+  if (!["stop", "target", "other"].includes(s.reasonType)) errors.push("매도 이유를 고르세요.");
+  if (!s.lesson) errors.push("배운 것을 적어야 합니다.");
+  if (s.followed !== "yes" && s.followed !== "no") errors.push("원칙을 지켰는지 고르세요.");
+  return errors;
+}
+
 export async function createSell(_prev: FormState, form: FormData): Promise<FormState> {
+  const input = sellInput(form);
+  const entryId = num(form, "entryId");
+  const bookKey = text(form, "bookKey");
+  if (entryId > 0) return updateSell(entryId, input, bookKey, echo(form));
+  if (bookKey) return createBookSell(input, bookKey, text(form, "fillKey"), echo(form));
   const positionId = num(form, "positionId");
-  const tradeDate = text(form, "tradeDate");
-  const quantity = num(form, "quantity");
-  const price = num(form, "price");
-  const reasonType = text(form, "reasonType");
-  const lesson = text(form, "lesson");
-  const followed = text(form, "followedRules");
+  const { tradeDate, quantity, price, reasonType, lesson, followed } = input;
 
   const toFill = (r: { trade_date: string; quantity: string; price: string }): Fill => ({
     tradeDate: r.trade_date, quantity: Number(r.quantity), price: Number(r.price),
@@ -117,13 +217,7 @@ export async function createSell(_prev: FormState, form: FormData): Promise<Form
     `SELECT ${fills} FROM sell_entries WHERE position_id = $1`, [positionId])).map(toFill);
   const remaining = remainingQuantity(buys, sells);
 
-  const errors: string[] = [];
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(tradeDate)) errors.push("매도일을 입력하세요.");
-  if (!(quantity > 0 && quantity <= remaining)) errors.push(`매도 수량은 0보다 크고 남은 수량(${remaining}) 이하여야 합니다.`);
-  if (!(price > 0)) errors.push("매도가를 입력하세요.");
-  if (!["stop", "target", "other"].includes(reasonType)) errors.push("매도 이유를 고르세요.");
-  if (!lesson) errors.push("배운 것을 적어야 합니다.");
-  if (followed !== "yes" && followed !== "no") errors.push("원칙을 지켰는지 고르세요.");
+  const errors = sellErrors(input, remaining);
   if (errors.length) return { errors, values: echo(form) };
 
   const avgBuy = averagePrice(buys);
@@ -132,7 +226,7 @@ export async function createSell(_prev: FormState, form: FormData): Promise<Form
        reason_type, reason_detail, lesson, followed_rules, macro_snapshot_id, fill_key)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
     [positionId, tradeDate, quantity, price, avgBuy, returnPct(avgBuy, price), holdingDays(buys, tradeDate),
-      reasonType, text(form, "reasonDetail"), lesson, followed === "yes", await snapshotFor(tradeDate), text(form, "fillKey") || null],
+      reasonType, input.reasonDetail, lesson, followed === "yes", await snapshotFor(tradeDate), text(form, "fillKey") || null],
   );
   if (quantity === remaining) {
     await query("UPDATE positions SET status = 'closed', closed_at = now() WHERE id = $1", [positionId]);
@@ -141,6 +235,67 @@ export async function createSell(_prev: FormState, form: FormData): Promise<Form
   revalidatePath(`/journal/${positionId}`);
   revalidatePath("/journal");
   return { errors: [] };
+}
+
+// 일기장에서 쓰는 매도 일지. 평단과 보유 기간은 그 권의 체결로 계산합니다.
+async function createBookSell(input: SellInput, bookKey: string, fillKey: string, values: Record<string, string>): Promise<FormState> {
+  const errors = sellErrors(input, null);
+  if (errors.length) return { errors, values };
+  const book = await loadBook(bookKey);
+  if (!book) return { errors: ["일기장을 찾지 못했어요. 책장에서 다시 열어 주세요."], values };
+  const page = book.pages.find((p) => p.fillKey === fillKey);
+  // 키움 기록보다 먼저 산 주식이라 평단을 모르면 수익률 0으로 둡니다.
+  const avgBuy = page?.avgCost ?? input.price;
+  const days = book.start ? Math.max(0, Math.round((Date.parse(input.tradeDate) - Date.parse(book.start)) / DAY_MS)) : 0;
+  const positionId = await bookPosition(book);
+  await query(
+    `INSERT INTO sell_entries (position_id, trade_date, quantity, price, avg_buy_price, return_pct, holding_days,
+       reason_type, reason_detail, lesson, followed_rules, macro_snapshot_id, fill_key)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [positionId, input.tradeDate, input.quantity, input.price, avgBuy, returnPct(avgBuy, input.price), days,
+      input.reasonType, input.reasonDetail, input.lesson, input.followed === "yes", await snapshotFor(input.tradeDate), fillKey || null],
+  );
+  if (book.end) {
+    await query("UPDATE positions SET status = 'closed', closed_at = COALESCE(closed_at, $2::date) WHERE id = $1", [positionId, book.end]);
+    await query("UPDATE alerts SET active = false WHERE position_id = $1 AND active", [positionId]);
+  }
+  revalidatePath("/journal");
+  redirect(bookHref(book.key));
+}
+
+// 예전에 쓴 매도 일지 고치기. 저장해 둔 평단으로 수익률을 다시 계산합니다.
+async function updateSell(id: number, input: SellInput, bookKey: string, values: Record<string, string>): Promise<FormState> {
+  const errors = sellErrors(input, null);
+  if (errors.length) return { errors, values };
+  const [row] = await query<{ position_id: number; avg_buy_price: string }>(
+    `UPDATE sell_entries SET holding_days = GREATEST(0, holding_days + ($2::date - trade_date)), trade_date = $2, quantity = $3, price = $4,
+       return_pct = ROUND(($4 - avg_buy_price) / NULLIF(avg_buy_price, 0) * 100, 2), reason_type = $5, reason_detail = $6, lesson = $7,
+       followed_rules = $8
+     WHERE id = $1 RETURNING position_id, avg_buy_price`,
+    [id, input.tradeDate, input.quantity, input.price, input.reasonType, input.reasonDetail, input.lesson, input.followed === "yes"],
+  );
+  if (!row) return { errors: ["고칠 매도 일지를 찾지 못했어요."], values };
+  revalidatePath("/journal");
+  revalidatePath(`/journal/${row.position_id}`);
+  redirect(bookKey ? bookHref(bookKey) : `/journal/${row.position_id}`);
+}
+
+// 전량 매도한 권의 사후강평. 다시 저장하면 고칩니다.
+export async function saveReview(form: FormData) {
+  const key = text(form, "bookKey");
+  if (!key || key.endsWith(":open")) return;
+  const stars = num(form, "stars");
+  const followed = text(form, "followedRules");
+  await query(
+    `INSERT INTO book_reviews (book_key, stars, followed_rules, thesis, plan, exit_timing, lesson, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+     ON CONFLICT (book_key) DO UPDATE SET stars = EXCLUDED.stars, followed_rules = EXCLUDED.followed_rules, thesis = EXCLUDED.thesis,
+       plan = EXCLUDED.plan, exit_timing = EXCLUDED.exit_timing, lesson = EXCLUDED.lesson, updated_at = now()`,
+    [key, stars >= 1 && stars <= 5 ? stars : null, followed === "yes" ? true : followed === "no" ? false : null,
+      text(form, "thesis"), text(form, "plan"), text(form, "exitTiming"), text(form, "lesson")],
+  );
+  revalidatePath("/journal/books");
+  redirect(bookHref(key));
 }
 
 // 일지에 남기지 않을 체결(예: 단타 테스트)은 목록에서 숨깁니다.

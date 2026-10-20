@@ -1,6 +1,10 @@
-"""키움 체결 내역을 30분마다 받아 매매일지에 안 적은 체결을 찾게 합니다. 처음 한 번은 최근 3개월을 받습니다."""
+"""키움 체결 내역을 30분마다 받아 매매일지에 안 적은 체결을 찾게 합니다. 처음 한 번은 최근 3개월을 받습니다.
+
+종목 일기장은 그 종목을 처음 산 날부터 봐야 해서, 그 뒤로는 30분마다 반년치씩 더 옛날 체결을 받아 옵니다.
+1년 내내 체결이 없거나 키움이 계속 거절하면 거기서 멈춥니다.
+"""
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import psycopg
@@ -15,6 +19,11 @@ RECENT_DAYS = 10
 KST = ZoneInfo("Asia/Seoul")
 # 읽는 방식을 고치면 이름을 바꿔 최근 3개월을 다시 받습니다. v2: 국내 거래종류 이름으로 거르던 것을 없앰
 BACKFILL_KEY = "fills_backfilled_v2"
+HISTORY_KEY = "fills_history"
+HISTORY_CHUNKS = 6  # 한 번에 한 달씩 여섯 번
+HISTORY_EMPTY_STOP = 12  # 열두 달 연속 체결이 없으면 더 옛날은 없다고 봅니다
+HISTORY_ERROR_STOP = 3
+HISTORY_FLOOR = date(2010, 1, 1)
 
 
 class FillsJob:
@@ -45,11 +54,42 @@ class FillsJob:
                     done[market] = True
                     db.set_setting(conn, BACKFILL_KEY, done)
                 status[market] = {"at": now.isoformat(), "ok": True, "count": len(merged)}
+                if done.get(market) and days == RECENT_DAYS:
+                    self._history(conn, market, fetch, today)
             except Exception as e:
                 log.warning("%s 체결 내역 가져오기 실패: %s", "국내" if market == "KR" else "미국", e)
                 # 화면에서 바로 보이도록 마지막 결과를 남깁니다. 키가 섞이지 않게 오류 문구만 짧게 둡니다.
                 status[market] = {"at": now.isoformat(), "ok": False, "error": str(e)[:200]}
         db.set_setting(conn, "fills_status", status)
+
+    def _history(self, conn, market: str, fetch, today: date) -> None:
+        hist = db.get_setting(conn, HISTORY_KEY) or {}
+        h = dict(hist.get(market) or {"before": (today - timedelta(days=BACKFILL_DAYS)).isoformat(), "empty": 0, "errors": 0})
+        if h.get("done"):
+            return
+        end = date.fromisoformat(h["before"]) - timedelta(days=1)
+        rows = []
+        try:
+            for _ in range(HISTORY_CHUNKS):
+                start = end - timedelta(days=30)
+                got = fetch(conn, start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+                rows += got
+                h.update(before=start.isoformat(), empty=0 if got else h.get("empty", 0) + 1, errors=0)
+                end = start - timedelta(days=1)
+                if h["empty"] >= HISTORY_EMPTY_STOP or start <= HISTORY_FLOOR:
+                    h["done"] = True
+                    break
+        except Exception as e:
+            log.warning("%s 옛날 체결 가져오기 실패: %s", "국내" if market == "KR" else "미국", e)
+            h["errors"] = h.get("errors", 0) + 1
+            h["error"] = str(e)[:200]
+            if h["errors"] >= HISTORY_ERROR_STOP:
+                h["done"] = True
+        if rows:
+            db.save_fills(conn, self._merge(rows))
+        log.info("%s 옛날 체결 %s까지 확인: %d건", "국내" if market == "KR" else "미국", h["before"], len(rows))
+        hist[market] = h
+        db.set_setting(conn, HISTORY_KEY, hist)
 
     def _kr(self, conn, start: str, end: str) -> list:
         return self.kiwoom.kr_fills(start, end)
