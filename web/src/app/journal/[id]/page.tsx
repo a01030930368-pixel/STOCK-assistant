@@ -63,7 +63,7 @@ export default async function PositionPage({ params, searchParams }: { params: P
       <h2>매수 기록</h2>
       {buys.map((b) => (
         <div className="card" key={b.id}>
-          <strong>{b.trade_day}</strong> · {won(b.quantity, 4)}주 @ {won(b.price, 2)} · 비중 {b.weight_pct}%
+          <strong>{b.trade_day}</strong> · {won(b.quantity, 4)}주 @ {won(b.price, 2)} · 비중 {b.weight_pct}% · <Link href={`/journal/books/entry?buy=${b.id}`}>고치기</Link>
           <div>매수 이유: {b.reason}</div>
           {b.scenario && <div>기대 시나리오: {b.scenario}</div>}
           <div>주요 리스크: {b.risk_1} / {b.risk_2} / {b.risk_3}</div>
@@ -86,7 +86,7 @@ export default async function PositionPage({ params, searchParams }: { params: P
       {sells.map((s) => (
         <div className="card" key={s.id}>
           <strong>{s.trade_day}</strong> · {won(s.quantity, 4)}주 @ {won(s.price, 2)} ·{" "}
-          <span className={signClass(s.return_pct)}>{s.return_pct}%</span> · 보유 {s.holding_days}일
+          <span className={signClass(s.return_pct)}>{s.return_pct}%</span> · 보유 {s.holding_days}일 · <Link href={`/journal/books/entry?sell=${s.id}`}>고치기</Link>
           <div>매도 이유: {REASON[s.reason_type]}{s.reason_detail && ` (${s.reason_detail})`}</div>
           <div>배운 것: {s.lesson}</div>
           <div>원칙 준수: {s.followed_rules ? "지켰다" : "못 지켰다"}</div>

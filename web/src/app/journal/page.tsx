@@ -3,6 +3,7 @@ import { hideFill } from "@/app/actions";
 import { query } from "@/lib/db";
 import { journalHref, sideLabel, type KiwoomFill } from "@/lib/fills";
 import { loadFills } from "@/lib/fillsData";
+import { loadBooks } from "@/lib/booksData";
 import { signClass, usd, won } from "@/lib/format";
 import Principles from "./Principles";
 import JournalTabs from "./JournalTabs";
@@ -23,6 +24,8 @@ export default async function JournalPage() {
   );
   const list = (status: string) => positions.filter((p) => p.status === status);
   const fills = await loadFills();
+  // 체결마다 그 체결이 들어 있는 일기장 한 장으로 갑니다. 보유 중 일지가 없는 매도도 여기서 쓸 수 있어요.
+  const pageOf = new Map((await loadBooks()).flatMap((b) => b.pages.map((p) => [p.id, `/journal/books/entry?${new URLSearchParams({ b: b.key, e: p.id })}`] as const)));
   const checked = await fillStatus();
   const todo = fills.filter((f) => !f.done).length;
   const SHOWN = 12;
@@ -49,14 +52,14 @@ export default async function JournalPage() {
         </p>
         {fills.length > 0 && (
           <div className="list">
-            {fills.slice(0, SHOWN).map((f) => <FillRow key={f.key} f={f} />)}
+            {fills.slice(0, SHOWN).map((f) => <FillRow key={f.key} f={f} href={pageOf.get(f.key) ?? journalHref(f)} />)}
           </div>
         )}
         {fills.length === 0 && checked.some((c) => c.ok) && <p className="muted">최근 3개월 체결이 없어요.</p>}
         {fills.length > SHOWN && (
           <details>
             <summary className="muted">나머지 {fills.length - SHOWN}건 보기</summary>
-            <div className="list">{fills.slice(SHOWN).map((f) => <FillRow key={f.key} f={f} />)}</div>
+            <div className="list">{fills.slice(SHOWN).map((f) => <FillRow key={f.key} f={f} href={pageOf.get(f.key) ?? journalHref(f)} />)}</div>
           </details>
         )}
       </section>
@@ -102,9 +105,8 @@ async function fillStatus(): Promise<Checked[]> {
     .map((m) => ({ market: m, at: time(row.value[m].at), ok: row.value[m].ok, error: row.value[m].error ?? "", count: row.value[m].count ?? null }));
 }
 
-function FillRow({ f }: { f: KiwoomFill }) {
+function FillRow({ f, href }: { f: KiwoomFill; href: string | null }) {
   const price = f.market === "US" ? usd(f.price) : `${won(f.price)}원`;
-  const href = journalHref(f);
   return (
     <div className="list-item">
       <div className="main">

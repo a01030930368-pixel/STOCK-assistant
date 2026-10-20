@@ -122,7 +122,7 @@ def test_job_backfills_three_months_then_recent(monkeypatch):
     job.run(FakeConn(), datetime(2026, 10, 20, 3, 10, tzinfo=timezone.utc))
     assert k.calls == []  # 30분이 안 지났음
     job.run(FakeConn(), datetime(2026, 10, 20, 3, 40, tzinfo=timezone.utc))
-    assert [c[1] for c in k.calls if c[0] == "kr"] == ["20261010"]
+    assert [c[1] for c in k.calls if c[0] == "kr"][0] == "20261010"
     assert [c[1] for c in k.calls if c[0] == "us"][0] == "20260720"
 
 
@@ -173,3 +173,39 @@ def test_job_falls_back_to_per_ticker_and_survives_day_errors(monkeypatch):
     FillsJob(k).run(FakeConn(), datetime(2026, 10, 20, 3, tzinfo=timezone.utc))
     assert store["fills_status"]["KR"]["ok"] and store["fills_status"]["US"]["ok"]
     assert {c[3] for c in k.calls if c[0] == "us"} == {None, "NVDA", "PLTR"}
+
+
+class HistoryKiwoom(FakeKiwoom):
+    def __init__(self, found):
+        super().__init__()
+        self.found = found
+
+    def kr_fills(self, start, end):
+        self.calls.append(("kr", start, end))
+        return [f for f in self.found if start <= f.day.strftime("%Y%m%d") <= end]
+
+    def us_fills(self, start, end, ticker=None):
+        if start < "20260701":
+            raise RuntimeError("키움 API 오류 ust21180: 조회기간 오류")
+        return []
+
+
+def test_job_walks_back_for_older_fills(monkeypatch):
+    store, saved = {"fills_backfilled_v2": {"KR": True, "US": True}}, []
+    monkeypatch.setattr("app.db.get_setting", lambda conn, key: store.get(key))
+    monkeypatch.setattr("app.db.set_setting", lambda conn, key, value: store.__setitem__(key, dict(value)))
+    monkeypatch.setattr("app.db.save_fills", lambda conn, rows: saved.extend(rows))
+    old = fills.Fill("KR", date(2026, 3, 9), "000660", "SK하이닉스", "buy", Decimal(10), Decimal(168000), None, None, "kt00015")
+    k = HistoryKiwoom([old])
+    job = FillsJob(k)
+    job.run(FakeConn(), datetime(2026, 10, 20, 3, tzinfo=timezone.utc))
+    kr = store["fills_history"]["KR"]
+    assert kr["before"] < "2026-03-09" and kr["empty"] == 1 and not kr.get("done")
+    assert old in saved
+    # 미국은 키움이 거절하므로 세 번 실패하면 더 묻지 않습니다. 국내는 열두 달 빈 뒤 멈춥니다.
+    for i in range(1, 5):
+        job.run(FakeConn(), datetime(2026, 10, 20, 3 + i, tzinfo=timezone.utc))
+    assert store["fills_history"]["US"]["done"] and store["fills_history"]["KR"]["done"]
+    calls = len(k.calls)
+    job.run(FakeConn(), datetime(2026, 10, 20, 9, tzinfo=timezone.utc))
+    assert len([c for c in k.calls[calls:] if c[0] == "kr"]) == 1  # 최근 10일만

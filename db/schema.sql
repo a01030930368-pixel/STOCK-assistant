@@ -34,7 +34,8 @@ CREATE TABLE positions (
   status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
   notes       TEXT NOT NULL DEFAULT '',
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  closed_at   TIMESTAMPTZ
+  closed_at   TIMESTAMPTZ,
+  book_key    TEXT  -- 종목 일기장에서 만든 일지면 그 일기장 키
 );
 
 -- 매수 기록. 매수 전 체크리스트 5개 항목은 모두 필수.
@@ -341,4 +342,16 @@ CREATE TABLE trade_fills (
   source      TEXT NOT NULL,
   hidden      BOOLEAN NOT NULL DEFAULT false,
   fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 종목 일기장(첫 매수부터 전량 매도까지 한 권)의 사후강평. book_key = 시장:종목:전량 매도한 날
+CREATE TABLE book_reviews (
+  book_key        TEXT PRIMARY KEY,
+  stars           INT CHECK (stars BETWEEN 1 AND 5),
+  followed_rules  BOOLEAN,
+  thesis          TEXT NOT NULL DEFAULT '',
+  plan            TEXT NOT NULL DEFAULT '',
+  exit_timing     TEXT NOT NULL DEFAULT '',
+  lesson          TEXT NOT NULL DEFAULT '',
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
