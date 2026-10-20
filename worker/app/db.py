@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from .alerts import Alert
 from .calendar import Event
@@ -570,3 +571,67 @@ def briefing_holdings(conn: psycopg.Connection) -> list[tuple[str, str, float, f
             change = (float(closes[0]) / float(closes[1]) - 1) * 100
         out.append((name, market, float(price), change, float(pnl)))
     return out
+
+
+# ---------------------------------------------------------------- 텔레그램 명령
+
+def get_setting(conn: psycopg.Connection, key: str):
+    row = conn.execute("SELECT value FROM app_settings WHERE key = %s", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def set_setting(conn: psycopg.Connection, key: str, value) -> None:
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (key, Jsonb(value)),
+    )
+
+
+def command_accounts(conn: psycopg.Connection) -> tuple[list[tuple], float]:
+    """(시장, 평가, 손익, 손익률, 예수금) 목록과 원/달러 환율"""
+    cash = {m: float(d2 if d2 is not None else dep) for m, dep, d2 in conn.execute("SELECT market, deposit, d2_deposit FROM cash_balances")}
+    out = []
+    for market, table in (("KR", "account_summary"), ("US", "us_account_summary")):
+        row = conn.execute(f"SELECT total_eval, total_pnl, total_pnl_pct FROM {table} WHERE id = 1").fetchone()
+        if row:
+            out.append((market, float(row[0]), float(row[1]), float(row[2]), cash.get(market)))
+    rate = conn.execute("SELECT exch_rate FROM us_account_summary WHERE id = 1").fetchone()
+    return out, float(rate[0]) if rate else 0.0
+
+
+def command_holdings(conn: psycopg.Connection) -> list[tuple]:
+    return [(n, m, float(p), float(r)) for n, m, p, r in conn.execute(
+        "SELECT name, market, cur_price, pnl_pct FROM holdings WHERE quantity > 0 ORDER BY market, eval_amount DESC")]
+
+
+def command_alerts(conn: psycopg.Connection) -> list[tuple]:
+    rows = conn.execute(
+        """SELECT a.name, COALESCE(h.market, w.market, 'KR'), a.kind, a.direction, a.price, COALESCE(h.cur_price, q.price)
+           FROM alerts a
+           LEFT JOIN holdings h ON h.ticker = a.ticker
+           LEFT JOIN watchlist w ON w.ticker = a.ticker
+           LEFT JOIN watch_quotes q ON q.ticker = a.ticker
+           WHERE a.active ORDER BY a.name, a.price"""
+    ).fetchall()
+    return [(n, m, k, d, float(p), float(c) if c is not None else None) for n, m, k, d, p, c in rows]
+
+
+def command_calendar(conn: psycopg.Connection, today) -> list[tuple]:
+    return conn.execute(
+        "SELECT day, title FROM calendar_events WHERE day >= %s AND day < %s + 7 ORDER BY day, kind DESC, title",
+        (today, today),
+    ).fetchall()
+
+
+def command_watch(conn: psycopg.Connection) -> list[tuple]:
+    rows = conn.execute(
+        """SELECT w.name, w.market, COALESCE(h.cur_price, q.price), q.change_pct,
+             (SELECT a.price FROM alerts a WHERE a.ticker = w.ticker AND a.kind = 'custom' AND a.active
+              ORDER BY abs(a.price - COALESCE(h.cur_price, q.price, a.price)) LIMIT 1)
+           FROM watchlist w
+           LEFT JOIN holdings h ON h.ticker = w.ticker AND h.quantity > 0
+           LEFT JOIN watch_quotes q ON q.ticker = w.ticker
+           ORDER BY w.created_at"""
+    ).fetchall()
+    f = lambda v: float(v) if v is not None else None
+    return [(n, m, f(c), f(ch), f(t)) for n, m, c, ch, t in rows]

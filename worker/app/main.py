@@ -15,6 +15,7 @@ from .intraday_job import IntradayJob
 from .ai_job import AiJob
 from .briefing_job import BriefingJob
 from .watch_job import WatchJob
+from .bot import Bot
 from .market import kr_market_open, us_market_open
 
 log = logging.getLogger("worker")
@@ -96,6 +97,7 @@ def main() -> None:
     last_macro: datetime | None = None
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:
         db.migrate(conn)
+        Bot(cfg).start()
         while True:
             now = datetime.now(timezone.utc)
             if last_macro is None or now - last_macro >= MACRO_EVERY:
