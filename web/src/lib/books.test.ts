@@ -74,6 +74,11 @@ describe("shelf helpers", () => {
     expect(onShelf(old, "all", () => true)).toBe(true);
     const [held] = buildBooks([], [{ market: "KR", ticker: "000660", name: "SK하이닉스", quantity: 2, avgPrice: 100, pnlPct: 1 }], "2026-10-20");
     expect(onShelf(held, "all", () => false)).toBe(true);
+    // 매수를 전부 '일지 안 씀'으로 넘긴 끝난 권도 숨겨요. 일지를 쓴 매수가 있으면 보여요.
+    const [joke] = buildBooks([ev("2025-03-02", "buy", 1, 10, { skipped: true }), ev("2025-03-02", "sell", 1, 12)], [], "2026-10-20");
+    expect(onShelf(joke, "all", () => false)).toBe(false);
+    const [written] = buildBooks([ev("2025-03-02", "buy", 1, 10, { skipped: true, entryId: 7 }), ev("2025-03-02", "sell", 1, 12)], [], "2026-10-20");
+    expect(onShelf(written, "all", () => false)).toBe(true);
     expect(shortDay("2026-10-02", "2026-10-20")).toBe("10-02");
     expect(shortDay("2025-10-02", "2026-10-20")).toBe("2025.10.02");
   });

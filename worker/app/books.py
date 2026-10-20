@@ -20,6 +20,7 @@ class Trade:
     quantity: Decimal
     price: Decimal
     fee: Decimal | None
+    skipped: bool = False  # 매매일지에서 '일지 안 씀'을 누른 체결
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class ClosedBook:
     return_pct: float | None
     realized: float | None
     bought: bool = True  # 이 권 안에 매수가 있는지. 매도만 있는 권(옛날에 산 것)은 일기장에 안 보여요
+    skipped: bool = False  # 매수를 전부 '일지 안 씀'으로 넘긴 권. 일기장에 안 보여요
 
 
 @dataclass(frozen=True)
@@ -69,18 +71,19 @@ def replay(trades: list[Trade], held: dict[tuple[str, str], Decimal]) -> tuple[l
         start: date | None = None
         avg, cost, pnl, fees = Decimal(0), Decimal(0), Decimal(0), Decimal(0)
         active = q > EPS
-        nbuys = 0
+        nbuys = nkept = 0
         for t in items:
             if t.side == "buy":
                 if not active:
                     active, known, start, q, avg, cost, pnl, fees = True, True, t.day, Decimal(0), Decimal(0), Decimal(0), Decimal(0), Decimal(0)
-                    nbuys = 0
+                    nbuys = nkept = 0
                 nbuys += 1
+                nkept += not t.skipped
                 avg = (q * avg + t.quantity * t.price) / (q + t.quantity)
                 q += t.quantity
             else:
                 if not active:
-                    nbuys = 0
+                    nbuys = nkept = 0
                 if not active or t.quantity > q + EPS:
                     active, known, q = True, False, t.quantity
                 one = t.quantity * (t.price - avg) if known else None
@@ -100,6 +103,6 @@ def replay(trades: list[Trade], held: dict[tuple[str, str], Decimal]) -> tuple[l
                     key, n = f"{base}#{n}", n + 1
                 used.add(key)
                 out.append(ClosedBook(key, market, ticker, t.name,
-                                      start if known else None, t.day, ret, realized, nbuys > 0))
+                                      start if known else None, t.day, ret, realized, nbuys > 0, nbuys > 0 and nkept == 0))
                 active, q, start = False, Decimal(0), None
     return out, sold

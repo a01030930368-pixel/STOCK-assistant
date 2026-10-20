@@ -10,7 +10,7 @@ type HoldingRow = { market: Market; ticker: string; name: string; quantity: stri
 export async function loadBooks(): Promise<Book[]> {
   const fills = await query<FillRow>(
     `SELECT fill_key AS key, market, to_char(trade_date, 'YYYY-MM-DD') AS day, fill_time AS time, ticker,
-       COALESCE(NULLIF(name, ''), ticker) AS name, side, quantity, price, fee
+       COALESCE(NULLIF(name, ''), ticker) AS name, side, quantity, price, fee, hidden
      FROM trade_fills ORDER BY trade_date, fill_time NULLS LAST`,
   ).catch(() => [] as FillRow[]);
   const entries = await query<EntryRow>(
