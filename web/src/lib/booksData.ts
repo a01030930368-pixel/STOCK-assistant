@@ -1,12 +1,7 @@
 import { query } from "./db";
-import { buildBooks, type Book, type BookEvent, type Holding, type Market, type Side } from "./books";
+import { attachEntries, buildBooks, findBook, type Book, type EntryRow, type FillRow, type Holding, type Market } from "./books";
 import { today } from "./format";
 
-type FillRow = {
-  key: string; market: Market; day: string; time: string | null; ticker: string; name: string; side: Side;
-  quantity: string; price: string; fee: string | null;
-};
-type EntryRow = { id: number; side: Side; fill_key: string | null; market: Market; ticker: string; name: string; day: string; quantity: string; price: string; note: string };
 type HoldingRow = { market: Market; ticker: string; name: string; quantity: string; avg_price: string; pnl_pct: string | null };
 
 // 키움 체결 전부(숨긴 것 포함, 수량을 맞추려면 다 있어야 해요)에 그날 적은 일지를 붙이고,
@@ -27,35 +22,66 @@ export async function loadBooks(): Promise<Book[]> {
   );
   const holdings = await query<HoldingRow>("SELECT market, ticker, name, quantity, avg_price, pnl_pct FROM holdings");
 
-  const used = new Set<string>();
-  const take = (pred: (e: EntryRow) => boolean) => {
-    const e = entries.find((x) => !used.has(`${x.side}:${x.id}`) && pred(x));
-    if (e) used.add(`${e.side}:${e.id}`);
-    return e;
-  };
-  const events: BookEvent[] = fills.map((f) => {
-    const e = take((x) => x.fill_key === f.key) ?? take((x) => !x.fill_key && x.side === f.side && x.ticker === f.ticker && x.day === f.day);
-    return {
-      id: f.key, market: f.market, ticker: f.ticker, name: f.name, day: f.day, time: f.time, side: f.side,
-      quantity: Number(f.quantity), price: Number(f.price), fee: f.fee === null ? null : Number(f.fee),
-      fillKey: f.key, entryId: e?.id ?? null, note: e?.note ?? null,
-    };
-  });
+  const events = attachEntries(fills, entries);
+  const used = new Set(events.flatMap((e) => e.entryIds));
   for (const e of entries) {
     if (used.has(`${e.side}:${e.id}`)) continue;
     events.push({
       id: `${e.side}:${e.id}`, market: e.market, ticker: e.ticker, name: e.name, day: e.day, time: null, side: e.side,
-      quantity: Number(e.quantity), price: Number(e.price), fee: null, fillKey: null, entryId: e.id, note: e.note,
+      quantity: Number(e.quantity), price: Number(e.price), fee: null, fillKey: null, entryId: e.id, note: e.note, entryIds: [],
     });
   }
-  return buildBooks(events, holdings.map((h): Holding => ({
+  const books = buildBooks(events.map(({ entryIds: _, ...e }) => e), holdings.map((h): Holding => ({
     market: h.market, ticker: h.ticker, name: h.name, quantity: Number(h.quantity), avgPrice: Number(h.avg_price),
     pnlPct: h.pnl_pct === null ? null : Number(h.pnl_pct),
   })), today());
+  await settlePositions(books);
+  return books;
 }
 
 export async function loadBook(key: string): Promise<Book | undefined> {
-  return (await loadBooks()).find((b) => b.key === key);
+  return findBook(await loadBooks(), key);
+}
+
+// 일기장에서 쓴 일지 묶음(positions.book_key)을 지금 권에 맞춥니다.
+// 보유 중일 때 키가 '…:open'이라, 다 판 뒤에는 끝난 권 키로 옮기고 보유 중 표시와 손절·익절 알림을 끕니다.
+// 다시 사서 새 권이 열렸는데 옛 묶음이 그대로면, 옛 일지가 새 권에 섞이지 않게 옛 권으로 옮겨요.
+async function settlePositions(books: Book[]): Promise<void> {
+  const rows = await query<{ id: number; book_key: string; first_day: string | null }>(
+    `SELECT p.id, p.book_key, to_char(LEAST(
+        (SELECT min(trade_date) FROM buy_entries b WHERE b.position_id = p.id),
+        (SELECT min(trade_date) FROM sell_entries s WHERE s.position_id = p.id)), 'YYYY-MM-DD') AS first_day
+     FROM positions p WHERE p.book_key LIKE '%:open'`,
+  ).catch(() => []);
+  for (const row of rows) {
+    const stock = row.book_key.slice(0, -":open".length);
+    const mine = books.filter((b) => `${b.market}:${b.ticker}` === stock);
+    const open = mine.find((b) => !b.end);
+    if (open && (!open.start || !row.first_day || row.first_day >= open.start)) continue;
+    const closed = mine.filter((b) => b.end && (!open?.start || b.end <= open.start)).sort((a, b) => (a.end! < b.end! ? -1 : 1));
+    const target = (row.first_day && closed.find((b) => b.end! >= row.first_day!)) || closed.at(-1);
+    if (!target) continue;
+    await moveToBook(row.id, target);
+  }
+}
+
+async function moveToBook(positionId: number, book: Book): Promise<void> {
+  await query("UPDATE alerts SET active = false WHERE position_id = $1 AND kind IN ('stop', 'target') AND active", [positionId]);
+  const [other] = await query<{ id: number }>("SELECT id FROM positions WHERE book_key = $1 AND id <> $2 LIMIT 1", [book.key, positionId]);
+  if (other) {
+    // 끝난 권에 매도 일지를 쓰며 이미 묶음이 따로 생겼으면 하나로 합칩니다.
+    await query("UPDATE buy_entries SET position_id = $1 WHERE position_id = $2", [other.id, positionId]);
+    await query("UPDATE sell_entries SET position_id = $1 WHERE position_id = $2", [other.id, positionId]);
+    await query("UPDATE alerts SET position_id = $1 WHERE position_id = $2", [other.id, positionId]);
+    await query(
+      "UPDATE positions SET notes = trim(both E'\\n' FROM notes || E'\\n' || (SELECT notes FROM positions WHERE id = $2)) WHERE id = $1",
+      [other.id, positionId]);
+    await query("DELETE FROM positions WHERE id = $1", [positionId]);
+    await query("UPDATE positions SET status = 'closed', closed_at = COALESCE(closed_at, $2::date) WHERE id = $1", [other.id, book.end]);
+  } else {
+    await query("UPDATE positions SET book_key = $2, status = 'closed', closed_at = COALESCE(closed_at, $3::date) WHERE id = $1",
+      [positionId, book.key, book.end]);
+  }
 }
 
 export type Review = { stars: number | null; followed_rules: boolean | null; thesis: string; plan: string; exit_timing: string; lesson: string; updated: string };

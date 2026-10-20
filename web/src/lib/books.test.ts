@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildBooks, onShelf, shortDay, type BookEvent, type Holding } from "./books";
+import { attachEntries, buildBooks, findBook, onShelf, shortDay, type BookEvent, type EntryRow, type FillRow, type Holding } from "./books";
 
 let n = 0;
 const ev = (day: string, side: "buy" | "sell", quantity: number, price: number, over: Partial<BookEvent> = {}): BookEvent => ({
@@ -70,5 +70,54 @@ describe("shelf helpers", () => {
     expect(onShelf(b, "open", () => false)).toBe(false);
     expect(shortDay("2026-10-02", "2026-10-20")).toBe("10-02");
     expect(shortDay("2025-10-02", "2026-10-20")).toBe("2025.10.02");
+  });
+});
+
+describe("book keys", () => {
+  it("gives a second same-day round trip its own key", () => {
+    const books = buildBooks([
+      ev("2026-10-01", "buy", 1, 100, { time: "09:01" }), ev("2026-10-01", "sell", 1, 110, { time: "09:30" }),
+      ev("2026-10-01", "buy", 1, 105, { time: "10:00" }), ev("2026-10-01", "sell", 1, 120, { time: "11:00" }),
+    ], [], "2026-10-20");
+    expect(books.map((b) => b.key)).toEqual(["KR:000660:2026-10-01", "KR:000660:2026-10-01#2"]);
+  });
+});
+
+describe("attachEntries", () => {
+  const fill = (key: string, day: string, side: "buy" | "sell", quantity: number): FillRow => ({
+    key, market: "US", day, time: null, ticker: "AAPL", name: "Apple", side, quantity: String(quantity), price: "100", fee: null,
+  });
+  const entry = (id: number, day: string, side: "buy" | "sell", note: string): EntryRow => ({
+    id, side, fill_key: null, market: "US", ticker: "AAPL", name: "Apple", day, quantity: "10", price: "100", note,
+  });
+
+  it("attaches an entry written a day off to the nearest fill instead of adding shares", () => {
+    const events = attachEntries(
+      [fill("b", "2026-10-01", "buy", 10), fill("s", "2026-10-05", "sell", 10)],
+      [entry(1, "2026-10-02", "buy", "이유")],
+    );
+    expect(events.map((e) => [e.id, e.entryId, e.note])).toEqual([["b", 1, "이유"], ["s", null, null]]);
+    const books = buildBooks(events, [], "2026-10-20");
+    expect(books.map((b) => b.end)).toEqual(["2026-10-05"]);
+  });
+
+  it("puts two entries for one combined fill on the same page", () => {
+    const events = attachEntries([fill("b", "2026-10-01", "buy", 20)],
+      [entry(1, "2026-10-01", "buy", "첫째"), entry(2, "2026-10-01", "buy", "둘째")]);
+    expect(events[0].entryIds).toEqual(["buy:1", "buy:2"]);
+    expect(events[0].note).toBe("첫째\n둘째");
+  });
+
+  it("leaves entries far from any fill for the caller to add by hand", () => {
+    const events = attachEntries([fill("b", "2026-10-01", "buy", 10)], [entry(1, "2026-09-01", "buy", "옛날")]);
+    expect(events[0].entryIds).toEqual([]);
+  });
+});
+
+describe("findBook", () => {
+  it("opens the latest book of a stock from an old open-book link", () => {
+    const books = buildBooks([ev("2026-10-01", "buy", 1, 100), ev("2026-10-05", "sell", 1, 110)], [], "2026-10-20");
+    expect(findBook(books, "KR:000660:open")?.key).toBe("KR:000660:2026-10-05");
+    expect(findBook(books, "KR:000660:2026-09-01")).toBeUndefined();
   });
 });

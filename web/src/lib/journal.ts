@@ -52,7 +52,16 @@ export function holdingDays(buys: Fill[], sellDate: string): number {
   return Math.round((Date.parse(sellDate) - Date.parse(first)) / 86_400_000);
 }
 
+// 소수점 주식(0.1 + 0.2 같은)도 다 팔면 0이 되도록 소수 6자리에서 반올림합니다.
 export function remainingQuantity(buys: Fill[], sells: Fill[]): number {
   const sum = (xs: Fill[]) => xs.reduce((s, f) => s + f.quantity, 0);
-  return sum(buys) - sum(sells);
+  return Math.round((sum(buys) - sum(sells)) * 1e6) / 1e6;
+}
+
+export const sameQuantity = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+
+// 매도 때의 평단: 그날까지 산 것들의 평균. 그 전 매수가 없으면 전체 평균입니다.
+export function averageBefore(buys: Fill[], sellDate: string): number {
+  const before = buys.filter((b) => b.tradeDate <= sellDate);
+  return averagePrice(before.length ? before : buys);
 }

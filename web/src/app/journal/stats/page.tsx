@@ -182,7 +182,9 @@ export default async function StatsPage({ searchParams }: { searchParams: Promis
   const rows = await query<Row>(
     `SELECT s.position_id, to_char(s.trade_date, 'YYYY-MM-DD') AS trade_date, p.ticker, p.name, s.return_pct, s.holding_days,
        s.reason_type, s.followed_rules, s.lesson
-     FROM sell_entries s JOIN positions p ON p.id = s.position_id ORDER BY s.trade_date DESC, s.id DESC`,
+     FROM sell_entries s JOIN positions p ON p.id = s.position_id
+     WHERE s.return_pct IS NOT NULL -- 평단을 모르는 매도는 승률·손익비에서 뺍니다
+     ORDER BY s.trade_date DESC, s.id DESC`,
   );
   const all: (Sale & { positionId: number })[] = rows.map((x) => ({
     positionId: x.position_id, tradeDate: x.trade_date, ticker: x.ticker, name: x.name, returnPct: Number(x.return_pct),
