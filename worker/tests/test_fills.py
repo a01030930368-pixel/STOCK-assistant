@@ -24,9 +24,11 @@ def test_kr_fill_uses_fill_date_and_fees():
 
 
 def test_kr_fill_skips_deposits_and_falls_back_to_amount():
-    deposit = {**KR_ROW, "trde_kind_nm": "입출금", "io_tp_nm": "입금"}
+    deposit = {**KR_ROW, "trde_kind_nm": "입출금", "io_tp_nm": "입금", "rmrk_nm": "이체입금", "stk_cd": ""}
     no_unit = {**KR_ROW, "trde_unit": "", "trde_qty_jwa_cnt": "2", "trde_amt": "000000000113800", "io_tp_nm": "매수"}
-    [f] = fills.parse_kr_fills([deposit, no_unit])
+    other_kind = {**KR_ROW, "trde_kind_nm": "장내매매"}
+    [f, g] = fills.parse_kr_fills([deposit, no_unit, other_kind])
+    assert g.side == "sell"
     assert (f.side, f.price) == ("buy", Decimal(56900))
 
 
