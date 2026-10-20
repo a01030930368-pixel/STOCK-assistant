@@ -4,12 +4,12 @@ import type {
   IChartApi, IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, ISeriesPrimitiveAxisView,
   PrimitivePaneViewZOrder, SeriesAttachedParameter, Time,
 } from "lightweight-charts";
-import { KIND_LABEL, type DoodlePoint, type Mark } from "@/lib/drawings";
+import { KIND_LABEL, markColor, type DoodlePoint, type Mark } from "@/lib/drawings";
 
 type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
-export const SUPPORT = "#86a8e6", RESIST = "#e8806f";
-const colorOf = (m: Mark) => (m.kind === "support" ? SUPPORT : RESIST);
+export { RESIST, SUPPORT } from "@/lib/drawings";
+const colorOf = markColor;
 
 export type Stroke = { id: number | null; color: string; points: DoodlePoint[] };
 export type DrawState = {

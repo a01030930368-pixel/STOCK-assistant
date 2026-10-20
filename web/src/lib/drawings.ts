@@ -1,12 +1,21 @@
 // 차트 위 그림: 지지·저항(가격 기준이라 모든 차트에 보임)과 낙서(그린 차트에서만 보임). DB와 무관한 순수 함수입니다.
 
 export type LevelKind = "support" | "resistance";
-export type Mark = { id: number; kind: LevelKind; low: number; high: number | null; memo: string; alert: boolean };
+export type Mark = { id: number; kind: LevelKind; low: number; high: number | null; memo: string; alert: boolean; color: string | null };
 // 낙서 점: [봉 키, 봉 안 위치(-0.5~0.5), 가격]. 봉 키는 일봉이면 날짜, 분봉이면 시각(초)이에요.
 export type DoodlePoint = [string, number, number];
 export type Doodle = { id: number; view: string; color: string; points: DoodlePoint[] };
 
 export const KIND_LABEL: Record<LevelKind, string> = { support: "지지", resistance: "저항" };
+export const SUPPORT = "#86a8e6", RESIST = "#e8806f";
+// 선·구간에 고를 수 있는 색. 첫 칸(null)은 지지 파랑·저항 빨강 그대로예요.
+export const COLORS: { value: string | null; label: string }[] = [
+  { value: null, label: "기본" }, { value: "#c9a96b", label: "금색" }, { value: "#7fb8a4", label: "초록" },
+  { value: "#b48ead", label: "보라" }, { value: "#e0a458", label: "주황" }, { value: "#ece8df", label: "흰색" },
+  { value: "#e8806f", label: "빨강" }, { value: "#86a8e6", label: "파랑" },
+];
+export const markColor = (m: Pick<Mark, "kind" | "color">) => m.color ?? (m.kind === "support" ? SUPPORT : RESIST);
+export const validColor = (c: unknown): c is string | null => c === null || (typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c));
 
 // 지금 가격보다 위에 그리면 저항, 아래면 지지예요.
 export function kindFor(low: number, high: number | null, current: number): LevelKind {
