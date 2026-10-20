@@ -112,7 +112,7 @@ def test_job_backfills_three_months_then_recent(monkeypatch):
     k = FakeKiwoom()
     job = FillsJob(k)
     job.run(FakeConn(), datetime(2026, 10, 20, 3, tzinfo=timezone.utc))
-    assert store["fills_backfilled"] == {"KR": True}  # 미국은 실패해서 다음에 다시 3개월
+    assert store["fills_backfilled_v2"] == {"KR": True}  # 미국은 실패해서 다음에 다시 3개월
     assert store["fills_status"]["KR"]["ok"] and not store["fills_status"]["US"]["ok"]
     assert "모의투자 미지원" in store["fills_status"]["US"]["error"]
     assert [c for c in k.calls if c[0] == "kr"][0][1] == "20260720"
