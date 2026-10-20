@@ -100,9 +100,12 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
      SELECT CASE WHEN kind = 'custom' THEN 'alert' ELSE kind END, price FROM alerts WHERE ticker = $1 AND active`,
     [ticker],
   )).map<Level>((l) => ({ kind: l.kind, price: Number(l.price) }));
-  const marks = (await safe<{ id: number; kind: Mark["kind"]; low: string; high: string | null; memo: string; alert: boolean }>(
-    "SELECT id, kind, low, high, memo, alert FROM chart_levels WHERE ticker = $1 ORDER BY id", [ticker],
-  )).map<Mark>((m) => ({ ...m, low: Number(m.low), high: m.high === null ? null : Number(m.high) }));
+  const marks = (await safe<{ id: number; kind: Mark["kind"]; low: string; high: string | null; memo: string; alert: boolean; color: string | null }>(
+    "SELECT id, kind, low, high, memo, alert, color FROM chart_levels WHERE ticker = $1 ORDER BY id", [ticker],
+  ).then((rows) => rows.length ? rows : safe<{ id: number; kind: Mark["kind"]; low: string; high: string | null; memo: string; alert: boolean; color: string | null }>(
+    // 워커 업데이트 전 DB에는 color 칸이 없어요.
+    "SELECT id, kind, low, high, memo, alert, NULL AS color FROM chart_levels WHERE ticker = $1 ORDER BY id", [ticker],
+  ))).map<Mark>((m) => ({ ...m, low: Number(m.low), high: m.high === null ? null : Number(m.high) }));
   const doodles = await safe<Doodle>("SELECT id, view, color, points FROM chart_doodles WHERE ticker = $1 ORDER BY id", [ticker]);
   const memos = await safe<Memo>(
     "SELECT id, to_char(day, 'YYYY-MM-DD') AS day, body FROM chart_memos WHERE ticker = $1 ORDER BY day DESC, id DESC",

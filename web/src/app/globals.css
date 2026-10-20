@@ -491,3 +491,6 @@ p.small { font-size: 0.82rem; margin: 6px 0 0; }
 .level-kind { padding: 0; font-weight: 600; }
 .level-memo { flex: 1; min-width: 120px; padding: 5px 8px; font-size: 0.82rem; }
 .level-row > .ghost:last-child { margin-left: auto; }
+.level-colors { display: inline-flex; gap: 4px; align-items: center; }
+.level-colors .dot { width: 18px; height: 18px; border-radius: 50%; padding: 0; border: 2px solid transparent; font-size: 0.6rem; line-height: 14px; color: #0b0b0d; font-weight: 700; }
+.level-colors .dot.on { border-color: var(--text, #ece8df); box-shadow: 0 0 0 1px #0b0b0d inset; }

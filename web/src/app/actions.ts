@@ -8,7 +8,7 @@ import { rulesFromForm } from "@/lib/screener";
 import { averagePrice, holdingDays, remainingQuantity, returnPct, validateBuy, type BuyInput, type Fill } from "@/lib/journal";
 import type { Book } from "@/lib/books";
 import { loadBook } from "@/lib/booksData";
-import { KIND_LABEL, validDoodle, type DoodlePoint, type LevelKind } from "@/lib/drawings";
+import { KIND_LABEL, validColor, validDoodle, type DoodlePoint, type LevelKind } from "@/lib/drawings";
 
 // values: 오류가 났을 때 입력한 값을 폼에 되돌려 주기 위해 사용합니다.
 export type FormState = { errors: string[]; values?: Record<string, string> };
@@ -509,7 +509,8 @@ export async function addLevel(input: { ticker: string; name: string; kind: Leve
   return row.id;
 }
 
-export async function updateLevel(id: number, change: { memo?: string; alert?: boolean; kind?: LevelKind; low?: number; high?: number | null }): Promise<void> {
+export async function updateLevel(id: number, change: { memo?: string; alert?: boolean; kind?: LevelKind; low?: number; high?: number | null; color?: string | null }): Promise<void> {
+  if (change.color !== undefined && validColor(change.color)) await query("UPDATE chart_levels SET color = $2 WHERE id = $1", [id, change.color]);
   // 끌어서 옮긴 가격. 구간이면 위·아래가 같이 와요.
   if (change.low !== undefined && positive(change.low) && (change.high === undefined || change.high === null || positive(change.high))) {
     await query("UPDATE chart_levels SET low = $2, high = CASE WHEN high IS NULL THEN NULL ELSE $3::numeric END, last_price = NULL WHERE id = $1",

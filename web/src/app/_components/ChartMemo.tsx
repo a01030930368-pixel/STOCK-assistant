@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
 import { addAlert, addChartMemo, addDoodle, addLevel, deleteChartMemo, deleteDoodle, deleteLevel, updateLevel } from "@/app/actions";
-import { KIND_LABEL, kindFor, moveEdge, nearest, snap, strokeDistance, thin, zone, type Doodle, type DoodlePoint, type Mark } from "@/lib/drawings";
+import { COLORS, KIND_LABEL, kindFor, markColor, moveEdge, nearest, snap, strokeDistance, thin, zone, type Doodle, type DoodlePoint, type Mark } from "@/lib/drawings";
 import { Drawings, RESIST, SUPPORT, type Stroke } from "./chartDrawings";
 import { aggregate, aggregateMinutes, bollinger, bucketOf, MINUTES, rsi, sma, type Candle, type MinuteCandle, type Period } from "@/lib/candles";
 
@@ -274,9 +274,9 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   async function saveMark(low: number, high: number | null) {
     const kind = kindFor(low, high, ref);
     const id = await addLevel({ ticker, name, kind, low, high });
-    if (id !== null) setMarks((m) => [...m, { id, kind, low, high, memo: "", alert: false }]);
+    if (id !== null) setMarks((m) => [...m, { id, kind, low, high, memo: "", alert: false, color: null }]);
   }
-  function changeMark(id: number, change: Partial<Pick<Mark, "memo" | "alert" | "kind">>) {
+  function changeMark(id: number, change: Partial<Pick<Mark, "memo" | "alert" | "kind" | "color">>) {
     setMarks((ms) => ms.map((m) => (m.id === id ? { ...m, ...change } : m)));
     void updateLevel(id, change);
   }
@@ -558,10 +558,17 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           <div className="muted levels-head">내가 그린 지지·저항 · 🔔를 켜 두면 가격이 닿을 때 텔레그램으로 알려요</div>
           {[...marks].sort((a, b) => (b.high ?? b.low) - (a.high ?? a.low)).map((m) => (
             <div key={m.id} className="list-item level-row">
-              <span className={m.high === null ? "sw line" : "sw"} style={{ background: m.kind === "support" ? SUPPORT : RESIST }} />
-              <button type="button" className="ghost level-kind" style={{ color: m.kind === "support" ? SUPPORT : RESIST }} title="눌러서 지지/저항 바꾸기"
+              <span className={m.high === null ? "sw line" : "sw"} style={{ background: markColor(m) }} />
+              <button type="button" className="ghost level-kind" style={{ color: markColor(m) }} title="눌러서 지지/저항 바꾸기"
                 onClick={() => changeMark(m.id, { kind: m.kind === "support" ? "resistance" : "support" })}>{KIND_LABEL[m.kind]}</button>
               <span className="num">{m.high === null ? fmt(m.low) : `${fmt(m.low)} ~ ${fmt(m.high)}`}</span>
+              <span className="level-colors" role="radiogroup" aria-label="색">
+                {COLORS.map((c) => (
+                  <button key={c.label} type="button" role="radio" aria-checked={m.color === c.value} title={c.label}
+                    className={m.color === c.value ? "dot on" : "dot"} style={{ background: c.value ?? markColor({ kind: m.kind, color: null }) }}
+                    onClick={() => changeMark(m.id, { color: c.value })}>{c.value === null ? "기" : ""}</button>
+                ))}
+              </span>
               <input className="level-memo" defaultValue={m.memo} placeholder="메모 (예: 전고점)" maxLength={100}
                 onBlur={(e) => e.target.value.trim() !== m.memo && changeMark(m.id, { memo: e.target.value.trim() })} />
               <button type="button" className={m.alert ? "chip-btn on" : "chip-btn"} aria-pressed={m.alert} onClick={() => changeMark(m.id, { alert: !m.alert })}>

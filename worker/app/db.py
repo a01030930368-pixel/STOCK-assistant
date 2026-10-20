@@ -243,6 +243,7 @@ MIGRATIONS = [
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS chart_levels_ticker_idx ON chart_levels (ticker)",
+    "ALTER TABLE chart_levels ADD COLUMN IF NOT EXISTS color TEXT",
     """CREATE TABLE IF NOT EXISTS chart_doodles (
       id          SERIAL PRIMARY KEY,
       ticker      TEXT NOT NULL,

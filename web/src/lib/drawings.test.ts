@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { kindFor, moveEdge, nearest, snap, strokeDistance, thin, validDoodle, zone, type Mark } from "./drawings";
+import { kindFor, markColor, validColor, moveEdge, nearest, snap, strokeDistance, thin, validDoodle, zone, type Mark } from "./drawings";
 
-const mark = (id: number, low: number, high: number | null = null): Mark => ({ id, kind: "support", low, high, memo: "", alert: false });
+const mark = (id: number, low: number, high: number | null = null): Mark => ({ id, kind: "support", low, high, memo: "", alert: false, color: null });
 
 describe("drawings", () => {
   it("picks support or resistance from the current price", () => {
@@ -46,5 +46,13 @@ describe("drawings", () => {
     expect(moveEdge(mark(1, 10), "low", 12)).toMatchObject({ low: 12, high: null });
     expect(moveEdge(mark(1, 10, 20), "high", 25)).toMatchObject({ low: 10, high: 25 });
     expect(moveEdge(mark(1, 10, 20), "high", 5)).toMatchObject({ low: 5, high: 10 });
+  });
+
+  it("uses the picked color or the kind's color", () => {
+    expect(markColor({ kind: "support", color: null })).toBe("#86a8e6");
+    expect(markColor({ kind: "resistance", color: "#c9a96b" })).toBe("#c9a96b");
+    expect(validColor("#C9A96B")).toBe(true);
+    expect(validColor(null)).toBe(true);
+    expect(validColor("red")).toBe(false);
   });
 });

@@ -372,6 +372,7 @@ CREATE TABLE chart_levels (
   low         NUMERIC(18, 4) NOT NULL,
   high        NUMERIC(18, 4),
   memo        TEXT NOT NULL DEFAULT '',
+  color       TEXT,                            -- 직접 고른 색. 없으면 지지 파랑, 저항 빨강
   alert       BOOLEAN NOT NULL DEFAULT false,  -- 가격이 닿으면 텔레그램
   last_price  NUMERIC(18, 4),                  -- 워커가 지난번에 본 가격(닿았는지 판단용)
   alerted_at  TIMESTAMPTZ,
