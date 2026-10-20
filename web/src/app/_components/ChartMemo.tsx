@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
 import { addAlert, addChartMemo, addDoodle, addLevel, deleteChartMemo, deleteDoodle, deleteLevel, updateLevel } from "@/app/actions";
-import { KIND_LABEL, kindFor, nearest, strokeDistance, thin, zone, type Doodle, type DoodlePoint, type Mark } from "@/lib/drawings";
+import { KIND_LABEL, kindFor, moveEdge, nearest, snap, strokeDistance, thin, zone, type Doodle, type DoodlePoint, type Mark } from "@/lib/drawings";
 import { Drawings, RESIST, SUPPORT, type Stroke } from "./chartDrawings";
 import { aggregate, aggregateMinutes, bollinger, bucketOf, MINUTES, rsi, sma, type Candle, type MinuteCandle, type Period } from "@/lib/candles";
 
@@ -76,6 +76,10 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   const [tool, setTool] = useState<Tool>("none");
   const [pending, setPending] = useState<number | null>(null);
   const [drawShown, setDrawShown] = useState(true);
+  const [magnet, setMagnet] = useState(true);
+  const magnetRef = useRef(magnet);
+  magnetRef.current = magnet;
+  const dragged = useRef(false); // 끌기가 막 끝났으면 그 클릭은 메모·알림 칸에 넣지 않아요
   const toolRef = useRef<Tool>(tool);
   toolRef.current = tool;
   const pendingRef = useRef<number | null>(pending);
@@ -216,6 +220,10 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
 
       chart.subscribeCrosshairMove((p: MouseEventParams<Time>) => setHover(p.time ? index.get(String(p.time)) ?? null : null));
       chart.subscribeClick((p: MouseEventParams<Time>) => {
+        if (dragged.current) {
+          dragged.current = false;
+          return;
+        }
         const b = p.time === undefined ? undefined : bars[index.get(String(p.time)) ?? -1];
         if (b) setDay(b.day > today ? today : b.day);
         // 누른 높이의 가격을 알림 가격 칸에 넣습니다. 현재가보다 높으면 "위로", 낮으면 "아래로".
@@ -261,6 +269,8 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   }, [tool]);
 
   const ref = current ?? (bars.length ? bars[bars.length - 1].close : 0);
+  const refPrice = useRef(ref);
+  refPrice.current = ref;
   async function saveMark(low: number, high: number | null) {
     const kind = kindFor(low, high, ref);
     const id = await addLevel({ ticker, name, kind, low, high });
@@ -304,13 +314,113 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
       if (m) removeMark(m.id);
     }
   }
+  // 자석: 누른 자리 근처 캔들의 꼬리·몸통(시·고·저·종) 가격에 붙여요.
+  // near가 있으면 그 봉 양옆 한 개씩을 먼저(넉넉하게), 없으면 화면에 보이는 봉 전체를(좁게) 봐요.
+  function snapAt(y: number, x: number | null, raw: number): number {
+    const chart = chartRef.current, price = priceRef.current;
+    if (!magnetRef.current || !chart || !price || !bars.length) return tickRound(raw, market);
+    const toY = (v: number) => price.priceToCoordinate(v);
+    const ohlc = (from: number, to: number) => bars.slice(Math.max(0, from), Math.min(bars.length, to + 1)).flatMap((b) => [b.open, b.high, b.low, b.close]);
+    const logical = x === null ? null : chart.timeScale().coordinateToLogical(x);
+    if (logical !== null) {
+      const i = Math.round(logical);
+      const hit = snap(y, ohlc(i - 1, i + 1), toY, 14);
+      if (hit !== null) return hit;
+    }
+    const range = chart.timeScale().getVisibleLogicalRange();
+    const hit = range ? snap(y, ohlc(Math.floor(range.from), Math.ceil(range.to)), toY, 6) : null;
+    return hit ?? tickRound(raw, market);
+  }
   // 도구를 고른 동안은 차트 위에 얇은 막을 덮어 누른 자리를 직접 받아요(차트는 빠른 두 번 누름을 놓쳐서).
   function tap(e: React.PointerEvent<HTMLDivElement>) {
     const r = e.currentTarget.getBoundingClientRect();
     const [x, y] = [e.clientX - r.left, e.clientY - r.top];
     const at = priceRef.current?.coordinateToPrice(y) ?? null;
-    if (at !== null && at > 0) drawAt(tickRound(at, market), x, y);
+    if (at !== null && at > 0) drawAt(toolRef.current === "eraser" ? at : snapAt(y, x, at), x, y);
   }
+
+  // 오른쪽 가격 칸 가까이에서 선(구간이면 위·아래 끝)을 잡고 위아래로 끌면 옮겨져요.
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    let drag: { id: number; edge: "low" | "high"; mark: Mark } | null = null;
+    const pos = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      return [e.clientX - r.left, e.clientY - r.top] as const;
+    };
+    const grab = (e: PointerEvent) => {
+      const chart = chartRef.current, d = drawRef.current;
+      if (!chart || !d || toolRef.current !== "none" || !drawShownRef.current) return null;
+      const [x, y] = pos(e);
+      if (x < chart.timeScale().width() - 90) return null;
+      const reach = e.pointerType === "touch" ? 16 : 9;
+      let best: { id: number; edge: "low" | "high"; mark: Mark; gap: number } | null = null;
+      for (const m of marksRef.current) {
+        for (const edge of (m.high === null ? ["low"] : ["high", "low"]) as ("low" | "high")[]) {
+          const ey = d.y(edge === "high" ? m.high! : m.low);
+          if (ey === null) continue;
+          const gap = Math.abs(ey - y);
+          if (gap <= reach && (!best || gap < best.gap)) best = { id: m.id, edge, mark: m, gap };
+        }
+      }
+      return best;
+    };
+    const down = (e: PointerEvent) => {
+      const g = grab(e);
+      if (!g) return;
+      drag = { id: g.id, edge: g.edge, mark: g.mark };
+      e.preventDefault();
+      e.stopPropagation();
+      chartRef.current?.applyOptions({ handleScroll: false, handleScale: false });
+      el.setPointerCapture(e.pointerId);
+    };
+    const move = (e: PointerEvent) => {
+      if (!drag) {
+        el.style.cursor = grab(e) ? "ns-resize" : "";
+        return;
+      }
+      const [x, y] = pos(e);
+      const raw = priceRef.current?.coordinateToPrice(y) ?? null;
+      if (raw === null || raw <= 0) return;
+      // 오른쪽 끝에서 끄는 거라 근처 봉이 아니라 화면에 보이는 봉 전체의 꼬리·몸통에 붙여요.
+      drag.mark = moveEdge(drag.mark, drag.edge, snapAt(y, x < (chartRef.current?.timeScale().width() ?? 0) - 90 ? x : null, raw));
+      if (drag.mark.high !== null && drag.edge === "high" && drag.mark.high < drag.mark.low) drag.edge = "low";
+      const next = marksRef.current.map((m) => (m.id === drag!.id ? drag!.mark : m));
+      marksRef.current = next;
+      drawRef.current?.set({ marks: next });
+    };
+    const up = () => {
+      if (!drag) return;
+      const m = drag.mark;
+      // 구간 끝을 서로 넘겨 끌었을 수 있어서, 위·아래는 저장 전에 다시 맞춰요.
+      const fixed = m.high === null ? m : { ...m, low: Math.min(m.low, m.high), high: Math.max(m.low, m.high) };
+      const kind = kindFor(fixed.low, fixed.high, refPrice.current);
+      drag = null;
+      dragged.current = true;
+      setTimeout(() => (dragged.current = false), 400);
+      chartRef.current?.applyOptions({ handleScroll: true, handleScale: true });
+      setMarks((ms) => ms.map((x) => (x.id === fixed.id ? { ...fixed, kind } : x)));
+      void updateLevel(fixed.id, { low: fixed.low, high: fixed.high, kind });
+    };
+    // 폰에서 끄는 동안 화면이 같이 스크롤되지 않게
+    const touch = (e: TouchEvent) => drag && e.preventDefault();
+    el.addEventListener("pointerdown", down, true);
+    el.addEventListener("pointermove", move, true);
+    el.addEventListener("pointerup", up, true);
+    el.addEventListener("pointercancel", up, true);
+    el.addEventListener("touchstart", touch, { capture: true, passive: false });
+    el.addEventListener("touchmove", touch, { capture: true, passive: false });
+    return () => {
+      el.removeEventListener("pointerdown", down, true);
+      el.removeEventListener("pointermove", move, true);
+      el.removeEventListener("pointerup", up, true);
+      el.removeEventListener("pointercancel", up, true);
+      el.removeEventListener("touchstart", touch, true);
+      el.removeEventListener("touchmove", touch, true);
+    };
+    // 상태는 ref로 읽어서, 차트 상자가 바뀔 때만 다시 붙입니다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bars.length >= 2, big]);
   // 낙서: 누른 자리(화면 좌표)를 봉 키·봉 안 위치·가격으로 바꿔 둡니다.
   function toPoint(x: number, y: number): DoodlePoint | null {
     const chart = chartRef.current, price = priceRef.current;
@@ -381,6 +491,8 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
               <button key={t.key} type="button" className={tool === t.key ? "chip-btn on" : "chip-btn"} aria-pressed={tool === t.key}
                 onClick={() => { setTool(tool === t.key ? "none" : t.key); setDrawShown(true); }}>{t.label}</button>
             ))}
+            <button type="button" className={magnet ? "chip-btn on" : "chip-btn"} aria-pressed={magnet} title="캔들 꼬리·몸통에 붙이기"
+              onClick={() => setMagnet((v) => !v)}>🧲 자석</button>
             <button type="button" className={drawShown ? "chip-btn" : "chip-btn on"} aria-pressed={!drawShown} onClick={() => setDrawShown((v) => !v)}>
               {drawShown ? "그림 숨기기" : "그림 보이기"}
             </button>
@@ -436,7 +548,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           </div>
         )}
         <p className="chart-foot">
-          휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 지지·저항은 모든 차트에, 낙서는 그린 차트에만 보여요. 차트:{" "}
+          휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 지지·저항은 모든 차트에, 낙서는 그린 차트에만 보여요. 선·구간 끝은 오른쪽 가격 칸 가까이에서 잡고 위아래로 끌면 옮겨지고, 🧲 자석이 켜져 있으면 캔들 꼬리·몸통에 붙어요. 차트:{" "}
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a> Lightweight Charts
         </p>
       </div>
