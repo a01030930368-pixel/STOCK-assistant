@@ -462,3 +462,17 @@ h2 .muted { font-weight: 400; font-size: 0.8rem; margin-left: 8px; }
 }
 .fee-tiles { margin-bottom: 16px; }
 @media (max-width: 640px) { .stats.fee-tiles { grid-template-columns: 1fr; } }
+
+/* 통계 · 사후강평 모아 보기 */
+.stats.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.month-bars .star-lab { fill: var(--accent); font-size: 12px; }
+.lessons { display: grid; gap: 10px; align-content: start; }
+.lessons .panel-title { margin: 0; }
+.lesson { display: grid; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 11px 14px; color: var(--fg); }
+.lesson:hover { text-decoration: none; border-color: #4a3f28; }
+.lesson-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.lesson-top b { font-weight: 600; }
+.lesson-day { margin-left: auto; font-size: 0.82rem; }
+.lesson-text { line-height: 1.55; }
+p.small { font-size: 0.82rem; margin: 6px 0 0; }
+@media (max-width: 720px) { .stats.four { grid-template-columns: 1fr 1fr; } }
