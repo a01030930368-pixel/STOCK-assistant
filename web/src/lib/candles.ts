@@ -38,6 +38,19 @@ export function sma(values: number[], n: number): (number | null)[] {
   });
 }
 
+// 볼린저 밴드: 가운데는 n일 이동평균, 위·아래는 표준편차의 k배. 증권사 HTS 기본값(20, 2)과 같아요.
+export function bollinger(values: number[], n = 20, k = 2): ({ mid: number; upper: number; lower: number } | null)[] {
+  const mid = sma(values, n);
+  return values.map((_, i) => {
+    const m = mid[i];
+    if (m === null) return null;
+    let sq = 0;
+    for (let j = i - n + 1; j <= i; j++) sq += (values[j] - m) ** 2;
+    const sd = Math.sqrt(sq / n);
+    return { mid: m, upper: m + k * sd, lower: m - k * sd };
+  });
+}
+
 // 와일더 방식 RSI. 증권사 HTS와 같은 계산입니다.
 export function rsi(values: number[], n = 14): (number | null)[] {
   const out: (number | null)[] = values.map(() => null);

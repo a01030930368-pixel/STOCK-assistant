@@ -3,14 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
 import { addAlert, addChartMemo, deleteChartMemo } from "@/app/actions";
-import { aggregate, aggregateMinutes, bucketOf, MINUTES, rsi, sma, type Candle, type MinuteCandle, type Period } from "@/lib/candles";
+import { aggregate, aggregateMinutes, bollinger, bucketOf, MINUTES, rsi, sma, type Candle, type MinuteCandle, type Period } from "@/lib/candles";
 
 export type { Candle, MinuteCandle };
 export type Memo = { id: number; day: string; body: string };
 export type Trade = { day: string; side: "buy" | "sell"; price: number; quantity: number };
 export type Level = { kind: "avg" | "stop" | "target" | "alert"; price: number };
 
-const UP = "#e8806f", DOWN = "#86a8e6", GOLD = "#c9a96b", MUTED = "#9b968b", LINE = "#1b1b1f";
+const UP = "#e8806f", DOWN = "#86a8e6", GOLD = "#c9a96b", MUTED = "#9b968b", LINE = "#1b1b1f", BAND = "#a7a08f";
 const MAS = [
   { n: 5, color: GOLD },
   { n: 20, color: "#b48ead" },
@@ -54,7 +54,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   const intraday = !["D", "W", "M"].includes(view);
   const period: Period = intraday ? "D" : (view as Period);
   const [range, setRange] = useState<Range>("6m");
-  const [show, setShow] = useState({ ma: true, volume: true, rsi: false, trades: true, memos: true, levels: true });
+  const [show, setShow] = useState({ ma: true, bb: false, volume: true, rsi: false, trades: true, memos: true, levels: true });
   const [big, setBig] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const [day, setDay] = useState(today);
@@ -77,6 +77,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   }, [candles, minutes, view, intraday, period, market]);
   const closes = useMemo(() => bars.map((b) => b.close), [bars]);
   const maValues = useMemo(() => MAS.map((m) => sma(closes, m.n)), [closes]);
+  const bands = useMemo(() => bollinger(closes), [closes]);
   const memosByBar = useMemo(() => {
     const map = new Map<string, Memo[]>();
     if (intraday) return map;
@@ -127,6 +128,14 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           const s = chart!.addSeries(lc.LineSeries, { color: m.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
           s.setData(bars.flatMap((b, i) => (maValues[k][i] === null ? [] : [{ time: b.time, value: maValues[k][i]! }])));
         });
+      }
+
+      if (show.bb) {
+        // 볼린저 밴드(20, 2): 위·아래 선은 실선, 가운데 20일선은 점선
+        for (const [k, style] of [["upper", lc.LineStyle.Solid], ["mid", lc.LineStyle.Dashed], ["lower", lc.LineStyle.Solid]] as const) {
+          const s = chart.addSeries(lc.LineSeries, { color: BAND, lineWidth: 1, lineStyle: style, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+          s.setData(bars.flatMap((b, i) => (bands[i] === null ? [] : [{ time: b.time, value: bands[i]![k] }])));
+        }
       }
 
       let pane = 1;
@@ -197,7 +206,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     };
     // fmt·period는 bars·market과 함께 바뀌므로 의존성에서 뺍니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars, show, levels, trades, memosByBar, maValues, closes, today, big, intraday]);
+  }, [bars, show, levels, trades, memosByBar, maValues, bands, closes, today, big, intraday]);
 
   useEffect(() => {
     if (chartRef.current) applyRange(chartRef.current, bars, intraday ? "intraday" : range);
@@ -227,7 +236,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
             {RANGES.map((r) => <button key={r.key} type="button" aria-selected={range === r.key} onClick={() => setRange(r.key)}>{r.label}</button>)}
           </div>
           <div className="chart-toggles">
-            {([["ma", "이동평균"], ["volume", "거래량"], ["rsi", "RSI"], ["trades", "매매"], ["levels", "평단·손절·알림"], ["memos", "메모"]] as const).map(([k, label]) => (
+            {([["ma", "이동평균"], ["bb", "볼린저"], ["volume", "거래량"], ["rsi", "RSI"], ["trades", "매매"], ["levels", "평단·손절·알림"], ["memos", "메모"]] as const).map(([k, label]) => (
               <button key={k} type="button" className={show[k] ? "chip-btn on" : "chip-btn"} aria-pressed={show[k]} onClick={() => toggle(k)}>{label}</button>
             ))}
             <button type="button" className="chip-btn" onClick={() => setBig((b) => !b)}>{big ? "닫기 ✕" : "크게 보기"}</button>
@@ -257,6 +266,11 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
                   {MAS.map((m, k) => maValues[k][i] !== null && (
                     <span key={m.n} style={{ color: m.color }}>{m.n}{intraday ? "봉" : "일"} {fmt(maValues[k][i]!)}</span>
                   ))}
+                </div>
+              )}
+              {show.bb && bands[i] && (
+                <div>
+                  <span style={{ color: BAND }}>볼린저(20, 2) 위 {fmt(bands[i]!.upper)} · 가운데 {fmt(bands[i]!.mid)} · 아래 {fmt(bands[i]!.lower)}</span>
                 </div>
               )}
               {barMemos.map((m) => <div key={m.id} className="tip-memo">{md(m.day)} {m.body}</div>)}

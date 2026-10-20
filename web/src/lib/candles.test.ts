@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregate, aggregateMinutes, bucketOf, rsi, sma, wallClock, type Candle, type MinuteCandle } from "./candles";
+import { aggregate, aggregateMinutes, bollinger, bucketOf, rsi, sma, wallClock, type Candle, type MinuteCandle } from "./candles";
 
 const c = (day: string, open: number, high: number, low: number, close: number, volume: number | null = 10): Candle => ({ day, open, high, low, close, volume });
 
@@ -19,6 +19,13 @@ describe("candles", () => {
     const d = [c("2026-10-13", 10, 12, 9, 11), c("2026-10-14", 11, 15, 10, 14)];
     aggregate(d, "W");
     expect(d[0].high).toBe(12);
+  });
+
+  it("computes bollinger bands", () => {
+    const [a, b, c] = bollinger([2, 4, 4], 2, 2);
+    expect(a).toBeNull();
+    expect(b).toEqual({ mid: 3, upper: 5, lower: 1 });
+    expect(c).toEqual({ mid: 4, upper: 4, lower: 4 });
   });
 
   it("computes sma and rsi", () => {
