@@ -355,3 +355,9 @@ CREATE TABLE book_reviews (
   lesson          TEXT NOT NULL DEFAULT '',
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 날마다 내 돈 전체(원화 환산). 주간 성적표에서 지난주와 비교할 때 써요.
+CREATE TABLE asset_history (
+  day    DATE PRIMARY KEY,
+  total  NUMERIC(20, 2) NOT NULL
+);

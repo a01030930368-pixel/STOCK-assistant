@@ -17,12 +17,15 @@ class BriefingJob:
         self.http = http
 
     def run(self, conn: psycopg.Connection, now: datetime | None = None) -> None:
+        now = now or datetime.now(timezone.utc)
+        # 주간 성적표에서 지난주와 비교하려고 텔레그램이 없어도 날마다 내 돈 전체를 적어 둡니다.
+        db.record_assets(conn, now.astimezone(briefing.KST).date())
         if not (self.cfg.telegram_bot_token and self.cfg.telegram_chat_id):
             return
-        now = now or datetime.now(timezone.utc)
         self._evening(conn, now)
         self._earnings_eve(conn, now)
         self._reviews(conn, now)
+        self._weekly(conn, now)
         self._morning(conn, now)
 
     def _send(self, text: str) -> None:
@@ -69,6 +72,30 @@ class BriefingJob:
             self._send(briefing.review_message(book))
             log.info("%s 사후강평 알림을 보냈습니다", book.name)
             db.mark_notice(conn, key)
+
+    def _weekly(self, conn: psycopg.Connection, now: datetime) -> None:
+        start = briefing.weekly_due(now)
+        if start is None:
+            return
+        key = f"weekly:{start.isoformat()}"
+        if db.notice_sent(conn, key):
+            return
+        end = start + timedelta(days=6)
+        total, last_total, moves, events = db.weekly_inputs(conn, start, end)
+        trades, held, reviewed = db.review_inputs(conn)
+        closed_all, sold = books.replay(trades, held)
+        week = [t for t in trades if start <= t.day <= end]
+        realized: dict[str, float] = {}
+        for s in sold:
+            if start <= s.day <= end and s.pnl is not None:
+                realized[s.market] = realized.get(s.market, 0.0) + s.pnl
+        closed = [(b.name, b.return_pct) for b in closed_all if start <= b.end <= end]
+        unreviewed = sum(1 for b in closed_all if b.key not in reviewed and b.end > end - timedelta(days=30))
+        self._send(briefing.weekly_message(briefing.Week(
+            start, total, last_total, moves, sum(t.side == "buy" for t in week), sum(t.side == "sell" for t in week),
+            realized, closed, unreviewed, events)))
+        log.info("주간 성적표를 보냈습니다")
+        db.mark_notice(conn, key)
 
     def _morning(self, conn: psycopg.Connection, now: datetime) -> None:
         day = briefing.morning_due(now)
