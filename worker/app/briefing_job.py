@@ -67,7 +67,8 @@ class BriefingJob:
         today = day - timedelta(days=1)
         trades, held, reviewed = db.review_inputs(conn)
         for book in books.closed_books(trades, held):
-            if not (today - timedelta(days=7) <= book.end < today) or book.key in reviewed:
+            # 매도만 있는 권(키움 기록보다 먼저 산 주식)은 일기장에 안 보이므로 알리지 않아요.
+            if not book.bought or not (today - timedelta(days=7) <= book.end < today) or book.key in reviewed:
                 continue
             key = f"review:{book.key}"
             if db.notice_sent(conn, key):
