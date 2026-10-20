@@ -25,6 +25,17 @@ describe("weights", () => {
       "현금이 11.6%로 최소 15%보다 적어요.",
     ]);
   });
+  it("adds the ISA account as its own slice even for a stock also in the regular account", () => {
+    const isa = weights([...H, { ticker: "000660", name: "SK하이닉스", market: "ISA", evalAmount: 1_180_000, pnlPct: 5, sector: "전기전자" }], 1_400, 600_000, 300);
+    expect(isa.total).toBe(10_000_000);
+    expect(isa.stocks.filter((s) => s.label.startsWith("SK")).map((s) => [s.key, s.label])).toEqual([["000660", "SK하이닉스"], ["ISA:000660", "SK하이닉스 (ISA)"]]);
+    expect(isa.markets.map((m) => m.label)).toEqual(["국내", "해외", "ISA", "현금"]);
+  });
+  it("does not hold an index ETF to the one-stock limit and groups it as ETF", () => {
+    const etf = weights([{ ticker: "360750", name: "TIGER 미국S&P500", market: "ISA", evalAmount: 5_000_000, pnlPct: 7, sector: null }, H[0]], 1_400, 0, 0);
+    expect(etf.sectors.map((s) => s.label)).toEqual(["ETF", "전기전자"]);
+    expect(breaches(etf, { sectorMax: 100, stockMax: 20, cashMin: 0 })).toEqual(["SK하이닉스 비중이 44.4%로 한 종목 한도 20%를 넘었어요."]);
+  });
   it("is empty without anything", () => {
     expect(weights([], 1400, 0, 0).total).toBe(0);
   });

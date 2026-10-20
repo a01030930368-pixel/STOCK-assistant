@@ -60,12 +60,13 @@ def balance_text(accounts: list[Account], usd_krw: float) -> str:
     lines = ["[잔고]"]
     total = 0.0
     for a in accounts:
-        rate = 1.0 if a.market == "KR" else usd_krw
+        rate = usd_krw if a.market == "US" else 1.0
         total += (a.total_eval + (a.cash or 0)) * rate
-        label = "국내" if a.market == "KR" else "해외"
-        lines.append(f"· {label} 주식 {money(a.market, a.total_eval)} ({pct(a.total_pnl_pct)}, {money(a.market, a.total_pnl)})")
+        label = {"KR": "국내", "US": "해외"}.get(a.market, a.market)
+        cur = "US" if a.market == "US" else "KR"  # ISA는 원화 계좌예요
+        lines.append(f"· {label} 주식 {money(cur, a.total_eval)} ({pct(a.total_pnl_pct)}, {money(cur, a.total_pnl)})")
         if a.cash is not None:
-            lines.append(f"  예수금 {money(a.market, a.cash)}")
+            lines.append(f"  예수금 {money(cur, a.cash)}")
     lines.insert(1, f"총자산 {won(total)}" + (" (달러는 원화로 환산)" if usd_krw and any(a.market == "US" for a in accounts) else ""))
     return "\n".join(lines)
 

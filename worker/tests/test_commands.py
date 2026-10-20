@@ -17,6 +17,9 @@ def test_balance_converts_dollars():
     assert "총자산 4,180,000원" in text
     assert "· 해외 주식 $1,000.00 (-4.76%, $-50.00)" in text
     assert "예수금 500,000원" in text
+    isa = commands.balance_text([Account("KR", 1_000_000, 0, 0, None), Account("ISA", 3_000_000, 200_000, 7.14, 50_000)], 1_400)
+    assert "총자산 4,050,000원" in isa
+    assert "· ISA 주식 3,000,000원 (+7.14%, 200,000원)" in isa
 
 
 def test_lists():

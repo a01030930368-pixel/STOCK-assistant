@@ -539,6 +539,7 @@ def sector_due(conn: psycopg.Connection, max_age_days: int = 7) -> list[tuple[st
     return conn.execute(
         """SELECT s.ticker, s.name, s.market FROM (
              SELECT ticker, name, market FROM holdings WHERE quantity > 0
+             UNION SELECT ticker, name, 'KR' FROM isa_holdings WHERE quantity > 0
              UNION SELECT ticker, name, market FROM watchlist) s
            LEFT JOIN stock_sectors x ON x.ticker = s.ticker
            WHERE x.ticker IS NULL OR x.sector = '' OR x.fetched_at < now() - make_interval(days => %s)
@@ -817,11 +818,13 @@ def events_on(conn: psycopg.Connection, day) -> list[tuple[str, str, str]]:
 USD_KRW = """COALESCE(NULLIF((SELECT exch_rate FROM us_account_summary WHERE id = 1), 0),
      (SELECT value FROM macro_indicators WHERE code = 'usdkrw'), 0)"""
 
-# 내 돈 전체(원): 국내·미국 주식 평가 + 예수금. 예수금은 /잔고와 같이 D+2 값(없으면 지금 값), 달러는 원화로 바꿉니다.
+# 내 돈 전체(원): 국내·미국·ISA 주식 평가 + 예수금. 예수금은 /잔고와 같이 D+2 값(없으면 지금 값), 달러는 원화로 바꿉니다.
 TOTAL_KRW = f"""SELECT COALESCE((SELECT total_eval FROM account_summary WHERE id = 1), 0)
      + COALESCE((SELECT total_eval FROM us_account_summary WHERE id = 1), 0) * {USD_KRW}
      + COALESCE((SELECT sum(COALESCE(d2_deposit, deposit)) FROM cash_balances WHERE currency = 'KRW'), 0)
-     + COALESCE((SELECT sum(COALESCE(d2_deposit, deposit)) FROM cash_balances WHERE currency = 'USD'), 0) * {USD_KRW}"""
+     + COALESCE((SELECT sum(COALESCE(d2_deposit, deposit)) FROM cash_balances WHERE currency = 'USD'), 0) * {USD_KRW}
+     + COALESCE((SELECT total_eval FROM isa_summary WHERE id = 1), 0)
+     + COALESCE((SELECT COALESCE(d2_deposit, deposit) FROM isa_cash WHERE id = 1), 0)"""
 
 
 def earnings_eve(conn: psycopg.Connection, day) -> list[tuple[str, tuple]]:
@@ -862,7 +865,8 @@ def weekly_inputs(conn: psycopg.Connection, start, end):
     moves = conn.execute(
         """SELECT h.name, (SELECT close FROM price_history p WHERE p.ticker = h.ticker AND p.day <= %s ORDER BY day DESC LIMIT 1),
                   (SELECT close FROM price_history p WHERE p.ticker = h.ticker AND p.day < %s ORDER BY day DESC LIMIT 1)
-           FROM holdings h WHERE h.quantity > 0""",
+           FROM (SELECT ticker, name FROM holdings WHERE quantity > 0
+                 UNION SELECT ticker, name || ' (ISA)' FROM isa_holdings WHERE quantity > 0) h""",
         (end, start),
     ).fetchall()
     events = conn.execute(
@@ -878,8 +882,9 @@ def review_inputs(conn: psycopg.Connection):
     from .books import Trade
 
     trades = [Trade(*r) for r in conn.execute(
-        """SELECT market, ticker, COALESCE(NULLIF(name, ''), ticker), trade_date, fill_time, side, quantity, price, fee
-           FROM trade_fills"""
+        """SELECT market, ticker, COALESCE(NULLIF(name, ''), ticker), trade_date, fill_time, side, quantity, price, fee,
+                  hidden AND NOT EXISTS (SELECT 1 FROM buy_entries b WHERE b.fill_key = f.fill_key)
+           FROM trade_fills f"""
     ).fetchall()]
     held = {(m, t): q for m, t, q in conn.execute("SELECT market, ticker, quantity FROM holdings").fetchall()}
     reviewed = {r[0] for r in conn.execute("SELECT book_key FROM book_reviews").fetchall()}
@@ -954,13 +959,22 @@ def command_accounts(conn: psycopg.Connection) -> tuple[list[tuple], float]:
         elif market in cash:
             # 주식은 없어도 예수금만 있는 계좌도 총자산에 넣습니다.
             out.append((market, 0.0, 0.0, 0.0, cash[market]))
+    isa = conn.execute("SELECT total_eval, total_pnl, total_pnl_pct FROM isa_summary WHERE id = 1").fetchone()
+    isa_cash = conn.execute("SELECT COALESCE(d2_deposit, deposit) FROM isa_cash WHERE id = 1").fetchone()
+    if isa or isa_cash:
+        out.append(("ISA", *(float(v) for v in (isa or (0, 0, 0))), float(isa_cash[0]) if isa_cash else None))
     rate = conn.execute(f"SELECT {USD_KRW}").fetchone()
     return out, float(rate[0]) if rate else 0.0
 
 
 def command_holdings(conn: psycopg.Connection) -> list[tuple]:
+    # 국내, ISA, 미국 순서. ISA 종목은 이름 뒤에 (ISA)를 붙여 일반 계좌와 구분합니다.
     return [(n, m, float(p), float(r)) for n, m, p, r in conn.execute(
-        "SELECT name, market, cur_price, pnl_pct FROM holdings WHERE quantity > 0 ORDER BY market, eval_amount DESC")]
+        """SELECT name, market, cur_price, pnl_pct FROM (
+             SELECT name, market, cur_price, pnl_pct, eval_amount, CASE market WHEN 'KR' THEN 0 ELSE 2 END AS o
+               FROM holdings WHERE quantity > 0
+             UNION ALL SELECT name || ' (ISA)', 'KR', cur_price, pnl_pct, eval_amount, 1 FROM isa_holdings WHERE quantity > 0) h
+           ORDER BY o, eval_amount DESC""")]
 
 
 def command_alerts(conn: psycopg.Connection) -> list[tuple]:

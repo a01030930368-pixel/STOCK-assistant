@@ -67,8 +67,8 @@ class BriefingJob:
         today = day - timedelta(days=1)
         trades, held, reviewed = db.review_inputs(conn)
         for book in books.closed_books(trades, held):
-            # 매도만 있는 권(키움 기록보다 먼저 산 주식)은 일기장에 안 보이므로 알리지 않아요.
-            if not book.bought or not (today - timedelta(days=7) <= book.end < today) or book.key in reviewed:
+            # 매도만 있는 권(키움 기록보다 먼저 산 주식)과 '일지 안 씀'으로 넘긴 권은 일기장에 안 보이므로 알리지 않아요.
+            if not book.bought or book.skipped or not (today - timedelta(days=7) <= book.end < today) or book.key in reviewed:
                 continue
             key = f"review:{book.key}"
             if db.notice_sent(conn, key):
@@ -95,7 +95,7 @@ class BriefingJob:
             if start <= s.day <= end and s.pnl is not None:
                 realized[s.market] = realized.get(s.market, 0.0) + s.pnl
         closed = [(b.name, b.return_pct) for b in closed_all if start <= b.end <= end]
-        unreviewed = sum(1 for b in closed_all if b.key not in reviewed and b.end > end - timedelta(days=30))
+        unreviewed = sum(1 for b in closed_all if b.bought and not b.skipped and b.key not in reviewed and b.end > end - timedelta(days=30))
         if not self._send(briefing.weekly_message(briefing.Week(
                 start, total, last_total, moves, sum(t.side == "buy" for t in week), sum(t.side == "sell" for t in week),
                 realized, closed, unreviewed, events))):

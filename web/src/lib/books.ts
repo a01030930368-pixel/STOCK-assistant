@@ -12,11 +12,12 @@ export type BookEvent = {
   fillKey: string | null;
   entryId: number | null; // 그날 적은 매수·매도 일지
   note: string | null; // 매수 이유 또는 매도 때 배운 것
+  skipped?: boolean; // 매매일지에서 '일지 안 씀'을 누른 체결
 };
 
 export type FillRow = {
   key: string; market: Market; day: string; time: string | null; ticker: string; name: string; side: Side;
-  quantity: string; price: string; fee: string | null;
+  quantity: string; price: string; fee: string | null; hidden?: boolean;
 };
 export type EntryRow = { id: number; side: Side; fill_key: string | null; market: Market; ticker: string; name: string; day: string; quantity: string; price: string; note: string };
 
@@ -157,7 +158,7 @@ const dayGap = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b))
 export function attachEntries(fills: FillRow[], entries: EntryRow[]): (BookEvent & { entryIds: string[] })[] {
   const events = fills.map((f) => ({
     id: f.key, market: f.market, ticker: f.ticker, name: f.name, day: f.day, time: f.time, side: f.side,
-    quantity: Number(f.quantity), price: Number(f.price), fee: f.fee === null ? null : Number(f.fee),
+    quantity: Number(f.quantity), price: Number(f.price), fee: f.fee === null ? null : Number(f.fee), skipped: f.hidden === true,
     fillKey: f.key, entryId: null as number | null, note: null as string | null, entryIds: [] as string[],
   }));
   const attach = (ev: (typeof events)[number], e: EntryRow) => {
@@ -192,9 +193,15 @@ export function findBook(books: Book[], key: string | undefined): Book | undefin
 // 강평을 이미 썼으면 그대로 보여 줘요.
 export const sellOnly = (b: Book) => b.end !== null && b.buys === 0;
 
+// 매수를 전부 매매일지에서 '일지 안 씀'으로 넘긴 끝난 권(장난으로 친 단타 같은 것). 일지를 한 장이라도 썼으면 남겨요.
+export const skipped = (b: Book) => {
+  const buys = b.pages.filter((p) => p.side === "buy");
+  return b.end !== null && buys.length > 0 && buys.every((p) => p.skipped && p.entryId === null);
+};
+
 export type Shelf = "all" | "open" | "closed" | "unreviewed";
 export function onShelf(b: Book, shelf: Shelf, reviewed: (key: string) => boolean): boolean {
-  if (sellOnly(b) && !reviewed(b.key)) return false;
+  if ((sellOnly(b) || skipped(b)) && !reviewed(b.key)) return false;
   if (shelf === "open") return b.end === null;
   if (shelf === "closed") return b.end !== null;
   if (shelf === "unreviewed") return b.end !== null && !reviewed(b.key);

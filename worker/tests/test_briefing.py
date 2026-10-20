@@ -129,7 +129,13 @@ def test_closed_books_match_the_web_diary():
     assert (b.key, b.start, b.realized, b.return_pct) == ("KR:000660:2026-10-14", date(2026, 8, 4), realized, round(realized / (15 * 172500) * 100, 2))
     [old] = closed_books([_t("2026-08-01", "sell", 3, 50000)], {})
     assert (old.start, old.realized, old.return_pct, old.bought) == (None, None, None, False)
-    assert b.bought
+    assert b.bought and not b.skipped
+    # '일지 안 씀'을 누른 단타는 매수가 전부 넘겨졌으니 일기장·알림에서 빠져요. 하나라도 남기면 그대로예요.
+    from dataclasses import replace
+    buy, sell = _t("2025-03-02", "buy", 1, 100), _t("2025-03-02", "sell", 1, 110)
+    [joke] = closed_books([replace(buy, skipped=True), sell], {})
+    [kept] = closed_books([replace(buy, skipped=True), _t("2025-03-02", "buy", 1, 100), _t("2025-03-03", "sell", 2, 110)], {})
+    assert joke.skipped and not kept.skipped
 
 
 def test_review_reminder_once_after_full_sell(monkeypatch):

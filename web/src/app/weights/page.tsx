@@ -6,7 +6,7 @@ import { breaches, CASH, weights, type HoldingIn, type Limits, type Part } from 
 
 export const dynamic = "force-dynamic";
 
-type Row = { ticker: string; name: string; market: "KR" | "US"; eval_amount: string; pnl_pct: string; auto: string | null; custom: string | null };
+type Row = { ticker: string; name: string; market: "KR" | "US" | "ISA"; eval_amount: string; pnl_pct: string; auto: string | null; custom: string | null };
 
 const safe = <T,>(sql: string, params: unknown[] = []) => query<T>(sql, params).catch(() => [] as T[]);
 const DEFAULT_LIMITS: Limits = { sectorMax: 40, stockMax: 20, cashMin: 10 };
@@ -56,11 +56,16 @@ function Donut({ title, parts, center }: { title: string; parts: (Part & { color
 }
 
 export default async function WeightsPage() {
+  // ISA 계좌 종목도 함께 넣습니다(같은 종목이 일반 계좌에도 있으면 따로 한 조각씩).
   const rows = await safe<Row>(
     `SELECT h.ticker, h.name, h.market, h.eval_amount, h.pnl_pct, s.sector AS auto, s.custom
-     FROM holdings h LEFT JOIN stock_sectors s ON s.ticker = h.ticker WHERE h.quantity > 0`,
+     FROM (SELECT ticker, name, market, eval_amount, pnl_pct FROM holdings WHERE quantity > 0
+           UNION ALL SELECT ticker, name, 'ISA', eval_amount, pnl_pct FROM isa_holdings WHERE quantity > 0) h
+     LEFT JOIN stock_sectors s ON s.ticker = h.ticker`,
   ).then((r) => r.length ? r : safe<Row>("SELECT ticker, name, market, eval_amount, pnl_pct, NULL AS auto, NULL AS custom FROM holdings WHERE quantity > 0"));
-  const cash = await safe<{ market: string; deposit: string; d2_deposit: string | null }>("SELECT market, deposit, d2_deposit FROM cash_balances");
+  const cash = await safe<{ market: string; deposit: string; d2_deposit: string | null }>(
+    "SELECT market, deposit, d2_deposit FROM cash_balances UNION ALL SELECT 'ISA', deposit, d2_deposit FROM isa_cash",
+  );
   const [saved] = await safe<{ value: Limits }>("SELECT value FROM app_settings WHERE key = 'weight_limits'");
   const limits = { ...DEFAULT_LIMITS, ...(saved?.value ?? {}) };
   const left = (m: string) => { const c = cash.find((x) => x.market === m); return c ? Number(c.d2_deposit ?? c.deposit) : 0; };
@@ -69,7 +74,7 @@ export default async function WeightsPage() {
   const holdings: HoldingIn[] = rows.map((r) => ({
     ticker: r.ticker, name: r.name, market: r.market, evalAmount: Number(r.eval_amount), pnlPct: Number(r.pnl_pct), sector: r.custom || r.auto || null,
   }));
-  const w = weights(holdings, rate, left("KR"), left("US"));
+  const w = weights(holdings, rate, left("KR") + left("ISA"), left("US"));
   const warnings = breaches(w, limits);
   const missingRate = rate === 0 && (holdings.some((h) => h.market === "US") || left("US") > 0);
 
@@ -95,7 +100,7 @@ export default async function WeightsPage() {
           {missingRate && <p className="muted">환율을 아직 못 받아서 미국 종목이 0원으로 계산됐어요. 미국장 잔고를 한 번 불러오면 바로 맞춰져요.</p>}
           <div className="donuts">
             <Donut title="업종" parts={slices(w.sectors, "그 밖 업종")} center={`${w.sectors.filter((s) => s.key !== CASH).length}개 업종`} />
-            <Donut title="국내 · 해외 · 현금" parts={w.markets.map((m) => ({ ...m, color: m.key === "KR" ? COLORS[0] : m.key === "US" ? COLORS[2] : CASH_COLOR }))} center={krw(w.total)} />
+            <Donut title={w.markets.some((m) => m.key === "ISA") ? "국내 · ISA · 해외 · 현금" : "국내 · 해외 · 현금"} parts={w.markets.map((m) => ({ ...m, color: m.key === "KR" ? COLORS[0] : m.key === "ISA" ? COLORS[1] : m.key === "US" ? COLORS[2] : CASH_COLOR }))} center={krw(w.total)} />
             <Donut title="종목" parts={slices(w.stocks.map(({ key, label, amount, pct }) => ({ key: key === CASH ? CASH : key, label, amount, pct })), "그 밖 종목")} center={`${holdings.length}종목`} />
           </div>
 
@@ -111,11 +116,12 @@ export default async function WeightsPage() {
               <div className="panel-title">종목별 업종 <span className="muted">국내는 키움, 미국은 Finnhub에서 자동으로 받아요. 바꾸고 싶으면 고쳐 쓰세요.</span></div>
               <div className="list">
                 {w.stocks.filter((s) => s.market !== "CASH").map((s) => {
-                  const r = rows.find((x) => x.ticker === s.key)!;
+                  const ticker = s.key.replace(/^ISA:/, "");
+                  const r = rows.find((x) => x.ticker === ticker)!;
                   return (
                     <form key={s.key} action={saveSector} className="list-item sector-row">
-                      <input type="hidden" name="ticker" value={s.key} />
-                      <input type="hidden" name="market" value={s.market} />
+                      <input type="hidden" name="ticker" value={ticker} />
+                      <input type="hidden" name="market" value={s.market === "US" ? "US" : "KR"} />
                       <span className="main"><b>{s.label}</b> <span className="muted num">{s.pct}%</span></span>
                       <input name="sector" defaultValue={r.custom ?? ""} placeholder={r.auto || "자동 이름 받는 중"} maxLength={30} aria-label={`${s.label} 업종`} />
                       <button type="submit" className="ghost">저장</button>
@@ -125,7 +131,7 @@ export default async function WeightsPage() {
               </div>
             </div>
           </div>
-          <p className="muted">비중은 평가금액 기준이고, 미국 종목과 달러 예수금은 키움 환율로 원화로 바꿔 합쳐요. 예수금은 D+2 기준이에요.</p>
+          <p className="muted">비중은 평가금액 기준이고, 미국 종목과 달러 예수금은 키움 환율로 원화로 바꿔 합쳐요. 예수금은 D+2 기준이에요. ISA 계좌도 함께 넣었고, ETF는 여러 종목 묶음이라 한 종목·업종 한도에서 빼요.</p>
         </>
       )}
     </>
