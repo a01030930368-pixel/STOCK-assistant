@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
-import { addChartMemo, deleteChartMemo } from "@/app/actions";
+import { addAlert, addChartMemo, deleteChartMemo } from "@/app/actions";
 import { aggregate, aggregateMinutes, bucketOf, MINUTES, rsi, sma, type Candle, type MinuteCandle, type Period } from "@/lib/candles";
 
 export type { Candle, MinuteCandle };
 export type Memo = { id: number; day: string; body: string };
 export type Trade = { day: string; side: "buy" | "sell"; price: number; quantity: number };
-export type Level = { kind: "avg" | "stop" | "target"; price: number };
+export type Level = { kind: "avg" | "stop" | "target" | "alert"; price: number };
 
 const UP = "#e8806f", DOWN = "#86a8e6", GOLD = "#c9a96b", MUTED = "#9b968b", LINE = "#1b1b1f";
 const MAS = [
@@ -33,14 +33,22 @@ const RANGES = [
   { key: "all", label: "전체", months: 0 },
 ] as const;
 type Range = (typeof RANGES)[number]["key"];
-const LEVEL = { avg: { label: "평단", color: GOLD }, stop: { label: "손절", color: DOWN }, target: { label: "목표", color: UP } };
+const LEVEL = { avg: { label: "평단", color: GOLD }, stop: { label: "손절", color: DOWN }, target: { label: "목표", color: UP }, alert: { label: "알림", color: "#ece8df" } };
+
+// 국내 호가 단위로 맞춥니다. 미국은 센트까지.
+export function tickRound(v: number, market: string): number {
+  if (market === "US") return Math.round(v * 100) / 100;
+  const tick = v < 2000 ? 1 : v < 5000 ? 5 : v < 20000 ? 10 : v < 50000 ? 50 : v < 200000 ? 100 : v < 500000 ? 500 : 1000;
+  return Math.round(v / tick) * tick;
+}
 
 const md = (day: string) => `${Number(day.slice(5, 7))}.${Number(day.slice(8, 10))}`;
 const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
 const compact = (v: number) => (v >= 1e12 ? `${(v / 1e12).toFixed(1)}조` : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v.toLocaleString("ko-KR"));
 
-export default function ChartMemo({ ticker, market, candles, minutes, memos, trades, levels, today }: {
-  ticker: string; market: string; candles: Candle[]; minutes: MinuteCandle[]; memos: Memo[]; trades: Trade[]; levels: Level[]; today: string;
+export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current }: {
+  ticker: string; name: string; market: string; candles: Candle[]; minutes: MinuteCandle[]; memos: Memo[]; trades: Trade[]; levels: Level[]; today: string;
+  current: number | null;
 }) {
   const [view, setView] = useState<View>("D");
   const intraday = !["D", "W", "M"].includes(view);
@@ -50,6 +58,8 @@ export default function ChartMemo({ ticker, market, candles, minutes, memos, tra
   const [big, setBig] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const [day, setDay] = useState(today);
+  const [pick, setPick] = useState<string>("");
+  const [way, setWay] = useState<"above" | "below">("above");
   const box = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const rangeRef = useRef<Range>(range);
@@ -169,6 +179,14 @@ export default function ChartMemo({ ticker, market, candles, minutes, memos, tra
       chart.subscribeClick((p: MouseEventParams<Time>) => {
         const b = p.time === undefined ? undefined : bars[index.get(String(p.time)) ?? -1];
         if (b) setDay(b.day > today ? today : b.day);
+        // 누른 높이의 가격을 알림 가격 칸에 넣습니다. 현재가보다 높으면 "위로", 낮으면 "아래로".
+        const at = p.point ? price.coordinateToPrice(p.point.y) : null;
+        if (at !== null && at > 0) {
+          const v = tickRound(at, market);
+          setPick(String(v));
+          const ref = current ?? bars[bars.length - 1].close;
+          setWay(v >= ref ? "above" : "below");
+        }
       });
       applyRange(chart, bars, intraday ? "intraday" : rangeRef.current);
     })();
@@ -209,7 +227,7 @@ export default function ChartMemo({ ticker, market, candles, minutes, memos, tra
             {RANGES.map((r) => <button key={r.key} type="button" aria-selected={range === r.key} onClick={() => setRange(r.key)}>{r.label}</button>)}
           </div>
           <div className="chart-toggles">
-            {([["ma", "이동평균"], ["volume", "거래량"], ["rsi", "RSI"], ["trades", "매매"], ["levels", "평단·손절·목표"], ["memos", "메모"]] as const).map(([k, label]) => (
+            {([["ma", "이동평균"], ["volume", "거래량"], ["rsi", "RSI"], ["trades", "매매"], ["levels", "평단·손절·알림"], ["memos", "메모"]] as const).map(([k, label]) => (
               <button key={k} type="button" className={show[k] ? "chip-btn on" : "chip-btn"} aria-pressed={show[k]} onClick={() => toggle(k)}>{label}</button>
             ))}
             <button type="button" className="chip-btn" onClick={() => setBig((b) => !b)}>{big ? "닫기 ✕" : "크게 보기"}</button>
@@ -247,10 +265,26 @@ export default function ChartMemo({ ticker, market, candles, minutes, memos, tra
           </div>
         )}
         <p className="chart-foot">
-          휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 날짜를 누르면 아래 메모 날짜가 바뀌어요. 차트:{" "}
+          휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 차트:{" "}
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a> Lightweight Charts
         </p>
       </div>
+
+      <form action={addAlert} className="memo-form alert-form" onSubmit={() => setTimeout(() => setPick(""), 0)}>
+        <input type="hidden" name="ticker" value={ticker} />
+        <input type="hidden" name="name" value={name} />
+        <div className="segment" role="radiogroup" aria-label="알림 방향">
+          {(["above", "below"] as const).map((w) => (
+            <button key={w} type="button" role="radio" aria-selected={way === w} aria-checked={way === w} onClick={() => setWay(w)}>
+              {w === "above" ? "위로 가면" : "아래로 가면"}
+            </button>
+          ))}
+        </div>
+        <input type="hidden" name="direction" value={way} />
+        <input name="price" inputMode="decimal" placeholder="알림 가격 (차트를 눌러도 돼요)" value={pick} onChange={(e) => setPick(e.target.value)} required />
+        <input name="memo" placeholder="메모 (선택)" maxLength={200} />
+        <button type="submit">텔레그램 알림 만들기</button>
+      </form>
 
       <form action={addChartMemo} className="row memo-form">
         <input type="hidden" name="ticker" value={ticker} />

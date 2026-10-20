@@ -27,6 +27,7 @@ class ResearchJob:
         self.dart_codes: dict[str, str] = {}
         self.sec_ciks: dict[str, int] = {}
         self.codes_at: datetime | None = None
+        self.tried_prices: set[str] = set()
 
     @property
     def user_agent(self) -> str:
@@ -43,6 +44,7 @@ class ResearchJob:
             self._fundamentals(conn, now)
             self._calendar(conn, now)
             self._prices(conn, now)
+        self._new_prices(conn, now)
 
     def _try(self, what: str, fn) -> None:
         # 한 종목·한 출처가 실패해도 나머지는 계속 모읍니다.
@@ -81,6 +83,18 @@ class ResearchJob:
         # 차트용 1년치 일봉 종가를 12시간마다 다시 받아 빈 날을 채웁니다.
         base = now.astimezone(KST).strftime("%Y%m%d")
         for ticker, name, market in db.watched_stocks(conn):
+            if market == "KR" and self.kiwoom:
+                self._try(f"{name} 일봉", lambda: db.save_prices(conn, ticker, self.kiwoom.kr_daily(ticker, base)))
+            elif market == "US":
+                self._try(f"{ticker} 일봉", lambda: db.save_prices(conn, ticker, prices.us_daily(ticker, self.http)))
+
+    def _new_prices(self, conn: psycopg.Connection, now: datetime) -> None:
+        # 새로 넣은 관심종목은 12시간을 기다리지 않고 바로 일봉을 받아 차트가 보이게 합니다.
+        base = now.astimezone(KST).strftime("%Y%m%d")
+        for ticker, name, market in db.unpriced_stocks(conn):
+            if ticker in self.tried_prices:
+                continue
+            self.tried_prices.add(ticker)
             if market == "KR" and self.kiwoom:
                 self._try(f"{name} 일봉", lambda: db.save_prices(conn, ticker, self.kiwoom.kr_daily(ticker, base)))
             elif market == "US":

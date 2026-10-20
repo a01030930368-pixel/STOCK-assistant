@@ -183,6 +183,10 @@ MIGRATIONS = [
       custom      TEXT,
       fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
+    """CREATE TABLE IF NOT EXISTS app_settings (
+      key    TEXT PRIMARY KEY,
+      value  JSONB NOT NULL
+    )""",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -247,11 +251,20 @@ def save_indicators(conn: psycopg.Connection, indicators: list[Indicator]) -> No
 
 
 def watched_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
-    """뉴스·실적·재무를 모을 종목: 보유 종목과 매매일지에서 보유 중인 종목. (ticker, name, market)"""
+    """뉴스·실적·재무·차트를 모을 종목: 보유 종목, 매매일지에서 보유 중인 종목, 관심종목. (ticker, name, market)"""
     return conn.execute(
         """SELECT ticker, name, market FROM holdings
            UNION SELECT ticker, name, market FROM positions WHERE status = 'open'
+           UNION SELECT ticker, name, market FROM watchlist
            ORDER BY ticker"""
+    ).fetchall()
+
+
+def unpriced_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
+    """일봉이 하나도 없는 관심종목. (ticker, name, market)"""
+    return conn.execute(
+        """SELECT w.ticker, w.name, w.market FROM watchlist w
+           WHERE NOT EXISTS (SELECT 1 FROM price_history p WHERE p.ticker = w.ticker) ORDER BY w.ticker"""
     ).fetchall()
 
 

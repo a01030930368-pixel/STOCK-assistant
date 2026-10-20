@@ -2,6 +2,7 @@ import Link from "next/link";
 import { query } from "@/lib/db";
 import { signClass } from "@/lib/format";
 import Principles from "./Principles";
+import JournalTabs from "./JournalTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,10 @@ export default async function JournalPage() {
 
   return (
     <>
-      <h1>매매일지</h1>
+      <div className="board-head">
+        <h1>매매일지</h1>
+        <JournalTabs on="list" />
+      </div>
       <Principles editable />
       <p><Link href="/journal/buy">+ 매수 기록하기</Link></p>
       {(["open", "closed"] as const).map((status) => (

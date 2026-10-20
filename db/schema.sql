@@ -308,3 +308,9 @@ CREATE TABLE stock_sectors (
   custom      TEXT,
   fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 화면 설정 (예: 비중 한도 {"sectorMax":40,"stockMax":20,"cashMin":10})
+CREATE TABLE app_settings (
+  key    TEXT PRIMARY KEY,
+  value  JSONB NOT NULL
+);

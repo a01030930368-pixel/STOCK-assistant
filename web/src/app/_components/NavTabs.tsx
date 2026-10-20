@@ -7,12 +7,14 @@ const ICON = {
   journal: "M6 3h10l4 4v14H6zM9 9h6M9 13h8M9 17h5",
   macro: "M4 19V9M10 19V5M16 19v-7M22 19H2",
   calendar: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
+  star: "M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z",
   search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
 };
 
 const TABS = [
-  { href: "/", label: "포트폴리오", icon: ICON.home, match: (p: string) => p === "/" || p.startsWith("/stock") },
+  { href: "/", label: "포트폴리오", icon: ICON.home, match: (p: string) => p === "/" || p.startsWith("/stock") || p.startsWith("/weights") },
   { href: "/journal", label: "매매일지", icon: ICON.journal, match: (p: string) => p.startsWith("/journal") },
+  { href: "/watch", label: "관심종목", icon: ICON.star, match: (p: string) => p.startsWith("/watch") },
   { href: "/screener", label: "검색기", icon: ICON.search, match: (p: string) => p.startsWith("/screener") },
   { href: "/calendar", label: "일정", icon: ICON.calendar, match: (p: string) => p.startsWith("/calendar") },
   { href: "/macro", label: "매크로", icon: ICON.macro, match: (p: string) => p.startsWith("/macro") },
