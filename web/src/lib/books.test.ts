@@ -68,6 +68,12 @@ describe("shelf helpers", () => {
     expect(onShelf(b, "unreviewed", () => false)).toBe(true);
     expect(onShelf(b, "unreviewed", () => true)).toBe(false);
     expect(onShelf(b, "open", () => false)).toBe(false);
+    // 산 기록 없이 판 것만 있는 끝난 권은 숨기고, 강평을 썼으면 보여요. 아직 들고 있는 권은 그대로예요.
+    const [old] = buildBooks([ev("2025-05-11", "sell", 1, 48)], [], "2026-10-20");
+    expect(onShelf(old, "all", () => false)).toBe(false);
+    expect(onShelf(old, "all", () => true)).toBe(true);
+    const [held] = buildBooks([], [{ market: "KR", ticker: "000660", name: "SK하이닉스", quantity: 2, avgPrice: 100, pnlPct: 1 }], "2026-10-20");
+    expect(onShelf(held, "all", () => false)).toBe(true);
     expect(shortDay("2026-10-02", "2026-10-20")).toBe("10-02");
     expect(shortDay("2025-10-02", "2026-10-20")).toBe("2025.10.02");
   });

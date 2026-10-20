@@ -188,8 +188,13 @@ export function findBook(books: Book[], key: string | undefined): Book | undefin
   return books.filter((b) => `${b.market}:${b.ticker}` === stock).sort((a, b) => ((a.end ?? "9999") < (b.end ?? "9999") ? -1 : 1)).at(-1);
 }
 
+// 매도만 있고 그 앞 매수는 키움 기록에도 일지에도 없는 끝난 권(오래전에 산 주식). 언제 샀는지 몰라 책장에서 뺍니다.
+// 강평을 이미 썼으면 그대로 보여 줘요.
+export const sellOnly = (b: Book) => b.end !== null && b.buys === 0;
+
 export type Shelf = "all" | "open" | "closed" | "unreviewed";
 export function onShelf(b: Book, shelf: Shelf, reviewed: (key: string) => boolean): boolean {
+  if (sellOnly(b) && !reviewed(b.key)) return false;
   if (shelf === "open") return b.end === null;
   if (shelf === "closed") return b.end !== null;
   if (shelf === "unreviewed") return b.end !== null && !reviewed(b.key);
