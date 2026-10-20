@@ -16,7 +16,7 @@ export default async function JournalPage() {
   const positions = await query<Row>(
     `SELECT p.id, p.ticker, p.name, p.market, p.status,
        to_char(GREATEST(MAX(b.trade_date), MAX(s.trade_date)), 'YYYY-MM-DD') AS last_trade,
-       ROUND(SUM(s.return_pct * s.quantity) / NULLIF(SUM(s.quantity), 0), 2) AS total_return
+       ROUND(SUM(s.return_pct * s.quantity) / NULLIF(SUM(CASE WHEN s.return_pct IS NOT NULL THEN s.quantity END), 0), 2) AS total_return
      FROM positions p
      LEFT JOIN buy_entries b ON b.position_id = p.id
      LEFT JOIN sell_entries s ON s.position_id = p.id

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { saveReview } from "@/app/actions";
-import { onShelf, shortDay, type Book, type Page, type Shelf } from "@/lib/books";
+import { findBook, onShelf, shortDay, type Book, type Page, type Shelf } from "@/lib/books";
 import { buyPlans, loadBooks, loadReviews, type Review } from "@/lib/booksData";
 import { signClass, today, usd, won } from "@/lib/format";
 import JournalTabs from "../JournalTabs";
@@ -23,7 +23,7 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
   const [books, reviews] = await Promise.all([loadBooks(), loadReviews()]);
   const day = today();
   const shown = books.filter((b) => onShelf(b, shelf, (k) => reviews.has(k)));
-  const open = books.find((b) => b.key === params.b);
+  const open = findBook(books, params.b);
   const href = (q: { b?: string; s?: Shelf }) => {
     const sp = new URLSearchParams();
     if (q.b) sp.set("b", q.b);

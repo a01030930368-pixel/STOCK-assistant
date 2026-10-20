@@ -47,7 +47,7 @@ def due(levels: list[Level], prices: dict[str, Decimal], now: datetime) -> list[
         if lv.ticker not in prices:
             continue
         cur = prices[lv.ticker]
-        if lv.last_price == cur:
+        if cur <= 0 or lv.last_price == cur:
             continue
         fresh = lv.alerted_at is None or now - lv.alerted_at >= COOLDOWN
         out.append((lv, cur, lv.alert and fresh and touched(lv, cur)))

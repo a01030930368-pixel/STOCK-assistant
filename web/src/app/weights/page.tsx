@@ -1,3 +1,4 @@
+import { usdKrw } from "@/lib/fx";
 import Link from "next/link";
 import { saveLimits, saveSector } from "@/app/actions";
 import { query } from "@/lib/db";
@@ -59,19 +60,18 @@ export default async function WeightsPage() {
     `SELECT h.ticker, h.name, h.market, h.eval_amount, h.pnl_pct, s.sector AS auto, s.custom
      FROM holdings h LEFT JOIN stock_sectors s ON s.ticker = h.ticker WHERE h.quantity > 0`,
   ).then((r) => r.length ? r : safe<Row>("SELECT ticker, name, market, eval_amount, pnl_pct, NULL AS auto, NULL AS custom FROM holdings WHERE quantity > 0"));
-  const [us] = await safe<{ exch_rate: string }>("SELECT exch_rate FROM us_account_summary WHERE id = 1");
   const cash = await safe<{ market: string; deposit: string; d2_deposit: string | null }>("SELECT market, deposit, d2_deposit FROM cash_balances");
   const [saved] = await safe<{ value: Limits }>("SELECT value FROM app_settings WHERE key = 'weight_limits'");
   const limits = { ...DEFAULT_LIMITS, ...(saved?.value ?? {}) };
   const left = (m: string) => { const c = cash.find((x) => x.market === m); return c ? Number(c.d2_deposit ?? c.deposit) : 0; };
-  const rate = us ? Number(us.exch_rate) : 0;
+  const rate = await usdKrw();
 
   const holdings: HoldingIn[] = rows.map((r) => ({
     ticker: r.ticker, name: r.name, market: r.market, evalAmount: Number(r.eval_amount), pnlPct: Number(r.pnl_pct), sector: r.custom || r.auto || null,
   }));
   const w = weights(holdings, rate, left("KR"), left("US"));
   const warnings = breaches(w, limits);
-  const missingRate = rate === 0 && holdings.some((h) => h.market === "US");
+  const missingRate = rate === 0 && (holdings.some((h) => h.market === "US") || left("US") > 0);
 
   return (
     <>

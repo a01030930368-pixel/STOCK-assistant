@@ -5,11 +5,19 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
+import threading
 import time
+from zoneinfo import ZoneInfo
 
 import httpx
 
 KST_FORMAT = "%Y%m%d%H%M%S"
+KST = ZoneInfo("Asia/Seoul")
+# 키움은 초당 요청 수를 제한합니다. 요청 사이에 이만큼 쉬고, 초과 오류면 잠깐 쉬었다 한 번 더 보냅니다.
+MIN_GAP = 0.25
+TOO_MANY = ("요청개수", "(429)")
+# 토큰이 만료되었거나 무효라는 응답이면 새로 받아 한 번 더 보냅니다.
+BAD_TOKEN = ("토큰", "token", "8005:")
 # 띄어쓰기 없이 비교합니다. 예: '[2000](501724:관련자료가없습니다)'
 NO_DATA = ("자료가없", "내역이없", "데이터가없", "조회건수가없")
 
@@ -178,11 +186,24 @@ class KiwoomClient:
         self._http = http or httpx.Client(timeout=10)
         self._token: str | None = None
         self._token_expires: datetime | None = None
+        self._lock = threading.Lock()
+        self._last_call = 0.0
+
+    def _wait_turn(self) -> None:
+        # 여러 작업이 동시에 불러도 키움 요청은 MIN_GAP 간격으로 하나씩 나갑니다.
+        with self._lock:
+            gap = MIN_GAP - (time.monotonic() - self._last_call)
+            if gap > 0:
+                time.sleep(gap)
+            self._last_call = time.monotonic()
 
     def _access_token(self) -> str:
         # 토큰은 만료 10분 전까지 재사용합니다. 재발급을 반복하면 제한에 걸립니다.
-        if self._token and self._token_expires and datetime.now() < self._token_expires - timedelta(minutes=10):
+        # expires_dt는 한국 시간이므로 지금 시각도 한국 시간으로 비교합니다(컨테이너는 UTC).
+        now = datetime.now(KST).replace(tzinfo=None)
+        if self._token and self._token_expires and now < self._token_expires - timedelta(minutes=10):
             return self._token
+        self._wait_turn()
         res = self._http.post(
             f"{self._base_url}/oauth2/token",
             headers={"Content-Type": "application/json;charset=UTF-8"},
@@ -198,6 +219,21 @@ class KiwoomClient:
         return self._token
 
     def _request(self, path: str, api_id: str, payload: dict, next_key: str | None = None) -> httpx.Response:
+        for attempt in range(3):
+            try:
+                return self._send(path, api_id, payload, next_key)
+            except RuntimeError as e:
+                text = str(e).replace(" ", "")
+                if attempt < 2 and any(word in text for word in TOO_MANY):
+                    time.sleep(1 + attempt)
+                    continue
+                if attempt == 0 and any(word in text.lower() for word in BAD_TOKEN):
+                    self._token = None
+                    continue
+                raise
+        raise AssertionError("unreachable")
+
+    def _send(self, path: str, api_id: str, payload: dict, next_key: str | None) -> httpx.Response:
         headers = {
             "Content-Type": "application/json;charset=UTF-8",
             "authorization": f"Bearer {self._access_token()}",
@@ -206,7 +242,12 @@ class KiwoomClient:
         if next_key:
             headers["cont-yn"] = "Y"
             headers["next-key"] = next_key
+        self._wait_turn()
         res = self._http.post(f"{self._base_url}{path}", headers=headers, json=payload)
+        if res.status_code == 429:
+            raise RuntimeError(f"키움 API 오류 {api_id}: 요청 개수 초과(429)")
+        if res.status_code == 401:
+            raise RuntimeError(f"키움 API 오류 {api_id}: token 401")
         res.raise_for_status()
         body = res.json()
         if str(body.get("return_code", "0")) != "0":
@@ -232,16 +273,29 @@ class KiwoomClient:
             next_key = res.headers.get("next-key", "").strip()
             if res.headers.get("cont-yn", "N").upper() != "Y" or not next_key:
                 break
-            time.sleep(0.3)
         return rows
+
+    def _post_all(self, path: str, api_id: str, payload: dict, list_key: str, max_pages: int = 10) -> dict:
+        # 첫 쪽 본문(합계 포함)에 다음 쪽들의 목록을 이어 붙입니다. 보유 종목이 많아도 빠지지 않게요.
+        res = self._request(path, api_id, payload)
+        body = res.json()
+        rows = list(body.get(list_key) or [])
+        for _ in range(max_pages - 1):
+            next_key = res.headers.get("next-key", "").strip()
+            if res.headers.get("cont-yn", "N").upper() != "Y" or not next_key:
+                break
+            res = self._request(path, api_id, payload, next_key)
+            rows.extend(res.json().get(list_key) or [])
+        body[list_key] = rows
+        return body
 
     def domestic_balance(self) -> Balance:
         # kt00018 계좌평가잔고내역요청, qry_tp=1 합산
-        return parse_balance(self._post("/api/dostk/acnt", "kt00018", {"qry_tp": "1", "dmst_stex_tp": "KRX"}))
+        return parse_balance(self._post_all("/api/dostk/acnt", "kt00018", {"qry_tp": "1", "dmst_stex_tp": "KRX"}, "acnt_evlt_remn_indv_tot"))
 
     def us_balance(self) -> UsBalance:
         # ust21070 미국주식 원장잔고확인, 빈 값이면 전체 종목
-        return parse_us_balance(self._post("/api/us/acnt", "ust21070", {"stex_tp": "", "stk_cd": ""}))
+        return parse_us_balance(self._post_all("/api/us/acnt", "ust21070", {"stex_tp": "", "stk_cd": ""}, "result_list"))
 
     def kr_cash(self) -> Cash:
         # kt00001 예수금상세현황요청, qry_tp=3 추정조회

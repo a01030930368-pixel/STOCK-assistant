@@ -1,22 +1,19 @@
 """종목 검색기 데이터 갱신. 장중에는 30분마다, 장 마감 뒤 한 번 더 국내 거래대금 상위 종목 지표를 다시 계산합니다."""
 import logging
-import time
-from datetime import datetime, time as dtime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import psycopg
 
 from . import db, screener
-from .market import is_holiday, kr_market_open
+from .market import is_holiday, kr_market_open, kr_session
 
 log = logging.getLogger("worker")
 
 KST = ZoneInfo("Asia/Seoul")
 EVERY = timedelta(minutes=30)
-AFTER_CLOSE = dtime(15, 40)
 MARKETS = {"001": "코스피", "101": "코스닥"}
 PER_MARKET = 100
-PAUSE = 0.25  # 키움 조회 한도를 넘지 않도록 일봉 요청 사이에 쉽니다.
 
 
 def due(now: datetime, last: datetime | None) -> bool:
@@ -26,8 +23,18 @@ def due(now: datetime, last: datetime | None) -> bool:
         return now - last >= EVERY
     # 장이 끝난 뒤 아직 마감 값으로 계산하지 않았으면 한 번 더 돕니다.
     local = now.astimezone(KST)
-    close = datetime.combine(local.date(), AFTER_CLOSE, KST)
-    return local.weekday() < 5 and not is_holiday("KR", local.date()) and local >= close and last < close
+    if local.weekday() >= 5 or is_holiday("KR", local.date()):
+        return False
+    close = datetime.combine(local.date(), kr_session(local.date())[1], KST) + timedelta(minutes=10)
+    return local >= close and last < close
+
+
+def opened_today(now: datetime) -> bool:
+    """오늘이 거래일이고 정규장이 이미 시작했는지. 아니면 순위의 현재가를 오늘 봉으로 붙이지 않습니다."""
+    local = now.astimezone(KST)
+    if local.weekday() >= 5 or is_holiday("KR", local.date()):
+        return False
+    return local.time() >= kr_session(local.date())[0]
 
 
 class ScreenerJob:
@@ -64,8 +71,10 @@ class ScreenerJob:
                 except Exception as e:
                     log.warning("검색기 %s 일봉 실패: %s", row.name, e)
                     continue
-                time.sleep(PAUSE)
-            m = screener.metrics(ticker, row.name, screener.with_today(self.bars[ticker][1], today, row))
+            bars = self.bars[ticker][1]
+            if opened_today(now):
+                bars = screener.with_today(bars, today, row)
+            m = screener.metrics(ticker, row.name, bars)
             if m:
                 out.append(m)
         # 순위에서 빠진 종목의 일봉은 메모리에서 지웁니다.

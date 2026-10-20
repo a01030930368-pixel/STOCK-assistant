@@ -39,5 +39,6 @@ def message(alert: Alert, current: Decimal) -> str:
 
 
 def due(alerts: list[Alert], prices: dict[str, Decimal]) -> list[tuple[Alert, Decimal]]:
-    """현재가가 있는 종목 중 조건을 만족한 알림을 돌려줍니다."""
-    return [(a, prices[a.ticker]) for a in alerts if a.ticker in prices and is_triggered(a, prices[a.ticker])]
+    """현재가가 있는 종목 중 조건을 만족한 알림을 돌려줍니다. 0 이하 가격은 아직 못 받은 값이라 건너뜁니다."""
+    return [(a, prices[a.ticker]) for a in alerts
+            if a.ticker in prices and prices[a.ticker] > 0 and is_triggered(a, prices[a.ticker])]

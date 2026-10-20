@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { saveNotes } from "@/app/actions";
 import { query } from "@/lib/db";
-import { signClass, today, won } from "@/lib/format";
+import { signClass, today, usd, won } from "@/lib/format";
 import MacroCard, { SNAPSHOT_COLUMNS, type Snapshot } from "@/app/macro/MacroCard";
 import Principles from "../Principles";
 import SellForm from "./SellForm";
@@ -18,7 +18,7 @@ type Buy = {
   macro_snapshot_id: number | null;
 };
 type Sell = {
-  id: number; trade_day: string; quantity: string; price: string; return_pct: string; holding_days: number;
+  id: number; trade_day: string; quantity: string; price: string; return_pct: string | null; holding_days: number;
   reason_type: string; reason_detail: string; lesson: string; followed_rules: boolean;
   macro_snapshot_id: number | null;
 };
@@ -44,7 +44,9 @@ export default async function PositionPage({ params, searchParams }: { params: P
     const s = id === null ? undefined : snapshots.get(id);
     return s && <MacroCard s={s} title={`당시 매크로 (${s.snapshot_day} 메모)`} />;
   };
-  const remaining = buys.reduce((s, b) => s + Number(b.quantity), 0) - sells.reduce((s, x) => s + Number(x.quantity), 0);
+  const remaining = Math.round((buys.reduce((s, b) => s + Number(b.quantity), 0) - sells.reduce((s, x) => s + Number(x.quantity), 0)) * 1e6) / 1e6;
+  // 미국 주식은 달러로, 국내는 원으로 보여 줍니다.
+  const money = (v: string | number) => (position.market === "US" ? usd(v) : `${won(v)}원`);
   const [fill] = fillKey ? (await loadFills(fillKey)).filter((f) => f.side === "sell" && f.ticker === position.ticker && !f.done) : [];
 
   return (
@@ -63,11 +65,11 @@ export default async function PositionPage({ params, searchParams }: { params: P
       <h2>매수 기록</h2>
       {buys.map((b) => (
         <div className="card" key={b.id}>
-          <strong>{b.trade_day}</strong> · {won(b.quantity, 4)}주 @ {won(b.price, 2)} · 비중 {b.weight_pct}% · <Link href={`/journal/books/entry?buy=${b.id}`}>고치기</Link>
+          <strong>{b.trade_day}</strong> · {won(b.quantity, 4)}주 @ {money(b.price)} · 비중 {b.weight_pct}% · <Link href={`/journal/books/entry?buy=${b.id}`}>고치기</Link>
           <div>매수 이유: {b.reason}</div>
           {b.scenario && <div>기대 시나리오: {b.scenario}</div>}
           <div>주요 리스크: {b.risk_1} / {b.risk_2} / {b.risk_3}</div>
-          <div>손절 {won(b.stop_price, 2)} · 익절 {won(b.target_price, 2)} ({b.target_basis === "chart" ? "차트 분석" : "퍼센트"})</div>
+          <div>손절 {money(b.stop_price)} · 익절 {money(b.target_price)} ({b.target_basis === "chart" ? "차트 분석" : "퍼센트"})</div>
           {macroOf(b.macro_snapshot_id)}
         </div>
       ))}
@@ -76,7 +78,7 @@ export default async function PositionPage({ params, searchParams }: { params: P
       <h2>알림</h2>
       {alerts.map((a) => (
         <div key={a.id} className="muted">
-          {a.kind === "stop" ? "손절" : a.kind === "target" ? "익절" : "알림"} {won(a.price, 2)} ·{" "}
+          {a.kind === "stop" ? "손절" : a.kind === "target" ? "익절" : "알림"} {money(a.price)} ·{" "}
           {a.active ? "대기 중" : a.triggered_at ? `발송됨 ${a.triggered_at.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}` : "꺼짐"}
         </div>
       ))}
@@ -85,8 +87,8 @@ export default async function PositionPage({ params, searchParams }: { params: P
       {sells.length === 0 && <p className="muted">없습니다.</p>}
       {sells.map((s) => (
         <div className="card" key={s.id}>
-          <strong>{s.trade_day}</strong> · {won(s.quantity, 4)}주 @ {won(s.price, 2)} ·{" "}
-          <span className={signClass(s.return_pct)}>{s.return_pct}%</span> · 보유 {s.holding_days}일 · <Link href={`/journal/books/entry?sell=${s.id}`}>고치기</Link>
+          <strong>{s.trade_day}</strong> · {won(s.quantity, 4)}주 @ {money(s.price)} ·{" "}
+          {s.return_pct === null ? <span className="muted">수익률 모름</span> : <span className={signClass(s.return_pct)}>{s.return_pct}%</span>} · 보유 {s.holding_days}일 · <Link href={`/journal/books/entry?sell=${s.id}`}>고치기</Link>
           <div>매도 이유: {REASON[s.reason_type]}{s.reason_detail && ` (${s.reason_detail})`}</div>
           <div>배운 것: {s.lesson}</div>
           <div>원칙 준수: {s.followed_rules ? "지켰다" : "못 지켰다"}</div>

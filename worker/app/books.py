@@ -58,6 +58,7 @@ def replay(trades: list[Trade], held: dict[tuple[str, str], Decimal]) -> tuple[l
     for t in trades:
         by_stock.setdefault((t.market, t.ticker), []).append(t)
     out = []
+    used: set[str] = set()
     for (market, ticker), items in by_stock.items():
         items.sort(key=_order)
         buys = sum((t.quantity for t in items if t.side == "buy"), Decimal(0))
@@ -86,7 +87,13 @@ def replay(trades: list[Trade], held: dict[tuple[str, str], Decimal]) -> tuple[l
             if q <= EPS:
                 realized = float(pnl - fees) if known else None
                 ret = round(realized / float(cost) * 100, 2) if realized is not None and cost > 0 else None
-                out.append(ClosedBook(f"{market}:{ticker}:{t.day.isoformat()}", market, ticker, t.name,
+                # 같은 날 두 번 다 판 종목은 두 번째 권부터 #2, #3을 붙입니다(웹과 같은 규칙).
+                key = base = f"{market}:{ticker}:{t.day.isoformat()}"
+                n = 2
+                while key in used:
+                    key, n = f"{base}#{n}", n + 1
+                used.add(key)
+                out.append(ClosedBook(key, market, ticker, t.name,
                                       start if known else None, t.day, ret, realized))
                 active, q, start = False, Decimal(0), None
     return out, sold

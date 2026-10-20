@@ -35,6 +35,14 @@ try {
   Write-Host '2/3 이 폴더에 덮어쓰는 중... (.env, pgdata는 그대로 둬요)'
   robocopy $src.FullName $Here /E /XF .env /XD pgdata backups node_modules .next /NFL /NDL /NJH /NJS /NP | Out-Null
   if ($LASTEXITCODE -ge 8) { Finish '파일을 덮어쓰지 못했어요. 열려 있는 파일이 있으면 닫고 다시 실행해 주세요.' }
+  # 코드 폴더는 GitHub과 똑같이 맞춥니다. GitHub에서 지운 파일이 PC에 남아 화면이 엉키지 않게요.
+  foreach ($d in @('web\src', 'worker\app', 'worker\tests', 'db')) {
+    $from = Join-Path $src.FullName $d
+    if (Test-Path $from) {
+      robocopy $from (Join-Path $Here $d) /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+      if ($LASTEXITCODE -ge 8) { Finish '파일을 덮어쓰지 못했어요. 열려 있는 파일이 있으면 닫고 다시 실행해 주세요.' }
+    }
+  }
   Remove-Item -Path $tmp -Recurse -Force
 
   Write-Host '3/3 다시 빌드하고 켜는 중... (몇 분 걸릴 수 있어요)'

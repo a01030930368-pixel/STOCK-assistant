@@ -14,6 +14,12 @@ export type BookEvent = {
   note: string | null; // 매수 이유 또는 매도 때 배운 것
 };
 
+export type FillRow = {
+  key: string; market: Market; day: string; time: string | null; ticker: string; name: string; side: Side;
+  quantity: string; price: string; fee: string | null;
+};
+export type EntryRow = { id: number; side: Side; fill_key: string | null; market: Market; ticker: string; name: string; day: string; quantity: string; price: string; note: string };
+
 export type Holding = { market: Market; ticker: string; name: string; quantity: number; avgPrice: number; pnlPct: number | null };
 
 export type Label = "첫 매수" | "추가 매수" | "일부 매도" | "전량 매도" | "매도";
@@ -33,6 +39,14 @@ const EPS = 1e-6;
 const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000);
 
 export const bookKey = (market: Market, ticker: string, end: string | null) => `${market}:${ticker}:${end ?? "open"}`;
+
+// 같은 날 두 번 다 판 종목(단타)은 두 번째 권부터 키 뒤에 #2, #3을 붙여 사후강평이 섞이지 않게 합니다.
+function uniqueKey(key: string, used: Set<string>): string {
+  let out = key;
+  for (let n = 2; used.has(out); n++) out = `${key}#${n}`;
+  used.add(out);
+  return out;
+}
 
 // 같은 날 매수와 매도가 함께 있으면 체결 시각 순, 시각이 없으면 매수부터 봅니다.
 function order(a: BookEvent, b: BookEvent): number {
@@ -64,8 +78,8 @@ function emptyBook(e: { market: Market; ticker: string; name: string }, start: s
   };
 }
 
-function finish(b: Book, cost: number, today: string, h: Holding | undefined): Book {
-  b.key = bookKey(b.market, b.ticker, b.end);
+function finish(b: Book, cost: number, today: string, h: Holding | undefined, used: Set<string>): Book {
+  b.key = uniqueKey(bookKey(b.market, b.ticker, b.end), used);
   b.days = b.start ? daysBetween(b.start, b.end ?? today) : null;
   if (b.realized !== null) b.realized -= b.fees;
   if (b.end) b.returnPct = b.realized !== null && cost > 0 ? Math.round((b.realized / cost) * 10000) / 100 : null;
@@ -84,6 +98,7 @@ export function buildBooks(events: BookEvent[], holdings: Holding[], today: stri
   const hold = new Map(holdings.map((h) => [`${h.market}:${h.ticker}`, h]));
 
   const books: Book[] = [];
+  const used = new Set<string>();
   for (const [k, list] of byStock) {
     const evs = [...list].sort(order);
     const h = hold.get(k);
@@ -119,18 +134,58 @@ export function buildBooks(events: BookEvent[], holdings: Holding[], today: stri
       if (q <= EPS) {
         q = 0;
         cur.end = e.day;
-        books.push(finish(cur, cost, today, h));
+        books.push(finish(cur, cost, today, h, used));
         cur = null;
       }
     }
     if (cur) {
       cur.held = q;
       cur.avgCost = avg;
-      books.push(finish(cur, cost, today, h));
+      books.push(finish(cur, cost, today, h, used));
     }
   }
   // 책장은 먼저 시작한 권이 위로. 시작을 모르는 권(기록 전부터 갖고 있던 것)이 맨 위예요.
   return books.sort((a, b) => (a.start ?? "") < (b.start ?? "") ? -1 : (a.start ?? "") > (b.start ?? "") ? 1 : a.name.localeCompare(b.name, "ko"));
+}
+
+const NEAR_DAYS = 3;
+const dayGap = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
+
+// 체결에 일지를 붙입니다. 체결 키가 같으면 그 체결, 아니면 같은 시장·종목·매수/매도 중 날짜가 가장 가까운(3일 안) 체결에 붙여요.
+// 미국 주식은 한국 날짜로 적어 하루 어긋나기 쉽고, 하루 두 번 산 걸 일지 두 장으로 써도 키움은 한 묶음이라
+// 어긋난 일지를 따로 더하면 없는 주식이 생깁니다. 가까운 체결이 없을 때만 손으로 적은 매매로 따로 넣어요.
+export function attachEntries(fills: FillRow[], entries: EntryRow[]): (BookEvent & { entryIds: string[] })[] {
+  const events = fills.map((f) => ({
+    id: f.key, market: f.market, ticker: f.ticker, name: f.name, day: f.day, time: f.time, side: f.side,
+    quantity: Number(f.quantity), price: Number(f.price), fee: f.fee === null ? null : Number(f.fee),
+    fillKey: f.key, entryId: null as number | null, note: null as string | null, entryIds: [] as string[],
+  }));
+  const attach = (ev: (typeof events)[number], e: EntryRow) => {
+    ev.entryIds.push(`${e.side}:${e.id}`);
+    if (ev.entryId === null) { ev.entryId = e.id; ev.note = e.note; }
+    else if (e.note && e.note !== ev.note) ev.note = ev.note ? `${ev.note}\n${e.note}` : e.note;
+  };
+  const rest: EntryRow[] = [];
+  for (const e of entries) {
+    const ev = e.fill_key ? events.find((x) => x.fillKey === e.fill_key) : undefined;
+    if (ev) attach(ev, e); else rest.push(e);
+  }
+  for (const e of rest) {
+    const near = events
+      .filter((x) => x.side === e.side && x.ticker === e.ticker && x.market === e.market && dayGap(x.day, e.day) <= NEAR_DAYS)
+      .sort((a, b) => (a.entryId === null ? 0 : 1) - (b.entryId === null ? 0 : 1) || dayGap(a.day, e.day) - dayGap(b.day, e.day));
+    if (near[0]) attach(near[0], e);
+  }
+  return events;
+}
+
+// 키로 권을 찾습니다. 보유 중일 때 저장해 둔 링크(…:open)는 다 팔아 권이 끝났으면 그 종목의 가장 최근 권을 보여 줘요.
+export function findBook(books: Book[], key: string | undefined): Book | undefined {
+  if (!key) return undefined;
+  const found = books.find((b) => b.key === key);
+  if (found || !key.endsWith(":open")) return found;
+  const stock = key.slice(0, -":open".length);
+  return books.filter((b) => `${b.market}:${b.ticker}` === stock).sort((a, b) => ((a.end ?? "9999") < (b.end ?? "9999") ? -1 : 1)).at(-1);
 }
 
 export type Shelf = "all" | "open" | "closed" | "unreviewed";

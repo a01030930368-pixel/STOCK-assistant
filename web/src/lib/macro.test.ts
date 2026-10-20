@@ -25,4 +25,9 @@ describe("macro", () => {
       "기록 날짜를 입력하세요.", "원/달러 환율은 숫자로 입력하세요.", "시사점을 한 줄이라도 적어 주세요.",
     ]);
   });
+
+  it("rejects numbers that do not fit, like the FX rate typed into a rate box", () => {
+    expect(validateMacro({ ...base, krBaseRate: 1380 })).toEqual(["한국 기준금리 값은 -100~100 사이 %로 입력하세요."]);
+    expect(validateMacro({ ...base, usdkrw: 0 })).toEqual(["원/달러 환율은 0보다 크고 100,000보다 작게 입력하세요."]);
+  });
 });

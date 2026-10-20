@@ -1,3 +1,4 @@
+import { usdKrw } from "@/lib/fx";
 import Link from "next/link";
 import { distancePct, scopeOf, totalOf, type Account, type Scope } from "@/lib/board";
 import { query } from "@/lib/db";
@@ -28,8 +29,9 @@ const money = (market: "KR" | "US") => (market === "KR" ? (v: string | number) =
 const kst = (d: Date) => d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
 function account(s: Summary | undefined, cash: Cash | undefined): Account | null {
-  if (!s) return null;
   const left = cash ? Number(cash.d2_deposit ?? cash.deposit) : null;
+  // 주식은 없고 예수금만 있는 계좌도 총자산에 넣습니다.
+  if (!s) return left === null ? null : { eval: 0, buy: 0, pnl: 0, cash: left };
   return { eval: Number(s.total_eval), buy: Number(s.total_buy), pnl: Number(s.total_pnl), cash: left };
 }
 
@@ -145,7 +147,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
   const summaries = await loadSummaries();
   const krCash = cash.find((c) => c.market === "KR");
   const usCash = cash.find((c) => c.market === "US");
-  const rate = usSummary ? Number(usSummary.exch_rate) : 0;
+  const rate = await usdKrw();
   const total = totalOf(scope, account(krSummary, krCash), account(usSummary, usCash), rate);
   const fmtTotal = total.currency === "USD" ? usd : krw;
   const shown = holdings.filter((h) => scope === "all" || h.market === scope);

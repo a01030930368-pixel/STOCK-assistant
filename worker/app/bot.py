@@ -70,7 +70,7 @@ class Bot:
         self._menu()
         while True:
             try:
-                with psycopg.connect(self.cfg.database_url, autocommit=True) as conn:
+                with psycopg.connect(self.cfg.database_url, autocommit=True, options="-c timezone=Asia/Seoul") as conn:
                     self._poll(conn)
             except Exception as e:
                 log.warning("텔레그램 명령 받기 실패, 30초 뒤 다시 시도: %s", e)

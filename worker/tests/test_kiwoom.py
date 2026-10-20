@@ -182,3 +182,64 @@ def test_cash_calls_kt00001_and_ust21110():
     assert client.kr_cash().deposit == Decimal(1000)
     assert client.us_cash().deposit == Decimal(1000)
     assert seen == [("/api/dostk/acnt", "kt00001"), ("/api/us/acnt", "ust21110")]
+
+
+def _client(handler):
+    return KiwoomClient("https://api.kiwoom.com", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+def test_token_expiry_is_read_as_korean_time(monkeypatch):
+    # 키움의 expires_dt는 한국 시간입니다. 컨테이너가 UTC여도 만료 9시간 전에 다시 받아야 해요.
+    from datetime import datetime as real_datetime, timedelta, timezone
+    import app.kiwoom as kw
+
+    kst_now = real_datetime(2026, 10, 20, 9, 0, tzinfo=kw.KST)
+
+    class Fixed(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return kst_now.astimezone(tz) if tz else kst_now.astimezone(timezone.utc).replace(tzinfo=None)
+
+    monkeypatch.setattr(kw, "datetime", Fixed)
+    tokens = []
+
+    def handler(request):
+        if request.url.path == "/oauth2/token":
+            tokens.append(1)
+            # 이미 5분 전에 만료된 토큰(한국 시간 08:55)
+            return httpx.Response(200, json={"token": f"T{len(tokens)}", "expires_dt": "20261020085500"})
+        return httpx.Response(200, json=SAMPLE)
+
+    client = _client(handler)
+    client.domestic_balance()
+    client.domestic_balance()
+    assert len(tokens) == 2
+
+
+def test_bad_token_is_refreshed_once():
+    tokens, calls = [], []
+
+    def handler(request):
+        if request.url.path == "/oauth2/token":
+            tokens.append(1)
+            return httpx.Response(200, json={"token": f"T{len(tokens)}", "expires_dt": "29991231235959"})
+        calls.append(request.headers["authorization"])
+        if request.headers["authorization"] == "Bearer T1":
+            return httpx.Response(200, json={"return_code": 3, "return_msg": "[8005:Token이 유효하지 않습니다]"})
+        return httpx.Response(200, json=SAMPLE)
+
+    _client(handler).domestic_balance()
+    assert calls == ["Bearer T1", "Bearer T2"]
+
+
+def test_balance_reads_every_page():
+    page2 = dict(SAMPLE, acnt_evlt_remn_indv_tot=[dict(SAMPLE["acnt_evlt_remn_indv_tot"][0], stk_cd="A035420", stk_nm="NAVER")])
+
+    def handler(request):
+        if request.url.path == "/oauth2/token":
+            return httpx.Response(200, json={"token": "T", "expires_dt": "29991231235959"})
+        if request.headers.get("next-key"):
+            return httpx.Response(200, json=page2)
+        return httpx.Response(200, json=SAMPLE, headers={"cont-yn": "Y", "next-key": "K"})
+
+    assert [h.ticker for h in _client(handler).domestic_balance().holdings] == ["005930", "035420"]
