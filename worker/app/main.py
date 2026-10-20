@@ -18,6 +18,7 @@ from .briefing_job import BriefingJob
 from .watch_job import WatchJob
 from .bot import Bot
 from .fills_job import FillsJob
+from .isa_job import IsaJob
 from .market import kr_market_open, kr_trading_now, us_market_open, us_trading_now
 
 log = logging.getLogger("worker")
@@ -29,7 +30,7 @@ def settle(conn: psycopg.Connection, market: str) -> None:
 
 
 def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | None, kr: bool, us: bool,
-         now: datetime | None = None) -> None:
+         now: datetime | None = None, isa: KiwoomClient | None = None) -> None:
     now = now or datetime.now(timezone.utc)
     # 한쪽 시장 조회가 실패해도 다른 시장과 알림은 계속 돌도록 따로 처리합니다.
     if kiwoom and kr:
@@ -42,6 +43,18 @@ def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | No
             db.save_cash(conn, "KR", kiwoom.kr_cash())
         except Exception:
             log.exception("국내 예수금 동기화 실패")
+    if isa and kr:
+        try:
+            db.save_isa_balance(conn, isa.domestic_balance())
+            db.set_setting(conn, "isa_balance_status", {"at": now.isoformat(), "ok": True})
+        except Exception as e:
+            log.exception("ISA 잔고 동기화 실패")
+            # 화면 ISA 카드에 이유를 보여 줍니다(예: 이 계좌는 REST API를 못 쓰는 경우).
+            db.set_setting(conn, "isa_balance_status", {"at": now.isoformat(), "ok": False, "error": str(e)[:200]})
+        try:
+            db.save_isa_cash(conn, isa.kr_cash())
+        except Exception:
+            log.exception("ISA 예수금 동기화 실패")
     if kiwoom and us:
         try:
             db.save_us_balance(conn, kiwoom.us_balance())
@@ -115,7 +128,7 @@ class Connection:
             self.conn = None
 
 
-def alert_loop(cfg: config.Config, kiwoom: KiwoomClient | None) -> None:
+def alert_loop(cfg: config.Config, kiwoom: KiwoomClient | None, isa: KiwoomClient | None = None) -> None:
     """잔고와 손절·익절·지지저항 알림만 따로 도는 줄. 무거운 수집 작업이 길어져도 알림은 밀리지 않아요."""
     db_conn = Connection(cfg.database_url)
     first = True
@@ -125,7 +138,7 @@ def alert_loop(cfg: config.Config, kiwoom: KiwoomClient | None) -> None:
             kr, us = kr_market_open(now), us_market_open(now)
             # 처음 켤 때는 장이 닫혀 있어도 잔고를 한 번 받아 화면을 채웁니다.
             if first or kr or us:
-                tick(cfg, db_conn.get(), kiwoom, first or kr, first or us, now)
+                tick(cfg, db_conn.get(), kiwoom, first or kr, first or us, now, isa)
                 first = False
         except Exception:
             log.exception("동기화 실패")
@@ -156,12 +169,17 @@ def main() -> None:
         cfg.kiwoom_appkey, cfg.kiwoom_secretkey, cfg.telegram_bot_token,
         cfg.ecos_api_key, cfg.fred_api_key, cfg.dart_api_key,
         cfg.naver_client_id, cfg.naver_client_secret, cfg.finnhub_api_key, cfg.anthropic_api_key, cfg.gemini_api_key,
+        cfg.kiwoom_isa_appkey, cfg.kiwoom_isa_secretkey,
     ])
     kiwoom = None
     if cfg.kiwoom_appkey and cfg.kiwoom_secretkey:
         kiwoom = KiwoomClient(cfg.kiwoom_base_url, cfg.kiwoom_appkey, cfg.kiwoom_secretkey)
     else:
         log.warning("키움 키가 없어 잔고 동기화를 건너뜁니다.")
+    # ISA 계좌는 키를 따로 받습니다. 국내 주식만 되는 계좌라 국내 조회만 씁니다.
+    isa = None
+    if cfg.kiwoom_isa_appkey and cfg.kiwoom_isa_secretkey:
+        isa = KiwoomClient(cfg.kiwoom_base_url, cfg.kiwoom_isa_appkey, cfg.kiwoom_isa_secretkey)
     if not (cfg.ecos_api_key or cfg.fred_api_key):
         log.warning("ECOS·FRED 키가 없어 매크로 지표 자동 수집을 건너뜁니다.")
     http = httpx.Client(timeout=30)
@@ -172,6 +190,7 @@ def main() -> None:
     notices = BriefingJob(cfg, http)
     watching = WatchJob(cfg, http, kiwoom)
     trades = FillsJob(kiwoom)
+    isa_trades = IsaJob(isa)
     last_macro: datetime | None = None
     db_conn = Connection(cfg.database_url)
     while True:
@@ -183,9 +202,10 @@ def main() -> None:
             db_conn.check()
             time.sleep(10)
     Bot(cfg).start()
-    threading.Thread(target=alert_loop, args=(cfg, kiwoom), name="alerts", daemon=True).start()
+    threading.Thread(target=alert_loop, args=(cfg, kiwoom, isa), name="alerts", daemon=True).start()
     jobs = [
         ("종목 정보 수집", research.run), ("관심종목 갱신", watching.run), ("체결 내역 갱신", trades.run),
+        ("ISA 체결 갱신", isa_trades.run),
         ("검색기 갱신", screener.run), ("분봉 갱신", minutes.run), ("AI 한마디", comments.run), ("일정 알림", notices.run),
     ]
     while True:

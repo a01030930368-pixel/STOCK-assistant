@@ -1,17 +1,19 @@
 export type Market = "KR" | "US";
-export type Scope = "all" | Market;
+export type Scope = "all" | Market | "ISA";
 
 export function scopeOf(raw: string | string[] | undefined): Scope {
-  return raw === "KR" || raw === "US" ? raw : "all";
+  return raw === "KR" || raw === "US" || raw === "ISA" ? raw : "all";
 }
 
 export type Account = { eval: number; buy: number; pnl: number; cash: number | null };
 
 // 총자산 = 주식 평가 + 남은 예수금. 전체는 원화로 맞추고, 해외만 볼 때는 달러로 둡니다.
-export function totalOf(scope: Scope, kr: Account | null, us: Account | null, rate: number) {
+// 국내 탭은 일반 국내 계좌만, ISA 탭은 ISA 계좌만, 전체는 셋 다 더합니다.
+export function totalOf(scope: Scope, kr: Account | null, us: Account | null, rate: number, isa: Account | null = null) {
   const parts: { acc: Account; fx: number }[] = [];
-  if (scope !== "US" && kr) parts.push({ acc: kr, fx: 1 });
-  if (scope !== "KR" && us) parts.push({ acc: us, fx: scope === "US" ? 1 : rate });
+  if ((scope === "all" || scope === "KR") && kr) parts.push({ acc: kr, fx: 1 });
+  if ((scope === "all" || scope === "US") && us) parts.push({ acc: us, fx: scope === "US" ? 1 : rate });
+  if ((scope === "all" || scope === "ISA") && isa) parts.push({ acc: isa, fx: 1 });
   const sum = (f: (a: Account) => number) => parts.reduce((s, p) => s + f(p.acc) * p.fx, 0);
   const buy = sum((a) => a.buy);
   const pnl = sum((a) => a.pnl);

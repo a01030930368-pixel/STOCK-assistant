@@ -18,6 +18,13 @@ describe("totalOf", () => {
     expect(t.total).toBe(1200);
     expect(t.cash).toBe(200);
   });
+  it("adds ISA to all and shows it alone on its tab", () => {
+    const isa = { eval: 5_000_000, buy: 4_500_000, pnl: 500_000, cash: 10_000 };
+    expect(totalOf("all", kr, us, 1400, isa).total).toBe(3_000_000 + 1200 * 1400 + 5_010_000);
+    expect(totalOf("KR", kr, us, 1400, isa).total).toBe(3_000_000);
+    const t = totalOf("ISA", kr, us, 1400, isa);
+    expect([t.currency, t.total, t.pnl]).toEqual(["KRW", 5_010_000, 500_000]);
+  });
   it("treats unknown cash as zero", () => {
     expect(totalOf("KR", { ...kr, cash: null }, null, 0).total).toBe(2_000_000);
   });
@@ -35,6 +42,7 @@ describe("distancePct", () => {
 
 it("scopeOf defaults to all", () => {
   expect(scopeOf("KR")).toBe("KR");
+  expect(scopeOf("ISA")).toBe("ISA");
   expect(scopeOf(undefined)).toBe("all");
   expect(scopeOf("x")).toBe("all");
 });

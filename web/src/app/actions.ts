@@ -520,6 +520,17 @@ export async function saveLimits(form: FormData) {
   revalidatePath("/weights");
 }
 
+// ISA 유형(비과세 한도)과 개설일(만기 계산)
+export async function saveIsa(form: FormData) {
+  const opened = text(form, "opened");
+  const value = { type: text(form, "type") === "low" ? "low" : "general", opened: /^\d{4}-\d{2}-\d{2}$/.test(opened) ? opened : null };
+  await query(
+    "INSERT INTO app_settings (key, value) VALUES ('isa', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+    [JSON.stringify(value)],
+  );
+  revalidatePath("/");
+}
+
 // 자동으로 받은 업종 이름을 직접 바꿉니다. 비우면 자동 이름으로 돌아갑니다.
 export async function saveSector(form: FormData) {
   const ticker = tickerOf(form);

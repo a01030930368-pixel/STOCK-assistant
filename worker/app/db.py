@@ -260,6 +260,44 @@ MIGRATIONS = [
     "ALTER TABLE sell_entries ALTER COLUMN return_pct DROP NOT NULL",
     """UPDATE sell_entries s SET avg_buy_price = NULL, return_pct = NULL FROM positions p
        WHERE p.id = s.position_id AND p.book_key IS NOT NULL AND s.return_pct = 0 AND s.avg_buy_price = s.price""",
+    # ISA 계좌(키움에서 계좌마다 키를 따로 받아요). 일반 계좌와 섞이지 않게 따로 둡니다.
+    """CREATE TABLE IF NOT EXISTS isa_holdings (
+      ticker       TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      quantity     NUMERIC(18, 4) NOT NULL,
+      avg_price    NUMERIC(18, 4) NOT NULL,
+      cur_price    NUMERIC(18, 4) NOT NULL,
+      eval_amount  NUMERIC(20, 2) NOT NULL,
+      pnl          NUMERIC(20, 2) NOT NULL,
+      pnl_pct      NUMERIC(8, 2) NOT NULL,
+      synced_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    """CREATE TABLE IF NOT EXISTS isa_summary (
+      id             INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      total_buy      NUMERIC(20, 2) NOT NULL,
+      total_eval     NUMERIC(20, 2) NOT NULL,
+      total_pnl      NUMERIC(20, 2) NOT NULL,
+      total_pnl_pct  NUMERIC(8, 2) NOT NULL,
+      synced_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    """CREATE TABLE IF NOT EXISTS isa_cash (
+      id          INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      deposit     NUMERIC(20, 4) NOT NULL,
+      d2_deposit  NUMERIC(20, 4),
+      orderable   NUMERIC(20, 4),
+      synced_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    """CREATE TABLE IF NOT EXISTS isa_fills (
+      fill_key    TEXT PRIMARY KEY,
+      trade_date  DATE NOT NULL,
+      ticker      TEXT NOT NULL,
+      name        TEXT NOT NULL DEFAULT '',
+      side        TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+      quantity    NUMERIC(18, 4) NOT NULL,
+      price       NUMERIC(18, 4) NOT NULL,
+      fee         NUMERIC(18, 4),
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
 
 
@@ -317,6 +355,44 @@ def save_cash(conn: psycopg.Connection, market: str, cash: Cash) -> None:
     )
 
 
+def save_isa_balance(conn: psycopg.Connection, balance: Balance) -> None:
+    with conn.transaction():
+        conn.execute("DELETE FROM isa_holdings")
+        for h in balance.holdings:
+            conn.execute(
+                """INSERT INTO isa_holdings (ticker, name, quantity, avg_price, cur_price, eval_amount, pnl, pnl_pct)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                (h.ticker, h.name, h.quantity, h.avg_price, h.cur_price, h.eval_amount, h.pnl, h.pnl_pct),
+            )
+        conn.execute(
+            """INSERT INTO isa_summary (id, total_buy, total_eval, total_pnl, total_pnl_pct, synced_at)
+               VALUES (1, %s, %s, %s, %s, now())
+               ON CONFLICT (id) DO UPDATE SET total_buy = EXCLUDED.total_buy, total_eval = EXCLUDED.total_eval,
+                 total_pnl = EXCLUDED.total_pnl, total_pnl_pct = EXCLUDED.total_pnl_pct, synced_at = now()""",
+            (balance.total_buy, balance.total_eval, balance.total_pnl, balance.total_pnl_pct),
+        )
+
+
+def save_isa_cash(conn: psycopg.Connection, cash: Cash) -> None:
+    conn.execute(
+        """INSERT INTO isa_cash (id, deposit, d2_deposit, orderable, synced_at) VALUES (1, %s, %s, %s, now())
+           ON CONFLICT (id) DO UPDATE SET deposit = EXCLUDED.deposit, d2_deposit = EXCLUDED.d2_deposit,
+             orderable = EXCLUDED.orderable, synced_at = now()""",
+        (cash.deposit, cash.d2_deposit, cash.orderable),
+    )
+
+
+def save_isa_fills(conn: psycopg.Connection, fills) -> None:
+    for f in fills:
+        conn.execute(
+            """INSERT INTO isa_fills (fill_key, trade_date, ticker, name, side, quantity, price, fee)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (fill_key) DO UPDATE SET name = EXCLUDED.name, quantity = EXCLUDED.quantity,
+                 price = EXCLUDED.price, fee = EXCLUDED.fee, fetched_at = now()""",
+            (f.key, f.day, f.ticker, f.name, f.side, f.quantity, f.price, f.fee),
+        )
+
+
 def save_indicators(conn: psycopg.Connection, indicators: list[Indicator]) -> None:
     for i in indicators:
         conn.execute(
@@ -327,9 +403,10 @@ def save_indicators(conn: psycopg.Connection, indicators: list[Indicator]) -> No
 
 
 def watched_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
-    """뉴스·실적·재무·차트를 모을 종목: 보유 종목, 매매일지에서 보유 중인 종목, 관심종목. (ticker, name, market)"""
+    """뉴스·실적·재무·차트를 모을 종목: 보유 종목(ISA 포함), 매매일지에서 보유 중인 종목, 관심종목. (ticker, name, market)"""
     return conn.execute(
         """SELECT ticker, name, market FROM holdings
+           UNION SELECT ticker, name, 'KR' FROM isa_holdings
            UNION SELECT ticker, name, market FROM positions WHERE status = 'open'
            UNION SELECT ticker, name, market FROM watchlist
            ORDER BY ticker"""
@@ -337,9 +414,10 @@ def watched_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
 
 
 def unpriced_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
-    """일봉이 하나도 없는 관심종목. (ticker, name, market)"""
+    """일봉이 하나도 없는 관심종목·ISA 종목. (ticker, name, market)"""
     return conn.execute(
-        """SELECT w.ticker, w.name, w.market FROM watchlist w
+        """SELECT w.ticker, w.name, w.market FROM (
+             SELECT ticker, name, market FROM watchlist UNION SELECT ticker, name, 'KR' FROM isa_holdings) w
            WHERE NOT EXISTS (SELECT 1 FROM price_history p WHERE p.ticker = w.ticker) ORDER BY w.ticker"""
     ).fetchall()
 

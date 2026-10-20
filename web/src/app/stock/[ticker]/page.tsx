@@ -24,7 +24,7 @@ const kst = (d: Date) => d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", mon
 
 export default async function StockPage({ params }: { params: Promise<{ ticker: string }> }) {
   const ticker = decodeURIComponent((await params).ticker).toUpperCase();
-  const [stock] = await query<Stock>(
+  const [found] = await query<Stock>(
     `SELECT s.ticker, s.name, s.market, p.id AS position_id,
        EXISTS (SELECT 1 FROM watchlist w WHERE w.ticker = s.ticker) AS watched,
        COALESCE((SELECT cur_price FROM holdings WHERE ticker = s.ticker), (SELECT price FROM watch_quotes WHERE ticker = s.ticker),
@@ -45,6 +45,14 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
      ORDER BY s.rank LIMIT 1`,
     [ticker],
   ));
+  // ISA 계좌에만 있는 종목(예: 적립식 ETF)
+  const [isaStock] = found ? [] : await query<Stock>(
+    `SELECT ticker, name, 'KR' AS market, NULL::int AS position_id,
+       EXISTS (SELECT 1 FROM watchlist w WHERE w.ticker = i.ticker) AS watched, cur_price AS cur
+     FROM isa_holdings i WHERE ticker = $1`,
+    [ticker],
+  ).catch(() => []);
+  const stock = found ?? isaStock;
   if (!stock) notFound();
 
   const news = await safe<News>(

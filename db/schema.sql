@@ -393,3 +393,46 @@ CREATE INDEX chart_doodles_ticker_idx ON chart_doodles (ticker, view);
 
 -- 날짜 계산(CURRENT_DATE)을 한국 날짜로 합니다.
 DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET timezone TO %L', current_database(), 'Asia/Seoul'); END $$;
+
+-- ISA 계좌(키움에서 계좌마다 키를 따로 받아요). 일반 계좌와 섞이지 않게 따로 둡니다.
+CREATE TABLE isa_holdings (
+  ticker       TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  quantity     NUMERIC(18, 4) NOT NULL,
+  avg_price    NUMERIC(18, 4) NOT NULL,
+  cur_price    NUMERIC(18, 4) NOT NULL,
+  eval_amount  NUMERIC(20, 2) NOT NULL,
+  pnl          NUMERIC(20, 2) NOT NULL,
+  pnl_pct      NUMERIC(8, 2) NOT NULL,
+  synced_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE isa_summary (
+  id             INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  total_buy      NUMERIC(20, 2) NOT NULL,
+  total_eval     NUMERIC(20, 2) NOT NULL,
+  total_pnl      NUMERIC(20, 2) NOT NULL,
+  total_pnl_pct  NUMERIC(8, 2) NOT NULL,
+  synced_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE isa_cash (
+  id          INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  deposit     NUMERIC(20, 4) NOT NULL,
+  d2_deposit  NUMERIC(20, 4),
+  orderable   NUMERIC(20, 4),
+  synced_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ISA 체결. 올해 산 금액(납입 한도 확인)에 씁니다.
+CREATE TABLE isa_fills (
+  fill_key    TEXT PRIMARY KEY,
+  trade_date  DATE NOT NULL,
+  ticker      TEXT NOT NULL,
+  name        TEXT NOT NULL DEFAULT '',
+  side        TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+  quantity    NUMERIC(18, 4) NOT NULL,
+  price       NUMERIC(18, 4) NOT NULL,
+  fee         NUMERIC(18, 4),
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
