@@ -476,3 +476,20 @@ def events_on(conn: psycopg.Connection, day) -> list[tuple[str, str, str]]:
     return conn.execute(
         "SELECT kind, title, detail FROM calendar_events WHERE day = %s ORDER BY kind, title", (day,)
     ).fetchall()
+
+
+def briefing_holdings(conn: psycopg.Connection) -> list[tuple[str, str, float, float | None, float]]:
+    """아침 브리핑용 보유 종목 (이름, 시장, 현재가, 전일 대비 %, 평단 대비 %). 국내 먼저, 시장 안에서는 평가금액이 큰 순서입니다."""
+    rows = conn.execute(
+        """SELECT h.name, h.market, h.cur_price, h.pnl_pct,
+                  (SELECT array_agg(close ORDER BY day DESC) FROM
+                     (SELECT day, close FROM price_history p WHERE p.ticker = h.ticker ORDER BY day DESC LIMIT 2) t)
+           FROM holdings h WHERE h.quantity > 0 ORDER BY h.market, h.eval_amount DESC"""
+    ).fetchall()
+    out = []
+    for name, market, price, pnl, closes in rows:
+        change = None
+        if closes and len(closes) == 2 and closes[1]:
+            change = (float(closes[0]) / float(closes[1]) - 1) * 100
+        out.append((name, market, float(price), change, float(pnl)))
+    return out

@@ -39,3 +39,41 @@ def test_job_sends_once_per_day(monkeypatch):
     assert len(sent) == 1 and marked == {"evening:2026-10-28"}
     BriefingJob(cfg(token=""), None).run(None, now.replace(day=28))
     assert len(sent) == 1
+
+
+def test_morning_due_on_weekday_mornings_only():
+    assert briefing.morning_due(datetime(2026, 10, 19, 23, 0, tzinfo=timezone.utc)) == date(2026, 10, 20)  # 화 08:00
+    assert briefing.morning_due(datetime(2026, 10, 20, 2, 0, tzinfo=timezone.utc)) is None  # 화 11:00
+    assert briefing.morning_due(datetime(2026, 10, 23, 23, 30, tzinfo=timezone.utc)) is None  # 토 08:30
+
+
+def test_morning_message_sections():
+    text = briefing.morning_message(
+        date(2026, 10, 20),
+        [briefing.Quote("나스닥", 21400.5, -0.21)],
+        [briefing.Holding("삼성전자", "KR", 68400, 1.2, 5.0), briefing.Holding("아이온큐", "US", 31.11, None, -17.66)],
+        [],
+    )
+    assert "· 나스닥 21,400.50 (-0.2%)" in text
+    assert "· 삼성전자 68,400원 · +1.2% · +5.0%" in text
+    assert "· 아이온큐 $31.11 · - · -17.7%" in text
+    assert text.endswith("오늘 일정\n· 큰 일정은 없어요")
+
+
+def test_morning_sends_even_when_an_index_fails(monkeypatch):
+    sent, marked = [], set()
+    monkeypatch.setattr("app.briefing_job.db.notice_sent", lambda conn, key: key in marked)
+    monkeypatch.setattr("app.briefing_job.db.mark_notice", lambda conn, key: marked.add(key))
+    monkeypatch.setattr("app.briefing_job.db.events_on", lambda conn, day: [])
+    monkeypatch.setattr("app.briefing_job.db.briefing_holdings", lambda conn: [])
+    monkeypatch.setattr("app.briefing_job.telegram.send", lambda token, chat, text, http: sent.append(text))
+
+    def daily(symbol, http, span):
+        raise RuntimeError("blocked")
+
+    monkeypatch.setattr("app.briefing_job.prices.yahoo_daily", daily)
+    job = BriefingJob(cfg(), None)
+    now = datetime(2026, 10, 19, 23, 5, tzinfo=timezone.utc)
+    job.run(None, now)
+    job.run(None, now)
+    assert len(sent) == 1 and "morning:2026-10-20" in marked and "밤사이 미국장" not in sent[0]
