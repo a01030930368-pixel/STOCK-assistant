@@ -4,6 +4,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from .alerts import Alert
+from .levels import Level
 from .calendar import Event
 from .kiwoom import Balance, Cash, UsBalance
 from .macro import Indicator
@@ -228,6 +229,29 @@ MIGRATIONS = [
       day    DATE PRIMARY KEY,
       total  NUMERIC(20, 2) NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS chart_levels (
+      id          SERIAL PRIMARY KEY,
+      ticker      TEXT NOT NULL,
+      name        TEXT NOT NULL DEFAULT '',
+      kind        TEXT NOT NULL CHECK (kind IN ('support', 'resistance')),
+      low         NUMERIC(18, 4) NOT NULL,
+      high        NUMERIC(18, 4),
+      memo        TEXT NOT NULL DEFAULT '',
+      alert       BOOLEAN NOT NULL DEFAULT false,
+      last_price  NUMERIC(18, 4),
+      alerted_at  TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS chart_levels_ticker_idx ON chart_levels (ticker)",
+    """CREATE TABLE IF NOT EXISTS chart_doodles (
+      id          SERIAL PRIMARY KEY,
+      ticker      TEXT NOT NULL,
+      view        TEXT NOT NULL,
+      color       TEXT NOT NULL DEFAULT '#c9a96b',
+      points      JSONB NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS chart_doodles_ticker_idx ON chart_doodles (ticker, view)",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -416,6 +440,19 @@ def save_sector(conn: psycopg.Connection, ticker: str, market: str, sector: str)
 def active_alerts(conn: psycopg.Connection) -> list[Alert]:
     rows = conn.execute("SELECT id, ticker, name, kind, direction, price FROM alerts WHERE active").fetchall()
     return [Alert(*row) for row in rows]
+
+
+def chart_levels(conn: psycopg.Connection) -> list[Level]:
+    rows = conn.execute(
+        "SELECT id, ticker, name, kind, low, high, memo, alert, last_price, alerted_at FROM chart_levels ORDER BY id").fetchall()
+    return [Level(*r) for r in rows]
+
+
+def save_level_seen(conn: psycopg.Connection, level_id: int, price: Decimal, alerted: bool) -> None:
+    conn.execute(
+        "UPDATE chart_levels SET last_price = %s, alerted_at = CASE WHEN %s THEN now() ELSE alerted_at END WHERE id = %s",
+        (price, alerted, level_id),
+    )
 
 
 def mark_triggered(conn: psycopg.Connection, alert_id: int) -> None:

@@ -6,7 +6,7 @@ import { loadSummaries } from "@/lib/summaryData";
 import SummaryLine from "@/app/_components/SummaryLine";
 import AiNote, { type AiComment } from "@/app/_components/AiNote";
 import StockNews from "@/app/_components/StockNews";
-import ChartMemo, { type Candle, type Level, type Memo, type MinuteCandle, type Trade } from "@/app/_components/ChartMemo";
+import ChartMemo, { type Candle, type Doodle, type Level, type Mark, type Memo, type MinuteCandle, type Trade } from "@/app/_components/ChartMemo";
 import { wallClock } from "@/lib/candles";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
 
@@ -100,6 +100,10 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
      SELECT CASE WHEN kind = 'custom' THEN 'alert' ELSE kind END, price FROM alerts WHERE ticker = $1 AND active`,
     [ticker],
   )).map<Level>((l) => ({ kind: l.kind, price: Number(l.price) }));
+  const marks = (await safe<{ id: number; kind: Mark["kind"]; low: string; high: string | null; memo: string; alert: boolean }>(
+    "SELECT id, kind, low, high, memo, alert FROM chart_levels WHERE ticker = $1 ORDER BY id", [ticker],
+  )).map<Mark>((m) => ({ ...m, low: Number(m.low), high: m.high === null ? null : Number(m.high) }));
+  const doodles = await safe<Doodle>("SELECT id, view, color, points FROM chart_doodles WHERE ticker = $1 ORDER BY id", [ticker]);
   const memos = await safe<Memo>(
     "SELECT id, to_char(day, 'YYYY-MM-DD') AS day, body FROM chart_memos WHERE ticker = $1 ORDER BY day DESC, id DESC",
     [ticker],
@@ -124,7 +128,7 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}
 
       <h2>차트 · 메모 · 가격 알림</h2>
-      <ChartMemo ticker={ticker} name={stock.name} current={stock.cur === null ? null : Number(stock.cur)} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} />
+      <ChartMemo ticker={ticker} name={stock.name} current={stock.cur === null ? null : Number(stock.cur)} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} marks={marks} doodles={doodles} />
 
       <h2>재무 요약</h2>
       {financials.length === 0 ? (

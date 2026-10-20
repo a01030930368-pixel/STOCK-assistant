@@ -44,6 +44,10 @@ PC와 휴대폰에서 쓰는 개인 주식투자 보조 앱입니다. 키움증�
 휴대폰에서 밖에서 접속하려면 PC와 휴대폰에 [Tailscale](https://tailscale.com)을 설치하고 `http://<PC의 Tailscale 이름>:3000`으로 접속하세요.
 PC가 꺼지거나 절전 모드에 들어가면 알림도 멈추니 절전 모드를 꺼 두세요.
 
+### 업데이트
+
+GitHub에서 PR을 머지한 뒤, 이 폴더의 `update.bat`을 더블클릭하세요. main의 최신 코드를 받아 덮어쓰고(`.env`, `pgdata`는 그대로) `docker compose up -d --build`까지 해 줍니다. Docker Desktop이 켜져 있어야 해요.
+
 ## 개발
 
 ```bash

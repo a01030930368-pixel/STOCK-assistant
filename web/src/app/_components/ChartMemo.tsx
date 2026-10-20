@@ -2,13 +2,24 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
-import { addAlert, addChartMemo, deleteChartMemo } from "@/app/actions";
+import { addAlert, addChartMemo, addDoodle, addLevel, deleteChartMemo, deleteDoodle, deleteLevel, updateLevel } from "@/app/actions";
+import { KIND_LABEL, kindFor, nearest, strokeDistance, thin, zone, type Doodle, type DoodlePoint, type Mark } from "@/lib/drawings";
+import { Drawings, RESIST, SUPPORT, type Stroke } from "./chartDrawings";
 import { aggregate, aggregateMinutes, bollinger, bucketOf, MINUTES, rsi, sma, type Candle, type MinuteCandle, type Period } from "@/lib/candles";
 
 export type { Candle, MinuteCandle };
 export type Memo = { id: number; day: string; body: string };
 export type Trade = { day: string; side: "buy" | "sell"; price: number; quantity: number };
 export type Level = { kind: "avg" | "stop" | "target" | "alert"; price: number };
+export type { Doodle, Mark };
+type Tool = "none" | "line" | "zone" | "pen" | "eraser";
+const TOOLS: { key: Tool; label: string; hint: string }[] = [
+  { key: "line", label: "― 선", hint: "차트에서 원하는 높이를 한 번 누르세요. 지금 가격보다 위면 저항, 아래면 지지예요." },
+  { key: "zone", label: "▭ 구간", hint: "구간의 위·아래를 차례로 한 번씩 누르세요." },
+  { key: "pen", label: "✎ 낙서", hint: "손가락이나 마우스로 그리세요. 낙서는 이 차트에서만 보여요. 다 그렸으면 ✎ 낙서를 다시 눌러 끝내요." },
+  { key: "eraser", label: "지우개", hint: "지울 낙서나 선을 누르세요." },
+];
+const PEN = "#e7cf9c";
 
 const UP = "#e8806f", DOWN = "#86a8e6", GOLD = "#c9a96b", MUTED = "#9b968b", LINE = "#1b1b1f", BAND = "#a7a08f";
 const MAS = [
@@ -46,9 +57,9 @@ const md = (day: string) => `${Number(day.slice(5, 7))}.${Number(day.slice(8, 10
 const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
 const compact = (v: number) => (v >= 1e12 ? `${(v / 1e12).toFixed(1)}조` : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v.toLocaleString("ko-KR"));
 
-export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current }: {
+export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles }: {
   ticker: string; name: string; market: string; candles: Candle[]; minutes: MinuteCandle[]; memos: Memo[]; trades: Trade[]; levels: Level[]; today: string;
-  current: number | null;
+  current: number | null; marks: Mark[]; doodles: Doodle[];
 }) {
   const [view, setView] = useState<View>("D");
   const intraday = !["D", "W", "M"].includes(view);
@@ -60,6 +71,20 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   const [day, setDay] = useState(today);
   const [pick, setPick] = useState<string>("");
   const [way, setWay] = useState<"above" | "below">("above");
+  const [marks, setMarks] = useState<Mark[]>(savedMarks);
+  const [doodles, setDoodles] = useState<Doodle[]>(savedDoodles);
+  const [tool, setTool] = useState<Tool>("none");
+  const [pending, setPending] = useState<number | null>(null);
+  const [drawShown, setDrawShown] = useState(true);
+  const toolRef = useRef<Tool>(tool);
+  toolRef.current = tool;
+  const pendingRef = useRef<number | null>(pending);
+  pendingRef.current = pending;
+  const marksRef = useRef(marks);
+  marksRef.current = marks;
+  const drawRef = useRef<Drawings | null>(null);
+  const priceRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const live = useRef<{ px: [number, number][]; pts: DoodlePoint[] } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const rangeRef = useRef<Range>(range);
@@ -122,6 +147,11 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         priceFormat: { type: "custom", formatter: fmt, minMove: market === "US" ? 0.01 : 1 },
       });
       price.setData(bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
+      priceRef.current = price;
+      const drawings = new Drawings(new Map(bars.map((b, i) => [b.key, i])), fmt);
+      price.attachPrimitive(drawings);
+      drawRef.current = drawings;
+      syncDrawings();
 
       if (show.ma) {
         MAS.forEach((m, k) => {
@@ -203,6 +233,8 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
       disposed = true;
       chart?.remove();
       chartRef.current = null;
+      drawRef.current = null;
+      priceRef.current = null;
     };
     // fmt·period는 bars·market과 함께 바뀌므로 의존성에서 뺍니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -211,6 +243,108 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   useEffect(() => {
     if (chartRef.current) applyRange(chartRef.current, bars, intraday ? "intraday" : range);
   }, [range, bars, intraday]);
+
+  const strokes = useMemo<Stroke[]>(() => doodles.filter((d) => d.view === view), [doodles, view]);
+  function syncDrawings() {
+    drawRef.current?.set({ marks: marksRef.current, strokes: strokesRef.current, visible: drawShownRef.current, pending: pendingRef.current });
+  }
+  const strokesRef = useRef(strokes);
+  strokesRef.current = strokes;
+  const drawShownRef = useRef(drawShown);
+  drawShownRef.current = drawShown;
+  useEffect(() => {
+    drawRef.current?.set({ marks, strokes, visible: drawShown, pending });
+  }, [marks, strokes, drawShown, pending]);
+  useEffect(() => {
+    chartRef.current?.applyOptions({ handleScroll: tool !== "pen", handleScale: tool !== "pen" });
+    if (tool !== "zone") setPending(null);
+  }, [tool]);
+
+  const ref = current ?? (bars.length ? bars[bars.length - 1].close : 0);
+  async function saveMark(low: number, high: number | null) {
+    const kind = kindFor(low, high, ref);
+    const id = await addLevel({ ticker, name, kind, low, high });
+    if (id !== null) setMarks((m) => [...m, { id, kind, low, high, memo: "", alert: false }]);
+  }
+  function changeMark(id: number, change: Partial<Pick<Mark, "memo" | "alert" | "kind">>) {
+    setMarks((ms) => ms.map((m) => (m.id === id ? { ...m, ...change } : m)));
+    void updateLevel(id, change);
+  }
+  function removeMark(id: number) {
+    setMarks((ms) => ms.filter((m) => m.id !== id));
+    void deleteLevel(id);
+  }
+  // 선·구간·지우개 도구로 차트를 눌렀을 때
+  function drawAt(v: number, x: number, y: number) {
+    const t = toolRef.current;
+    if (t === "line") {
+      void saveMark(v, null);
+      setTool("none");
+    } else if (t === "zone") {
+      const first = pendingRef.current;
+      if (first === null) setPending(v);
+      else if (first !== v) {
+        const z = zone(first, v);
+        void saveMark(z.low, z.high);
+        setTool("none");
+      }
+    } else if (t === "eraser") {
+      const d = drawRef.current;
+      if (!d) return;
+      const hit = strokesRef.current.find((s) => s.id !== null && strokeDistance([x, y], d.pixels(s.points)) <= 10);
+      if (hit) {
+        setDoodles((ds) => ds.filter((s) => s.id !== hit.id));
+        void deleteDoodle(hit.id!);
+        return;
+      }
+      const m = marksRef.current.find((mk) => {
+        const top = d.y(mk.high ?? mk.low), bottom = d.y(mk.low);
+        return top !== null && bottom !== null && y >= top - 6 && y <= bottom + 6;
+      });
+      if (m) removeMark(m.id);
+    }
+  }
+  // 도구를 고른 동안은 차트 위에 얇은 막을 덮어 누른 자리를 직접 받아요(차트는 빠른 두 번 누름을 놓쳐서).
+  function tap(e: React.PointerEvent<HTMLDivElement>) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+    const at = priceRef.current?.coordinateToPrice(y) ?? null;
+    if (at !== null && at > 0) drawAt(tickRound(at, market), x, y);
+  }
+  // 낙서: 누른 자리(화면 좌표)를 봉 키·봉 안 위치·가격으로 바꿔 둡니다.
+  function toPoint(x: number, y: number): DoodlePoint | null {
+    const chart = chartRef.current, price = priceRef.current;
+    if (!chart || !price || !bars.length) return null;
+    const logical = chart.timeScale().coordinateToLogical(x);
+    const p = price.coordinateToPrice(y);
+    if (logical === null || p === null || p <= 0) return null;
+    const i = Math.max(0, Math.min(bars.length - 1, Math.round(logical)));
+    return [bars[i].key, Math.round((logical - i) * 1000) / 1000, Number(p.toPrecision(8))];
+  }
+  function penDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    live.current = { px: [], pts: [] };
+    penMove(e);
+  }
+  function penMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!live.current) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+    const pt = toPoint(x, y);
+    if (!pt) return;
+    live.current.px.push([x, y]);
+    live.current.pts.push(pt);
+    drawRef.current?.set({ strokes: [...strokesRef.current, { id: null, color: PEN, points: live.current.pts }] });
+  }
+  async function penUp() {
+    const cur = live.current;
+    live.current = null;
+    if (!cur || !cur.pts.length) return;
+    const points = thin(cur.px).map((i) => cur.pts[i]);
+    const id = await addDoodle({ ticker, view, color: PEN, points });
+    if (id !== null) setDoodles((ds) => [...ds, { id, view, color: PEN, points }]);
+    else syncDrawings();
+  }
 
   useEffect(() => {
     if (!big) return;
@@ -223,6 +357,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   const bar = bars[i];
   const prev = i > 0 ? bars[i - 1] : null;
   const barMemos = bar ? memosByBar.get(bar.key) ?? [] : [];
+  const near = nearest(marks, ref);
   const toggle = (k: keyof typeof show) => setShow((s) => ({ ...s, [k]: !s[k] }));
 
   return (
@@ -240,6 +375,17 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
               <button key={k} type="button" className={show[k] ? "chip-btn on" : "chip-btn"} aria-pressed={show[k]} onClick={() => toggle(k)}>{label}</button>
             ))}
             <button type="button" className="chip-btn" onClick={() => setBig((b) => !b)}>{big ? "닫기 ✕" : "크게 보기"}</button>
+          </div>
+          <div className="chart-toggles draw-tools">
+            {TOOLS.map((t) => (
+              <button key={t.key} type="button" className={tool === t.key ? "chip-btn on" : "chip-btn"} aria-pressed={tool === t.key}
+                onClick={() => { setTool(tool === t.key ? "none" : t.key); setDrawShown(true); }}>{t.label}</button>
+            ))}
+            <button type="button" className={drawShown ? "chip-btn" : "chip-btn on"} aria-pressed={!drawShown} onClick={() => setDrawShown((v) => !v)}>
+              {drawShown ? "그림 숨기기" : "그림 보이기"}
+            </button>
+            {near.above && <span className="near" style={{ color: RESIST, borderColor: RESIST }}>저항 {fmt(near.above.mark.low)}까지 {signed(near.above.pct)}</span>}
+            {near.below && <span className="near" style={{ color: SUPPORT, borderColor: SUPPORT }}>지지 {fmt(near.below.mark.high ?? near.below.mark.low)}까지 {signed(near.below.pct)}</span>}
           </div>
         </div>
 
@@ -275,14 +421,45 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
               )}
               {barMemos.map((m) => <div key={m.id} className="tip-memo">{md(m.day)} {m.body}</div>)}
             </div>
-            <div ref={box} className={show.rsi ? "chart-canvas tall" : "chart-canvas"} />
+            <div className="chart-stage">
+              <div ref={box} className={show.rsi ? "chart-canvas tall" : "chart-canvas"} />
+              {tool === "pen" && (
+                <div className="pen-layer" onPointerDown={penDown} onPointerMove={penMove} onPointerUp={penUp} onPointerCancel={penUp} />
+              )}
+              {(tool === "line" || tool === "zone" || tool === "eraser") && <div className="pen-layer" onPointerUp={tap} />}
+              {tool !== "none" && (
+                <div className="draw-hint">
+                  {tool === "zone" && pending !== null ? `${fmt(pending)}을 골랐어요. 이제 구간의 다른 끝을 누르세요.` : TOOLS.find((t) => t.key === tool)!.hint}
+                </div>
+              )}
+            </div>
           </div>
         )}
         <p className="chart-foot">
-          휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 차트:{" "}
+          휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 지지·저항은 모든 차트에, 낙서는 그린 차트에만 보여요. 차트:{" "}
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a> Lightweight Charts
         </p>
       </div>
+
+      {marks.length > 0 && (
+        <div className="list levels-list">
+          <div className="muted levels-head">내가 그린 지지·저항 · 🔔를 켜 두면 가격이 닿을 때 텔레그램으로 알려요</div>
+          {[...marks].sort((a, b) => (b.high ?? b.low) - (a.high ?? a.low)).map((m) => (
+            <div key={m.id} className="list-item level-row">
+              <span className={m.high === null ? "sw line" : "sw"} style={{ background: m.kind === "support" ? SUPPORT : RESIST }} />
+              <button type="button" className="ghost level-kind" style={{ color: m.kind === "support" ? SUPPORT : RESIST }} title="눌러서 지지/저항 바꾸기"
+                onClick={() => changeMark(m.id, { kind: m.kind === "support" ? "resistance" : "support" })}>{KIND_LABEL[m.kind]}</button>
+              <span className="num">{m.high === null ? fmt(m.low) : `${fmt(m.low)} ~ ${fmt(m.high)}`}</span>
+              <input className="level-memo" defaultValue={m.memo} placeholder="메모 (예: 전고점)" maxLength={100}
+                onBlur={(e) => e.target.value.trim() !== m.memo && changeMark(m.id, { memo: e.target.value.trim() })} />
+              <button type="button" className={m.alert ? "chip-btn on" : "chip-btn"} aria-pressed={m.alert} onClick={() => changeMark(m.id, { alert: !m.alert })}>
+                {m.alert ? "🔔 알림 켜짐" : "🔕 알림 꺼짐"}
+              </button>
+              <button type="button" className="ghost" onClick={() => removeMark(m.id)}>지우기</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <form action={addAlert} className="memo-form alert-form" onSubmit={() => setTimeout(() => setPick(""), 0)}>
         <input type="hidden" name="ticker" value={ticker} />
