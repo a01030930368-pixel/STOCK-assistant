@@ -13,6 +13,7 @@ from .research_job import ResearchJob
 from .screener_job import ScreenerJob
 from .intraday_job import IntradayJob
 from .ai_job import AiJob
+from .briefing_job import BriefingJob
 from .market import kr_market_open, us_market_open
 
 log = logging.getLogger("worker")
@@ -88,6 +89,7 @@ def main() -> None:
     screener = ScreenerJob(kiwoom)
     minutes = IntradayJob(http, kiwoom)
     comments = AiJob(cfg, http)
+    notices = BriefingJob(cfg, http)
     first = True
     last_macro: datetime | None = None
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:
@@ -120,6 +122,10 @@ def main() -> None:
                 comments.run(conn, now)
             except Exception:
                 log.exception("AI 한마디 실패")
+            try:
+                notices.run(conn, now)
+            except Exception:
+                log.exception("일정 알림 실패")
             time.sleep(cfg.poll_seconds)
 
 

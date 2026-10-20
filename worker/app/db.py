@@ -154,6 +154,10 @@ MIGRATIONS = [
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (ticker, day)
     )""",
+    """CREATE TABLE IF NOT EXISTS notices_sent (
+      key      TEXT PRIMARY KEY,
+      sent_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
     # 금리 결정·만기일(policy)과 미국 경제지표 발표일(economic)을 일정에 넣을 수 있게 합니다.
     "ALTER TABLE calendar_events DROP CONSTRAINT IF EXISTS calendar_events_kind_check",
     """ALTER TABLE calendar_events ADD CONSTRAINT calendar_events_kind_check
@@ -446,3 +450,19 @@ def ai_context(conn: psycopg.Connection, ticker: str, name: str, market: str) ->
         ).fetchall()
     ]
     return ctx
+
+
+def notice_sent(conn: psycopg.Connection, key: str) -> bool:
+    return conn.execute("SELECT 1 FROM notices_sent WHERE key = %s", (key,)).fetchone() is not None
+
+
+def mark_notice(conn: psycopg.Connection, key: str) -> None:
+    conn.execute("INSERT INTO notices_sent (key) VALUES (%s) ON CONFLICT DO NOTHING", (key,))
+    conn.execute("DELETE FROM notices_sent WHERE sent_at < now() - interval '60 days'")
+
+
+def events_on(conn: psycopg.Connection, day) -> list[tuple[str, str, str]]:
+    """그날 일정 (kind, title, detail). 실적은 지금 들고 있거나 일지에 열려 있는 종목만 남아 있습니다."""
+    return conn.execute(
+        "SELECT kind, title, detail FROM calendar_events WHERE day = %s ORDER BY kind, title", (day,)
+    ).fetchall()
