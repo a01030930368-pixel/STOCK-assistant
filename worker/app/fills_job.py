@@ -35,11 +35,9 @@ class FillsJob:
             try:
                 rows = []
                 for start, end in fills.chunks(today - timedelta(days=days), today):
-                    rows += fetch(start, end)
+                    rows += fetch(conn, start, end)
                 if market == "KR":
-                    # kt00015에 아직 안 잡혔을 수 있는 최근 닷새(주말 낀 결제 전 체결)는 하루치 조회로 채웁니다.
-                    for back in range(5):
-                        rows += self.kiwoom.kr_day_fills(today - timedelta(days=back))
+                    rows += self._kr_days(today)
                 merged = self._merge(rows)
                 db.save_fills(conn, merged)
                 log.info("%s 체결 내역 확인: %d건", "국내" if market == "KR" else "미국", len(merged))
@@ -53,11 +51,32 @@ class FillsJob:
                 status[market] = {"at": now.isoformat(), "ok": False, "error": str(e)[:200]}
         db.set_setting(conn, "fills_status", status)
 
-    def _kr(self, start: str, end: str) -> list:
+    def _kr(self, conn, start: str, end: str) -> list:
         return self.kiwoom.kr_fills(start, end)
 
-    def _us(self, start: str, end: str) -> list:
-        return self.kiwoom.us_fills(start, end)
+    def _kr_days(self, today) -> list:
+        # kt00015에 아직 안 잡혔을 수 있는 최근 닷새(주말 낀 결제 전 체결)는 하루치 조회로 채웁니다.
+        # 보조 조회라서 실패해도 kt00015 결과는 그대로 씁니다.
+        rows = []
+        for back in range(5):
+            day = today - timedelta(days=back)
+            try:
+                rows += self.kiwoom.kr_day_fills(day)
+            except Exception as e:
+                log.warning("국내 %s 하루치 체결 조회 실패: %s", day, e)
+        return rows
+
+    def _us(self, conn, start: str, end: str) -> list:
+        try:
+            return self.kiwoom.us_fills(start, end)
+        except RuntimeError as e:
+            if "stk_cd" not in str(e) and "종목" not in str(e):
+                raise
+        # 종목코드 없이는 안 받아 주면, 가진 적 있거나 지켜보는 미국 종목마다 따로 묻습니다.
+        rows = []
+        for ticker in db.us_tickers(conn):
+            rows += self.kiwoom.us_fills(start, end, ticker)
+        return rows
 
     @staticmethod
     def _merge(rows: list) -> list:
