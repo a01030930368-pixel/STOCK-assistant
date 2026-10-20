@@ -509,7 +509,12 @@ export async function addLevel(input: { ticker: string; name: string; kind: Leve
   return row.id;
 }
 
-export async function updateLevel(id: number, change: { memo?: string; alert?: boolean; kind?: LevelKind }): Promise<void> {
+export async function updateLevel(id: number, change: { memo?: string; alert?: boolean; kind?: LevelKind; low?: number; high?: number | null }): Promise<void> {
+  // 끌어서 옮긴 가격. 구간이면 위·아래가 같이 와요.
+  if (change.low !== undefined && positive(change.low) && (change.high === undefined || change.high === null || positive(change.high))) {
+    await query("UPDATE chart_levels SET low = $2, high = CASE WHEN high IS NULL THEN NULL ELSE $3::numeric END, last_price = NULL WHERE id = $1",
+      [id, change.low, change.high ?? null]);
+  }
   if (change.memo !== undefined) await query("UPDATE chart_levels SET memo = $2 WHERE id = $1", [id, change.memo.slice(0, 100)]);
   // 알림을 새로 켜면 지금 가격부터 다시 봐요(켜자마자 예전 움직임으로 울리지 않게).
   if (change.alert !== undefined) await query("UPDATE chart_levels SET alert = $2, last_price = NULL, alerted_at = NULL WHERE id = $1", [id, change.alert]);

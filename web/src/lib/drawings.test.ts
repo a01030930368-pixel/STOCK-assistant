@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kindFor, nearest, strokeDistance, thin, validDoodle, zone, type Mark } from "./drawings";
+import { kindFor, moveEdge, nearest, snap, strokeDistance, thin, validDoodle, zone, type Mark } from "./drawings";
 
 const mark = (id: number, low: number, high: number | null = null): Mark => ({ id, kind: "support", low, high, memo: "", alert: false });
 
@@ -34,5 +34,17 @@ describe("drawings", () => {
     expect(validDoodle([])).toBe(false);
     expect(validDoodle([["x", "0", 1]])).toBe(false);
     expect(validDoodle([["x", 0, -1]])).toBe(false);
+  });
+
+  it("snaps to the closest candle price on screen", () => {
+    const toY = (p: number) => 1000 - p; // 가격 1 = 1픽셀
+    expect(snap(500, [495, 503, 520], toY, 8)).toBe(503);
+    expect(snap(500, [480, 520], toY, 8)).toBeNull();
+  });
+
+  it("moves a line or a zone edge", () => {
+    expect(moveEdge(mark(1, 10), "low", 12)).toMatchObject({ low: 12, high: null });
+    expect(moveEdge(mark(1, 10, 20), "high", 25)).toMatchObject({ low: 10, high: 25 });
+    expect(moveEdge(mark(1, 10, 20), "high", 5)).toMatchObject({ low: 5, high: 10 });
   });
 });

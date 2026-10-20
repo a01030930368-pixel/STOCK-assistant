@@ -66,3 +66,22 @@ export function validDoodle(points: unknown): points is DoodlePoint[] {
     points.every((p) => Array.isArray(p) && p.length === 3 && typeof p[0] === "string" && p[0].length <= 20 &&
       Number.isFinite(p[1]) && Number.isFinite(p[2]) && p[2] > 0);
 }
+
+// 자석: 후보 가격(캔들의 시·고·저·종) 중 화면에서 maxPx 안에 있는 가장 가까운 것. 없으면 null.
+export function snap(y: number, candidates: number[], toY: (price: number) => number | null, maxPx: number): number | null {
+  let best: number | null = null, gap = maxPx;
+  for (const c of candidates) {
+    const cy = toY(c);
+    if (cy === null) continue;
+    const d = Math.abs(cy - y);
+    if (d <= gap) { best = c; gap = d; }
+  }
+  return best;
+}
+
+// 선·구간 끝을 끌어서 옮긴 결과. 구간의 위 끝을 아래 끝보다 내리면 서로 바뀌어요.
+export function moveEdge(m: Mark, edge: "low" | "high", price: number): Mark {
+  if (m.high === null) return { ...m, low: price };
+  const other = edge === "low" ? m.high : m.low;
+  return { ...m, low: Math.min(price, other), high: Math.max(price, other) };
+}
