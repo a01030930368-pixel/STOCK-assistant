@@ -2,6 +2,7 @@
 
 - 저녁 일정 알림: 매일 저녁 8시(한국 시간)에 다음 날 일정(금리 결정·경제지표·만기·휴장·내 종목 실적)을 보냅니다.
 - 아침 브리핑: 평일 아침 8시에 밤사이 미국장, 내 종목, 오늘 일정을 한 번에 보냅니다.
+- 실적 전날 알림: 저녁 8시에, 내일 실적을 발표하는 보유 종목마다 따로 한 통씩 보냅니다.
 """
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -89,4 +90,31 @@ def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], it
             lines.append(f"· {it.title}" + (f"\n  {it.detail}" if it.detail else ""))
     else:
         lines.append("· 큰 일정은 없어요")
+    return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class EarningsEve:
+    name: str
+    market: str
+    detail: str  # 일정의 예상 EPS 등
+    pnl_pct: float
+    weight_pct: float | None
+    stop: float | None
+    target: float | None
+    last_surprise_pct: float | None  # 지난번 실제 EPS가 예상보다 몇 % 높았나
+
+
+def earnings_eve_message(day: date, e: EarningsEve) -> str:
+    lines = [f"[LODESTAR] 내일 실적 발표 · {e.name}", day_label(day) + (f" · {e.detail}" if e.detail else "")]
+    if e.last_surprise_pct is not None:
+        lines.append(f"지난번 실적은 예상보다 {e.last_surprise_pct:+.0f}% {'좋았어요' if e.last_surprise_pct >= 0 else '나빴어요'}")
+    now = f"지금 평단 대비 {_pct(e.pnl_pct)}"
+    if e.weight_pct is not None:
+        now += f" · 내 돈의 {e.weight_pct:.0f}%"
+    lines.append(now)
+    plan = [f"손절 {_price(e.market, e.stop)}" if e.stop else "", f"익절 {_price(e.market, e.target)}" if e.target else ""]
+    plan = [p for p in plan if p]
+    lines.append(" · ".join(plan) if plan else "손절·익절 알림이 없어요")
+    lines.append("실적 뒤에는 가격이 크게 움직일 수 있어요. 들고 갈지, 줄일지 계획을 한 번 점검해 보세요.")
     return "\n".join(lines)

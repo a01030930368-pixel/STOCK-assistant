@@ -21,6 +21,7 @@ class BriefingJob:
             return
         now = now or datetime.now(timezone.utc)
         self._evening(conn, now)
+        self._earnings_eve(conn, now)
         self._morning(conn, now)
 
     def _send(self, text: str) -> None:
@@ -38,6 +39,18 @@ class BriefingJob:
             self._send(text)
             log.info("내일 일정 알림을 보냈습니다")
         db.mark_notice(conn, key)
+
+    def _earnings_eve(self, conn: psycopg.Connection, now: datetime) -> None:
+        day = briefing.evening_due(now)
+        if day is None:
+            return
+        for ticker, eve in db.earnings_eve(conn, day):
+            key = f"earnings:{ticker}:{day.isoformat()}"
+            if db.notice_sent(conn, key):
+                continue
+            self._send(briefing.earnings_eve_message(day, briefing.EarningsEve(*eve)))
+            log.info("%s 실적 전날 알림을 보냈습니다", ticker)
+            db.mark_notice(conn, key)
 
     def _morning(self, conn: psycopg.Connection, now: datetime) -> None:
         day = briefing.morning_due(now)
