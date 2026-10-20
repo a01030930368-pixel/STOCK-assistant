@@ -28,7 +28,7 @@ HOURS = {"bmo": "장 시작 전", "amc": "장 마감 후", "dmh": "장중"}
 @dataclass(frozen=True)
 class Event:
     day: date
-    kind: str  # holiday | earnings | policy(금리 결정·만기) | economic(미국 지표 발표)
+    kind: str  # holiday | earnings | policy(금리 결정·만기) | economic(미국 지표 발표) | dividend(배당락)
     market: str
     ticker: str
     title: str

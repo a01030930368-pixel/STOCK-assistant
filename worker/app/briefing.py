@@ -14,7 +14,7 @@ MORNING, MORNING_UNTIL = time(8, 0), time(11, 0)  # 워커가 늦게 켜져도 �
 # 밤사이 미국장으로 보여 줄 지수(야후 기호, 이름)
 INDEXES = [("^GSPC", "S&P 500"), ("^IXIC", "나스닥"), ("^SOX", "필라델피아 반도체"), ("KRW=X", "원/달러")]
 # 같은 날 여러 일정이 있으면 시장 전체에 영향이 큰 것부터 보여 줍니다.
-ORDER = {"policy": 0, "economic": 1, "earnings": 2, "holiday": 3}
+ORDER = {"policy": 0, "economic": 1, "earnings": 2, "dividend": 3, "holiday": 4}
 
 
 @dataclass(frozen=True)

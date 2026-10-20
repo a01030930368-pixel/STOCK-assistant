@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from .alerts import Alert
 from .calendar import Event
@@ -75,7 +76,7 @@ MIGRATIONS = [
     )""",
     """CREATE TABLE IF NOT EXISTS calendar_events (
       day     DATE NOT NULL,
-      kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic')),
+      kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic', 'dividend')),
       market  TEXT NOT NULL CHECK (market IN ('KR', 'US')),
       ticker  TEXT NOT NULL DEFAULT '',
       title   TEXT NOT NULL,
@@ -161,7 +162,7 @@ MIGRATIONS = [
     # 금리 결정·만기일(policy)과 미국 경제지표 발표일(economic)을 일정에 넣을 수 있게 합니다.
     "ALTER TABLE calendar_events DROP CONSTRAINT IF EXISTS calendar_events_kind_check",
     """ALTER TABLE calendar_events ADD CONSTRAINT calendar_events_kind_check
-       CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic'))""",
+       CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic', 'dividend'))""",
     """CREATE TABLE IF NOT EXISTS watchlist (
       ticker      TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
@@ -183,10 +184,34 @@ MIGRATIONS = [
       custom      TEXT,
       fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
+    """CREATE TABLE IF NOT EXISTS stock_dividends (
+      ticker   TEXT NOT NULL,
+      ex_date  DATE NOT NULL,
+      amount   NUMERIC(18, 4) NOT NULL,
+      PRIMARY KEY (ticker, ex_date)
+    )""",
     """CREATE TABLE IF NOT EXISTS app_settings (
       key    TEXT PRIMARY KEY,
       value  JSONB NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS trade_fills (
+      fill_key    TEXT PRIMARY KEY,
+      market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+      trade_date  DATE NOT NULL,
+      ticker      TEXT NOT NULL,
+      name        TEXT NOT NULL DEFAULT '',
+      side        TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+      quantity    NUMERIC(18, 4) NOT NULL,
+      price       NUMERIC(18, 4) NOT NULL,
+      fee         NUMERIC(18, 4),
+      fill_time   TEXT,
+      fill_count  INT NOT NULL DEFAULT 1,
+      source      TEXT NOT NULL,
+      hidden      BOOLEAN NOT NULL DEFAULT false,
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "ALTER TABLE buy_entries ADD COLUMN IF NOT EXISTS fill_key TEXT",
+    "ALTER TABLE sell_entries ADD COLUMN IF NOT EXISTS fill_key TEXT",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -392,6 +417,20 @@ def save_calendar(conn: psycopg.Connection, kind: str, events: list[Event], tick
         conn.execute("DELETE FROM calendar_events WHERE day < CURRENT_DATE - 30")
 
 
+def held_quantities(conn: psycopg.Connection) -> list[tuple[str, str, str, Decimal]]:
+    """(ticker, name, market, quantity)"""
+    return conn.execute("SELECT ticker, name, market, quantity FROM holdings WHERE quantity > 0 ORDER BY ticker").fetchall()
+
+
+def save_dividends(conn: psycopg.Connection, ticker: str, rows) -> None:
+    for d in rows:
+        conn.execute(
+            """INSERT INTO stock_dividends (ticker, ex_date, amount) VALUES (%s, %s, %s)
+               ON CONFLICT (ticker, ex_date) DO UPDATE SET amount = EXCLUDED.amount""",
+            (ticker, d.ex_date, d.amount),
+        )
+
+
 def save_prices(conn: psycopg.Connection, ticker: str, rows) -> None:
     for r in rows:
         conn.execute(
@@ -570,3 +609,81 @@ def briefing_holdings(conn: psycopg.Connection) -> list[tuple[str, str, float, f
             change = (float(closes[0]) / float(closes[1]) - 1) * 100
         out.append((name, market, float(price), change, float(pnl)))
     return out
+
+
+# ---------------------------------------------------------------- 텔레그램 명령
+
+def save_fills(conn: psycopg.Connection, fills) -> None:
+    # kt00015(수수료 포함)가 정본입니다. 하루치 조회(kt00009) 값은 kt00015 값을 덮지 않습니다.
+    for f in fills:
+        conn.execute(
+            """INSERT INTO trade_fills (fill_key, market, trade_date, ticker, name, side, quantity, price, fee, fill_time, fill_count, source)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (fill_key) DO UPDATE SET name = EXCLUDED.name, quantity = EXCLUDED.quantity, price = EXCLUDED.price,
+                 fee = EXCLUDED.fee, fill_time = COALESCE(EXCLUDED.fill_time, trade_fills.fill_time),
+                 fill_count = EXCLUDED.fill_count, source = EXCLUDED.source, fetched_at = now()
+               WHERE trade_fills.source <> 'kt00015' OR EXCLUDED.source = 'kt00015'""",
+            (f.key, f.market, f.day, f.ticker, f.name, f.side, f.quantity, f.price, f.fee, f.time, f.count, f.source),
+        )
+
+
+def get_setting(conn: psycopg.Connection, key: str):
+    row = conn.execute("SELECT value FROM app_settings WHERE key = %s", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def set_setting(conn: psycopg.Connection, key: str, value) -> None:
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (key, Jsonb(value)),
+    )
+
+
+def command_accounts(conn: psycopg.Connection) -> tuple[list[tuple], float]:
+    """(시장, 평가, 손익, 손익률, 예수금) 목록과 원/달러 환율"""
+    cash = {m: float(d2 if d2 is not None else dep) for m, dep, d2 in conn.execute("SELECT market, deposit, d2_deposit FROM cash_balances")}
+    out = []
+    for market, table in (("KR", "account_summary"), ("US", "us_account_summary")):
+        row = conn.execute(f"SELECT total_eval, total_pnl, total_pnl_pct FROM {table} WHERE id = 1").fetchone()
+        if row:
+            out.append((market, float(row[0]), float(row[1]), float(row[2]), cash.get(market)))
+    rate = conn.execute("SELECT exch_rate FROM us_account_summary WHERE id = 1").fetchone()
+    return out, float(rate[0]) if rate else 0.0
+
+
+def command_holdings(conn: psycopg.Connection) -> list[tuple]:
+    return [(n, m, float(p), float(r)) for n, m, p, r in conn.execute(
+        "SELECT name, market, cur_price, pnl_pct FROM holdings WHERE quantity > 0 ORDER BY market, eval_amount DESC")]
+
+
+def command_alerts(conn: psycopg.Connection) -> list[tuple]:
+    rows = conn.execute(
+        """SELECT a.name, COALESCE(h.market, w.market, 'KR'), a.kind, a.direction, a.price, COALESCE(h.cur_price, q.price)
+           FROM alerts a
+           LEFT JOIN holdings h ON h.ticker = a.ticker
+           LEFT JOIN watchlist w ON w.ticker = a.ticker
+           LEFT JOIN watch_quotes q ON q.ticker = a.ticker
+           WHERE a.active ORDER BY a.name, a.price"""
+    ).fetchall()
+    return [(n, m, k, d, float(p), float(c) if c is not None else None) for n, m, k, d, p, c in rows]
+
+
+def command_calendar(conn: psycopg.Connection, today) -> list[tuple]:
+    return conn.execute(
+        "SELECT day, title FROM calendar_events WHERE day >= %s AND day < %s + 7 ORDER BY day, kind DESC, title",
+        (today, today),
+    ).fetchall()
+
+
+def command_watch(conn: psycopg.Connection) -> list[tuple]:
+    rows = conn.execute(
+        """SELECT w.name, w.market, COALESCE(h.cur_price, q.price), q.change_pct,
+             (SELECT a.price FROM alerts a WHERE a.ticker = w.ticker AND a.kind = 'custom' AND a.active
+              ORDER BY abs(a.price - COALESCE(h.cur_price, q.price, a.price)) LIMIT 1)
+           FROM watchlist w
+           LEFT JOIN holdings h ON h.ticker = w.ticker AND h.quantity > 0
+           LEFT JOIN watch_quotes q ON q.ticker = w.ticker
+           ORDER BY w.created_at"""
+    ).fetchall()
+    f = lambda v: float(v) if v is not None else None
+    return [(n, m, f(c), f(ch), f(t)) for n, m, c, ch, t in rows]

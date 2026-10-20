@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import psycopg
 
-from . import calendar, db, prices, research, translate
+from . import calendar, db, dividends, prices, research, translate
 from .config import Config
 
 log = logging.getLogger("worker")
@@ -43,6 +43,7 @@ class ResearchJob:
             self._refresh_codes(now)
             self._fundamentals(conn, now)
             self._calendar(conn, now)
+            self._dividends(conn, now)
             self._prices(conn, now)
         self._new_prices(conn, now)
 
@@ -113,6 +114,17 @@ class ResearchJob:
             if market == "US":
                 self._try(f"{ticker} 실적 일정", lambda: db.save_calendar(
                     conn, "earnings", calendar.finnhub_earnings_calendar(ticker, name, self.cfg.finnhub_api_key, today, self.http), ticker))
+
+    def _dividends(self, conn: psycopg.Connection, now: datetime) -> None:
+        # 보유 종목마다 배당 기록을 받고, 다음 배당락(발표됐거나 예상)을 일정에 넣습니다.
+        today = now.astimezone(KST).date()
+        for ticker, name, market, qty in db.held_quantities(conn):
+            def one():
+                history = dividends.yahoo_dividends(ticker, market, self.http)
+                db.save_dividends(conn, ticker, history)
+                event = dividends.dividend_event(ticker, name, market, qty, history, today)
+                db.save_calendar(conn, "dividend", [event] if event else [], ticker)
+            self._try(f"{name} 배당", one)
 
     def _refresh_codes(self, now: datetime) -> None:
         if self.codes_at and now - self.codes_at < CODES_EVERY:

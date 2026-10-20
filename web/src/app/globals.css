@@ -15,6 +15,7 @@
   --up: #e8806f; --up-soft: #2c1714; --down: #86a8e6; --down-soft: #141c2b;
   --warn: #e0b25a; --warn-soft: #2b2312;
   --macro: #b48ead; --macro-soft: #2a2129;
+  --div: #5fbf9a; --div-soft: #14251f;
   --radius: 10px; --nav-h: 64px;
   --sans: "Pretendard Variable", "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   /* 숫자도 같은 글씨로 쓰고, 자리만 맞춥니다(tabular-nums). */
@@ -387,3 +388,14 @@ h2 .muted { font-weight: 400; font-size: 0.8rem; margin-left: 8px; }
 .sector-row input { padding: 7px 10px; }
 @media (max-width: 900px) { .donuts, .weights-bottom { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 720px) { .sector-row { grid-template-columns: minmax(0, 1fr) 130px auto; } .tabs a { font-size: 0.66rem; padding: 4px 2px; } }
+
+/* 배당 */
+.badge.div { background: var(--div-soft); color: var(--div); }
+.cal-chip.dividend { background: var(--div-soft); color: var(--div); }
+@media (max-width: 720px) { .cal-chip.dividend { background: var(--div); } }
+.div-sum { display: flex; flex-wrap: wrap; gap: 6px 24px; padding: 0 18px 10px; color: var(--sub); font-size: 0.9rem; }
+.div-sum b { color: var(--accent); font-weight: 600; }
+.fills .list-item { padding: 10px 16px; }
+.fills .list-item .button { padding: 6px 12px; font-size: 0.85rem; }
+.fills details summary { cursor: pointer; margin: 4px 0; }
+.fill-note { font-size: 0.88rem; }

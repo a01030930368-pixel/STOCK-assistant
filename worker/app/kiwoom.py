@@ -5,6 +5,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
+import time
 
 import httpx
 
@@ -194,21 +195,37 @@ class KiwoomClient:
         self._token_expires = datetime.strptime(body["expires_dt"], KST_FORMAT)
         return self._token
 
-    def _post(self, path: str, api_id: str, payload: dict) -> dict:
-        res = self._http.post(
-            f"{self._base_url}{path}",
-            headers={
-                "Content-Type": "application/json;charset=UTF-8",
-                "authorization": f"Bearer {self._access_token()}",
-                "api-id": api_id,
-            },
-            json=payload,
-        )
+    def _request(self, path: str, api_id: str, payload: dict, next_key: str | None = None) -> httpx.Response:
+        headers = {
+            "Content-Type": "application/json;charset=UTF-8",
+            "authorization": f"Bearer {self._access_token()}",
+            "api-id": api_id,
+        }
+        if next_key:
+            headers["cont-yn"] = "Y"
+            headers["next-key"] = next_key
+        res = self._http.post(f"{self._base_url}{path}", headers=headers, json=payload)
         res.raise_for_status()
         body = res.json()
         if str(body.get("return_code", "0")) != "0":
             raise RuntimeError(f"키움 API 오류 {api_id}: {body.get('return_msg')}")
-        return body
+        return res
+
+    def _post(self, path: str, api_id: str, payload: dict) -> dict:
+        return self._request(path, api_id, payload).json()
+
+    def _post_pages(self, path: str, api_id: str, payload: dict, list_key: str, max_pages: int = 30) -> list[dict]:
+        # 응답 헤더 cont-yn=Y이면 next-key를 붙여 같은 요청을 다시 보내 다음 쪽을 받습니다.
+        rows: list[dict] = []
+        next_key = None
+        for _ in range(max_pages):
+            res = self._request(path, api_id, payload, next_key)
+            rows.extend(res.json().get(list_key) or [])
+            next_key = res.headers.get("next-key", "").strip()
+            if res.headers.get("cont-yn", "N").upper() != "Y" or not next_key:
+                break
+            time.sleep(0.3)
+        return rows
 
     def domestic_balance(self) -> Balance:
         # kt00018 계좌평가잔고내역요청, qry_tp=1 합산
@@ -256,3 +273,23 @@ class KiwoomClient:
     def us_cash(self) -> Cash:
         # ust21110 해외주식 예수금 조회
         return parse_us_cash(self._post("/api/us/acnt", "ust21110", {}))
+
+    def kr_fills(self, start: str, end: str) -> list:
+        # kt00015 위탁종합거래내역요청. tp=3 매매, gds_tp=1 국내주식, 거래소 전체(KRX+NXT)
+        from .fills import parse_kr_fills
+        payload = {"strt_dt": start, "end_dt": end, "tp": "3", "stk_cd": "", "crnc_cd": "", "gds_tp": "1",
+                   "frgn_stex_code": "", "dmst_stex_tp": "%"}
+        return parse_kr_fills(self._post_pages("/api/dostk/acnt", "kt00015", payload, "trst_ovrl_trde_prps_array"))
+
+    def us_fills(self, start: str, end: str) -> list:
+        # ust21180 미국주식 기간별 주문내역. 체결 수량이 있는 줄만 씁니다.
+        from .fills import parse_us_fills
+        payload = {"strt_dt": start, "end_dt": end, "slby_tp": "0", "stex_tp": "%", "stk_cd": "", "oppo_trde_tp": "%"}
+        return parse_us_fills(self._post_pages("/api/us/acnt", "ust21180", payload, "result_list"))
+
+    def kr_day_fills(self, day) -> list:
+        # kt00009 계좌별주문체결현황요청. 하루치 체결만(qry_tp=1), 주식, 거래소 전체
+        from .fills import parse_kr_day_fills
+        payload = {"ord_dt": day.strftime("%Y%m%d"), "stk_bond_tp": "1", "mrkt_tp": "0", "sell_tp": "0", "qry_tp": "1",
+                   "stk_cd": "", "fr_ord_no": "", "dmst_stex_tp": "%"}
+        return parse_kr_day_fills(day, self._post_pages("/api/dostk/acnt", "kt00009", payload, "acnt_ord_cntr_prst_array"))
