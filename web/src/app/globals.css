@@ -497,3 +497,17 @@ p.small { font-size: 0.82rem; margin: 6px 0 0; }
 
 /* 아이폰은 16px보다 작은 입력칸을 누르면 화면을 확대해요. 휴대폰에서는 입력 글자를 16px로 둡니다. */
 @media (max-width: 720px) { input, select, textarea { font-size: 16px; } }
+
+/* ISA 계좌 카드 */
+.account.isa { border-left: 3px solid var(--accent); }
+.isa-meter { margin-top: 12px; }
+.isa-meter .label { font-size: 0.8rem; color: var(--muted); }
+.meter { height: 7px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 6px; }
+.meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.meter.green i { background: var(--div); }
+.isa-set { margin-top: 10px; font-size: 0.82rem; }
+.isa-set summary { color: var(--muted); cursor: pointer; }
+.isa-set form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-top: 8px; }
+.isa-set input[type="date"] { width: auto; }
+.isa-set button { padding: 8px 14px; }
+@media (max-width: 720px) { .isa-set form { grid-template-columns: 1fr; } }

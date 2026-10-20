@@ -31,6 +31,7 @@ PC와 휴대폰에서 쓰는 개인 주식투자 보조 앱입니다. 키움증�
 1. [Docker Desktop](https://www.docker.com/products/docker-desktop/)을 설치합니다.
 2. `.env.example`을 `.env`로 복사하고 값을 채웁니다.
    - 키움 앱키·시크릿: [키움 REST API](https://openapi.kiwoom.com)에서 신청. 처음엔 `KIWOOM_MOCK=true`(모의투자)로 시작하세요.
+   - ISA 계좌(선택): 키움은 계좌마다 앱키를 따로 줍니다. API 사용신청 > 계좌 선택에서 ISA 계좌를 추가해 받은 키를 `KIWOOM_ISA_APPKEY`, `KIWOOM_ISA_SECRETKEY`에 넣으면 포트폴리오에 ISA 탭이 생겨요.
    - 텔레그램: @BotFather로 봇을 만들어 토큰을 받고, 봇에게 말을 건 뒤
      `https://api.telegram.org/bot<토큰>/getUpdates`에서 `chat.id`를 확인합니다.
 3. 실행합니다.

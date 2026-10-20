@@ -21,6 +21,8 @@ class Config:
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
     ai_model: str = ""
+    kiwoom_isa_appkey: str = ""
+    kiwoom_isa_secretkey: str = ""
 
     @property
     def kiwoom_base_url(self) -> str:
@@ -46,4 +48,6 @@ def load() -> Config:
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
         ai_model=os.environ.get("AI_MODEL", ""),
+        kiwoom_isa_appkey=os.environ.get("KIWOOM_ISA_APPKEY", ""),
+        kiwoom_isa_secretkey=os.environ.get("KIWOOM_ISA_SECRETKEY", ""),
     )

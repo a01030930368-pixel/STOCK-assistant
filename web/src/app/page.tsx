@@ -9,6 +9,8 @@ import { loadSummaries } from "@/lib/summaryData";
 import type { Part } from "@/lib/summary";
 import AiNote, { type AiComment } from "@/app/_components/AiNote";
 import EventLine, { type CalendarEvent } from "./_components/EventLine";
+import IsaCard, { type IsaStatus } from "./_components/IsaCard";
+import { settingsOf } from "@/lib/isa";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +37,7 @@ function account(s: Summary | undefined, cash: Cash | undefined): Account | null
   return { eval: Number(s.total_eval), buy: Number(s.total_buy), pnl: Number(s.total_pnl), cash: left };
 }
 
-function HoldingRows({ rows, summaries }: { rows: Holding[]; summaries: Map<string, Part[]> }) {
+function HoldingRows({ rows, summaries, isa = false }: { rows: Holding[]; summaries: Map<string, Part[]>; isa?: boolean }) {
   return (
     <div className="list">
       {rows.map((h) => {
@@ -46,7 +48,9 @@ function HoldingRows({ rows, summaries }: { rows: Holding[]; summaries: Map<stri
               <Link className="title" href={`/stock/${encodeURIComponent(h.ticker)}`}>{h.name}</Link>
               <div className="sub">
                 <span className="num">{h.ticker} · {won(h.quantity, 4)}주</span> ·{" "}
-                {h.position_id ? (
+                {isa ? (
+                  <span className="gold">ISA</span>
+                ) : h.position_id ? (
                   <Link href={`/journal/${h.position_id}`}>매매일지</Link>
                 ) : (
                   <Link href={`/journal/buy?${new URLSearchParams({ ticker: h.ticker, name: h.name, market: h.market })}`}>일지 작성</Link>
@@ -102,6 +106,21 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
   // 예전 DB에는 워커가 처음 돌기 전까지 아래 테이블들이 없을 수 있습니다.
   const [usSummary] = await query<UsSummary>("SELECT * FROM us_account_summary WHERE id = 1").catch(() => []);
   const cash = await query<Cash>("SELECT * FROM cash_balances").catch(() => []);
+  // ISA 계좌는 키를 따로 받아요. 테이블은 워커가 업데이트된 뒤에 생깁니다.
+  const [isaSummary] = await query<Summary>("SELECT * FROM isa_summary WHERE id = 1").catch(() => []);
+  const [isaCash] = await query<Cash>("SELECT 'KR' AS market, * FROM isa_cash WHERE id = 1").catch(() => []);
+  const isaHoldings = await query<Holding>(
+    "SELECT *, 'KR' AS market, NULL::int AS position_id FROM isa_holdings ORDER BY eval_amount DESC",
+  ).catch(() => []);
+  const [isaYear] = await query<{ bought: string }>(
+    `SELECT COALESCE(sum(quantity * price), 0) AS bought FROM isa_fills
+     WHERE side = 'buy' AND trade_date >= date_trunc('year', CURRENT_DATE)`,
+  ).catch(() => []);
+  const isaSettings = await query<{ key: string; value: unknown }>(
+    "SELECT key, value FROM app_settings WHERE key IN ('isa', 'isa_status', 'isa_balance_status')",
+  ).catch(() => []);
+  const isaSetting = (key: string) => isaSettings.find((r) => r.key === key)?.value;
+  const hasIsa = Boolean(isaSummary || isaCash || process.env.KIWOOM_ISA_APPKEY);
   const holdings = await query<Holding>(
     `SELECT h.*, p.id AS position_id FROM holdings h
      LEFT JOIN positions p ON p.ticker = h.ticker AND p.status = 'open'
@@ -111,7 +130,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
     `SELECT a.ticker, a.name, h.market, a.kind, a.direction, a.price, h.cur_price
      FROM alerts a JOIN holdings h ON h.ticker = a.ticker WHERE a.active`,
   );
-  const tickers = holdings.filter((h) => scope === "all" || h.market === scope).map((h) => h.ticker);
+  const tickers = scope === "ISA" ? isaHoldings.map((h) => h.ticker) : holdings.filter((h) => scope === "all" || h.market === scope).map((h) => h.ticker);
   // 국내·해외 탭에 나눠 보여 주도록 시장마다 최신 8건씩 가져옵니다.
   const news = await query<News>(
     `SELECT * FROM (
@@ -137,7 +156,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
     `SELECT to_char(day, 'YYYY-MM-DD') AS day, kind, market, ticker, title, detail FROM calendar_events
      WHERE day >= CURRENT_DATE AND day < CURRENT_DATE + 45 AND ($1 = 'all' OR market = $1)
      ORDER BY day, kind DESC LIMIT 6`,
-    [scope],
+    [scope === "ISA" ? "KR" : scope],
   ).catch(() => []);
 
   const comments = await query<AiComment & { market: string }>(
@@ -148,18 +167,19 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
   const krCash = cash.find((c) => c.market === "KR");
   const usCash = cash.find((c) => c.market === "US");
   const rate = await usdKrw();
-  const total = totalOf(scope, account(krSummary, krCash), account(usSummary, usCash), rate);
+  const total = totalOf(scope, account(krSummary, krCash), account(usSummary, usCash), rate, account(isaSummary, isaCash));
   const fmtTotal = total.currency === "USD" ? usd : krw;
-  const shown = holdings.filter((h) => scope === "all" || h.market === scope);
+  const shown = scope === "ISA" ? isaHoldings : holdings.filter((h) => scope === "all" || h.market === scope);
   const near = alerts
     .filter((a) => scope === "all" || a.market === scope)
     .map((a) => ({ ...a, dist: distancePct({ kind: a.kind, direction: a.direction, price: Number(a.price), cur: Number(a.cur_price) }) }))
     .sort((a, b) => a.dist - b.dist)
     .slice(0, 5);
   const groups: [string, Holding[]][] = scope === "all"
-    ? [["국내", shown.filter((h) => h.market === "KR")], ["해외", shown.filter((h) => h.market === "US")]]
+    ? [["국내", shown.filter((h) => h.market === "KR")], ["해외", shown.filter((h) => h.market === "US")], ["ISA", isaHoldings]]
     : [["", shown]];
-  const tabs: [Scope, string][] = [["all", "전체"], ["KR", "국내"], ["US", "해외"]];
+  const count = shown.length + (scope === "all" ? isaHoldings.length : 0);
+  const tabs: [Scope, string][] = [["all", "전체"], ["KR", "국내"], ["US", "해외"], ...(hasIsa ? [["ISA", "ISA"] as [Scope, string]] : [])];
 
   return (
     <>
@@ -179,33 +199,53 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
       <div className="board">
         <section>
           <div className="panel total">
-            <div className="label">총자산 · 주식과 예수금 합계{scope === "all" && rate > 0 ? " · 원화 환산" : ""}</div>
+            <div className="label">
+              총자산 · 주식과 예수금 합계{scope === "all" && hasIsa ? " · ISA 포함" : ""}{scope === "all" && rate > 0 ? " · 원화 환산" : ""}
+            </div>
             <div className="value">{fmtTotal(total.total)}</div>
             <div className={`pl ${signClass(total.pnl)}`}>
               {signed(total.pnl, fmtTotal(total.pnl))}　{signed(total.pnlPct, fixedPct(total.pnlPct))}
             </div>
             <div className="rule" />
-            <div className="split">
+            {scope === "ISA" ? (
+              <div className="split">
+                <div><div className="label">ISA 주식 평가</div><div className="num">{isaSummary ? krw(isaSummary.total_eval) : "-"}</div></div>
+                <div><div className="label">ISA 예수금</div><div className="num">{isaCash ? krw(isaCash.d2_deposit ?? isaCash.deposit) : "-"}</div></div>
+              </div>
+            ) : <div className="split">
               <div><div className="label">원화 예수금</div><div className="num">{krCash ? krw(krCash.d2_deposit ?? krCash.deposit) : "-"}</div></div>
               <div><div className="label">달러 예수금</div><div className="num">{usCash ? usd(usCash.d2_deposit ?? usCash.deposit) : "-"}</div></div>
-            </div>
+            </div>}
           </div>
           <AccountCard title="국내 주식 계좌" market="KR" scope={scope} summary={krSummary} cash={krCash} fmt={krw} />
           <AccountCard title="해외 주식 계좌" market="US" scope={scope} summary={usSummary} cash={usCash} fmt={usd} />
+          {hasIsa && (
+            <IsaCard
+              dim={scope !== "all" && scope !== "ISA"}
+              summary={isaSummary}
+              cash={isaCash}
+              bought={Number(isaYear?.bought ?? 0)}
+              settings={settingsOf(isaSetting("isa"))}
+              status={(isaSetting("isa_balance_status") ?? null) as IsaStatus | null}
+              today={new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" })}
+            />
+          )}
         </section>
 
         <section>
           <div className="panel flush holdings">
-            <div className="panel-title">보유 종목 <span className="muted">{shown.length}종목</span></div>
-            {shown.length === 0 ? (
+            <div className="panel-title">보유 종목 <span className="muted">{count}종목</span></div>
+            {count === 0 ? (
               <div className="list-empty">
-                {krSummary || usSummary ? "보유 종목이 없습니다." : "아직 키움 잔고를 불러오지 않았습니다. .env에 키움 앱키를 넣고 워커를 실행하세요."}
+                {scope === "ISA"
+                  ? isaSummary ? "ISA 계좌에 보유 종목이 없습니다." : "아직 ISA 잔고를 불러오지 않았습니다."
+                  : krSummary || usSummary ? "보유 종목이 없습니다." : "아직 키움 잔고를 불러오지 않았습니다. .env에 키움 앱키를 넣고 워커를 실행하세요."}
               </div>
             ) : (
               groups.map(([label, rows]) => rows.length > 0 && (
                 <div key={label}>
                   {label && <div className="group-label">{label}</div>}
-                  <HoldingRows rows={rows} summaries={summaries} />
+                  <HoldingRows rows={rows} summaries={summaries} isa={scope === "ISA" || label === "ISA"} />
                 </div>
               ))
             )}
@@ -239,7 +279,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
               </ul>
             )}
           </div>
-          <div className="panel">
+          {scope !== "ISA" && <div className="panel">
             <div className="panel-title">AI 한마디</div>
             {comments.filter((c) => scope === "all" || c.market === scope).length === 0 ? (
               <div className="muted">
@@ -254,7 +294,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
                 ))}
               </ul>
             )}
-          </div>
+          </div>}
           <div className="panel">
             <div className="panel-title">다가오는 일정 <Link href="/calendar" className="muted">전체 보기</Link></div>
             {upcoming.length === 0 ? (
