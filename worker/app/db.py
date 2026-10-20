@@ -38,6 +38,7 @@ MIGRATIONS = [
       PRIMARY KEY (ticker, url)
     )""",
     "ALTER TABLE stock_news ADD COLUMN IF NOT EXISTS title_ko TEXT",
+    "ALTER TABLE stock_news ADD COLUMN IF NOT EXISTS summary_ko TEXT",
     """CREATE TABLE IF NOT EXISTS stock_earnings (
       ticker        TEXT NOT NULL,
       period        TEXT NOT NULL,
@@ -318,23 +319,28 @@ def save_news(conn: psycopg.Connection, items: list[News]) -> None:
         conn.execute(
             """INSERT INTO stock_news (ticker, url, title, source, published_at, summary) VALUES (%s, %s, %s, %s, %s, %s)
                ON CONFLICT (ticker, url) DO UPDATE SET title = EXCLUDED.title, summary = EXCLUDED.summary,
-                 title_ko = CASE WHEN stock_news.title = EXCLUDED.title THEN stock_news.title_ko END""",
+                 title_ko = CASE WHEN stock_news.title = EXCLUDED.title THEN stock_news.title_ko END,
+                 summary_ko = CASE WHEN stock_news.summary = EXCLUDED.summary THEN stock_news.summary_ko END""",
             (n.ticker, n.url, n.title, n.source, n.published_at, n.summary),
         )
     conn.execute("DELETE FROM stock_news WHERE published_at < now() - interval '60 days'")
 
 
-def untranslated_news(conn: psycopg.Connection, limit: int = 40) -> list[tuple[str, str, str]]:
-    """아직 한국어 제목이 없는 최근 뉴스. (ticker, url, title)"""
+def untranslated_news(conn: psycopg.Connection, limit: int = 40) -> list[tuple[str, str, str, str | None, str, str | None]]:
+    """제목이나 요약에 아직 한국어가 없는 최근 뉴스. (ticker, url, title, title_ko, summary, summary_ko)"""
     return conn.execute(
-        """SELECT ticker, url, title FROM stock_news WHERE title_ko IS NULL
+        """SELECT ticker, url, title, title_ko, summary, summary_ko FROM stock_news
+           WHERE title_ko IS NULL OR (summary <> '' AND summary_ko IS NULL)
            ORDER BY published_at DESC LIMIT %s""",
         (limit,),
     ).fetchall()
 
 
-def save_title_ko(conn: psycopg.Connection, ticker: str, url: str, title_ko: str) -> None:
-    conn.execute("UPDATE stock_news SET title_ko = %s WHERE ticker = %s AND url = %s", (title_ko, ticker, url))
+def save_korean(conn: psycopg.Connection, ticker: str, url: str, title_ko: str, summary_ko: str | None) -> None:
+    conn.execute(
+        "UPDATE stock_news SET title_ko = %s, summary_ko = %s WHERE ticker = %s AND url = %s",
+        (title_ko, summary_ko, ticker, url),
+    )
 
 
 def save_earnings(conn: psycopg.Connection, ticker: str, items: list[Earnings]) -> None:

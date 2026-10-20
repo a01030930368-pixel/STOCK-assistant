@@ -15,6 +15,7 @@ KST = ZoneInfo("Asia/Seoul")
 NEWS_EVERY = timedelta(hours=1)
 FUNDAMENTALS_EVERY = timedelta(hours=12)
 CODES_EVERY = timedelta(days=1)
+SUMMARY_MAX = 1000  # 번역 주소에 넣을 수 있게 긴 요약은 잘라서 옮깁니다
 
 
 class ResearchJob:
@@ -64,22 +65,28 @@ class ResearchJob:
             elif market == "KR":
                 # 네이버 키가 없으면 키 없이 쓰는 구글 뉴스로 가져옵니다.
                 self._try(f"{name} 뉴스", lambda: db.save_news(conn, research.google_news(ticker, name, self.http)))
-            elif market == "US" and c.finnhub_api_key:
-                self._try(f"{ticker} 뉴스", lambda: db.save_news(
-                    conn, research.finnhub_news(ticker, c.finnhub_api_key, now.date(), self.http)))
+            elif market == "US":
+                if c.finnhub_api_key:
+                    self._try(f"{ticker} 뉴스", lambda: db.save_news(
+                        conn, research.finnhub_news(ticker, c.finnhub_api_key, now.date(), self.http)))
+                # 키움이 주는 한글 이름(예: 아이온큐)으로 국내 언론 기사도 같이 찾습니다.
+                if not translate.needs_translation(name):
+                    self._try(f"{name} 국내 기사", lambda: db.save_news(conn, research.google_news(ticker, name, self.http)))
         self._translate(conn)
 
     def _translate(self, conn: psycopg.Connection) -> None:
-        # 한글이 든 제목(국내 뉴스)은 원문을 그대로 한국어 제목으로 둡니다.
-        for ticker, url, title in db.untranslated_news(conn):
-            if not translate.needs_translation(title):
-                db.save_title_ko(conn, ticker, url, title)
-                continue
+        # 한글이 든 글(국내 기사)은 원문을 그대로 한국어로 둡니다.
+        for ticker, url, title, title_ko, summary, summary_ko in db.untranslated_news(conn):
             try:
-                db.save_title_ko(conn, ticker, url, translate.to_korean(title, self.http))
+                title_ko = title_ko or self._korean(title)
+                summary_ko = summary_ko or (self._korean(summary[:SUMMARY_MAX]) if summary else None)
             except Exception as e:
-                log.warning("뉴스 제목 번역 실패, 다음 시간에 다시 합니다: %s", e)
+                log.warning("뉴스 번역 실패, 다음 시간에 다시 합니다: %s", e)
                 return
+            db.save_korean(conn, ticker, url, title_ko, summary_ko)
+
+    def _korean(self, text: str) -> str:
+        return translate.to_korean(text, self.http) if translate.needs_translation(text) else text
 
     def _prices(self, conn: psycopg.Connection, now: datetime) -> None:
         # 차트용 1년치 일봉 종가를 12시간마다 다시 받아 빈 날을 채웁니다.

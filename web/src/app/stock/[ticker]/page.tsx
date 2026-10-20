@@ -5,6 +5,7 @@ import { query } from "@/lib/db";
 import { loadSummaries } from "@/lib/summaryData";
 import SummaryLine from "@/app/_components/SummaryLine";
 import AiNote, { type AiComment } from "@/app/_components/AiNote";
+import StockNews from "@/app/_components/StockNews";
 import ChartMemo, { type Candle, type Level, type Memo, type MinuteCandle, type Trade } from "@/app/_components/ChartMemo";
 import { wallClock } from "@/lib/candles";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
@@ -12,7 +13,7 @@ import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from 
 export const dynamic = "force-dynamic";
 
 type Stock = { ticker: string; name: string; market: string; position_id: number | null; watched: boolean; cur: string | null };
-type News = { url: string; title: string; source: string; published_at: Date; summary: string };
+type News = { url: string; title: string; title_ko: string | null; source: string; published_at: Date; summary: string; summary_ko: string | null };
 type Earnings = { period: string; title: string; url: string; reported_day: string | null; eps_actual: string | null; eps_estimate: string | null };
 type Peer = { peer_ticker: string; peer_name: string; peer_market: string };
 
@@ -46,7 +47,14 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
   ));
   if (!stock) notFound();
 
-  const news = await safe<News>("SELECT url, title, source, published_at, summary FROM stock_news WHERE ticker = $1 ORDER BY published_at DESC LIMIT 15", [ticker]);
+  const news = await safe<News>(
+    "SELECT url, title, title_ko, source, published_at, summary, summary_ko FROM stock_news WHERE ticker = $1 ORDER BY published_at DESC LIMIT 15",
+    [ticker],
+  ).then((rows) => rows.length ? rows : safe<News>(
+    // 워커 업데이트 전 DB에는 summary_ko가 없어요.
+    "SELECT url, title, NULL AS title_ko, source, published_at, summary, NULL AS summary_ko FROM stock_news WHERE ticker = $1 ORDER BY published_at DESC LIMIT 15",
+    [ticker],
+  ));
   const earnings = await safe<Earnings>(
     `SELECT period, title, url, to_char(reported_on, 'YYYY-MM-DD') AS reported_day, eps_actual, eps_estimate
      FROM stock_earnings WHERE ticker = $1 ORDER BY reported_on DESC NULLS LAST, period DESC LIMIT 8`,
@@ -191,19 +199,14 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
         </div>
       ))}
 
-      <h2>뉴스</h2>
+      <StockNews us={stock.market === "US"} items={news.map((n) => ({
+        url: n.url, title: n.title, titleKo: n.title_ko, summary: n.summary, summaryKo: n.summary_ko, meta: `${n.source} · ${kst(n.published_at)}`,
+      }))} />
       {news.length === 0 && (
         <p className="muted">
-          아직 없습니다. {stock.market === "KR" ? "워커가 1시간마다 구글 뉴스에서 가져옵니다." : "FINNHUB_API_KEY를 넣으면 워커가 1시간마다 가져옵니다."}
+          아직 없습니다. {stock.market === "KR" ? "워커가 1시간마다 구글 뉴스에서 가져옵니다." : "워커가 1시간마다 구글 뉴스(국내 기사)와 Finnhub(FINNHUB_API_KEY가 있을 때)에서 가져옵니다."}
         </p>
       )}
-      {news.map((n) => (
-        <div key={n.url} className="card">
-          <a href={n.url} target="_blank" rel="noreferrer">{n.title}</a>
-          <div className="muted">{n.source} · {kst(n.published_at)}</div>
-          {n.summary && <div className="muted">{n.summary}</div>}
-        </div>
-      ))}
     </>
   );
 }

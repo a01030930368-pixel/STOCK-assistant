@@ -208,6 +208,7 @@ dl.facts dd { margin: 0; }
 .segment button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .link-toggle { background: none; border: 0; padding: 0; color: var(--accent); font-size: 0.78rem; font-weight: 500; }
 .link-toggle:hover { text-decoration: underline; filter: none; }
+h2 .link-toggle { margin-left: 10px; vertical-align: middle; }
 
 /* 일정(달력) */
 .month-nav { display: flex; align-items: center; gap: 14px; font-size: 1.05rem; }

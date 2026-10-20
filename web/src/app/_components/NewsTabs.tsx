@@ -32,7 +32,8 @@ export default function NewsTabs({ items, initial }: { items: NewsItem[]; initia
       ) : (
         <ul className="feed">
           {shown.map((n) => {
-            const ko = tab === "US" && korean;
+            // 국내 언론의 미국 종목 기사는 이미 한국어라 번역 없이 엽니다.
+            const ko = tab === "US" && korean && !/[가-힣]/.test(n.title);
             return (
               <li key={n.key}>
                 <a href={ko ? translatedPage(n.url) : n.url} target="_blank" rel="noopener noreferrer">
