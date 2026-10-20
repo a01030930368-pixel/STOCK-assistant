@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { query } from "@/lib/db";
-import { today } from "@/lib/format";
+import { today, won } from "@/lib/format";
 import { byRules, monthly, since, summarize, type Sale, type Summary } from "@/lib/stats";
 import JournalTabs from "../JournalTabs";
 
@@ -67,6 +67,30 @@ function Side({ title, s, on }: { title: string; s: Summary; on?: boolean }) {
   );
 }
 
+type FeeRow = { fee: string | null; amount: string | null; fills: string; us_fills: string };
+
+// 키움 체결에서 받은 수수료·세금. 미국 체결 조회(ust21180)는 수수료를 주지 않아 국내만 합칩니다.
+async function feeTotals(months: number | null): Promise<FeeRow> {
+  const [row] = await query<FeeRow>(
+    `SELECT sum(fee) FILTER (WHERE market = 'KR') AS fee, sum(quantity * price) FILTER (WHERE market = 'KR' AND fee IS NOT NULL) AS amount,
+       count(*) FILTER (WHERE market = 'KR' AND fee IS NOT NULL) AS fills, count(*) FILTER (WHERE market = 'US') AS us_fills
+     FROM trade_fills WHERE $1::int IS NULL OR trade_date > CURRENT_DATE - make_interval(months => $1::int)`,
+    [months],
+  ).catch(() => []);
+  return row ?? { fee: null, amount: null, fills: "0", us_fills: "0" };
+}
+
+function Fees({ f, label }: { f: FeeRow; label: string }) {
+  const fee = Number(f.fee ?? 0), amount = Number(f.amount ?? 0);
+  return (
+    <div className="stats three fee-tiles">
+      <div className="stat"><div className="stat-label">수수료·세금 <span className="muted">국내 · {label}</span></div><div className="stat-value">{won(fee)}원</div><div className="stat-sub">키움 체결 {f.fills}건 기준</div></div>
+      <div className="stat"><div className="stat-label">거래 금액 대비</div><div className="stat-value">{amount > 0 ? `${((fee / amount) * 100).toFixed(2)}%` : "-"}</div><div className="stat-sub">사고판 금액 {won(amount)}원</div></div>
+      <div className="stat"><div className="stat-label">한 번 사고팔 때 평균</div><div className="stat-value">{Number(f.fills) > 0 ? `${won(fee / Number(f.fills))}원` : "-"}</div><div className="stat-sub">{Number(f.us_fills) > 0 ? `미국 ${f.us_fills}건은 키움이 수수료를 안 알려 줘서 빠져 있어요` : "체결 한 묶음(하루·종목·방향)마다"}</div></div>
+    </div>
+  );
+}
+
 export default async function StatsPage({ searchParams }: { searchParams: Promise<{ r?: string }> }) {
   const r = (await searchParams).r;
   const range = RANGES.find((x) => x.key === r) ?? RANGES[2];
@@ -87,6 +111,7 @@ export default async function StatsPage({ searchParams }: { searchParams: Promis
   const brokenLosses = broken.filter((x) => x.returnPct <= 0);
   const worstBroken = broken.length ? broken.reduce((a, b) => (b.returnPct < a.returnPct ? b : a)) : null;
   const months = monthly(all, day, range.months === null ? 12 : Math.max(6, range.months));
+  const fees = await feeTotals(range.months);
 
   return (
     <>
@@ -97,6 +122,8 @@ export default async function StatsPage({ searchParams }: { searchParams: Promis
           {RANGES.map((x) => <Link key={x.key} href={`/journal/stats?r=${x.key}`} aria-current={x.key === range.key ? "page" : undefined}>{x.label}</Link>)}
         </nav>
       </div>
+
+      <Fees f={fees} label={range.label} />
 
       {all.length === 0 ? (
         <p className="muted">아직 매도 기록이 없어요. 매매일지에서 매도를 기록하면 여기서 승률과 원칙을 지켰을 때의 성과를 계산해요.</p>

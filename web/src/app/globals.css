@@ -460,3 +460,5 @@ h2 .muted { font-weight: 400; font-size: 0.8rem; margin-left: 8px; }
   .review-qs { grid-template-columns: 1fr; }
   .book-stock { margin-left: 0; }
 }
+.fee-tiles { margin-bottom: 16px; }
+@media (max-width: 640px) { .stats.fee-tiles { grid-template-columns: 1fr; } }

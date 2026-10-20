@@ -605,6 +605,33 @@ def events_on(conn: psycopg.Connection, day) -> list[tuple[str, str, str]]:
     ).fetchall()
 
 
+def earnings_eve(conn: psycopg.Connection, day) -> list[tuple[str, tuple]]:
+    """그날 실적을 발표하는 보유 종목: (티커, (이름, 시장, 일정 설명, 평단 대비 %, 비중 %, 손절, 익절, 지난 서프라이즈 %))"""
+    rows = conn.execute(
+        """SELECT h.ticker, h.name, h.market, c.detail, h.pnl_pct,
+                  h.eval_amount * CASE WHEN h.market = 'US' THEN COALESCE((SELECT exch_rate FROM us_account_summary WHERE id = 1), 1) ELSE 1 END,
+                  (SELECT max(price) FROM alerts a WHERE a.ticker = h.ticker AND a.active AND a.kind = 'stop'),
+                  (SELECT min(price) FROM alerts a WHERE a.ticker = h.ticker AND a.active AND a.kind = 'target'),
+                  (SELECT (e.eps_actual - e.eps_estimate) / NULLIF(abs(e.eps_estimate), 0) * 100 FROM stock_earnings e
+                    WHERE e.ticker = h.ticker AND e.eps_actual IS NOT NULL AND e.eps_estimate IS NOT NULL ORDER BY e.period DESC LIMIT 1)
+           FROM calendar_events c JOIN holdings h ON h.ticker = c.ticker AND h.quantity > 0
+           WHERE c.kind = 'earnings' AND c.day = %s ORDER BY h.name""",
+        (day,),
+    ).fetchall()
+    total = conn.execute(
+        """SELECT COALESCE((SELECT total_eval FROM account_summary WHERE id = 1), 0)
+                + COALESCE((SELECT total_eval * exch_rate FROM us_account_summary WHERE id = 1), 0)
+                + COALESCE((SELECT sum(deposit) FROM cash_balances WHERE currency = 'KRW'), 0)"""
+    ).fetchone()[0]
+    out = []
+    for ticker, name, market, detail, pnl, value, stop, target, surprise in rows:
+        weight = float(value) / float(total) * 100 if total and value is not None else None
+        out.append((ticker, (name, market, detail or "", float(pnl), weight,
+                             float(stop) if stop else None, float(target) if target else None,
+                             float(surprise) if surprise is not None else None)))
+    return out
+
+
 def briefing_holdings(conn: psycopg.Connection) -> list[tuple[str, str, float, float | None, float]]:
     """아침 브리핑용 보유 종목 (이름, 시장, 현재가, 전일 대비 %, 평단 대비 %). 국내 먼저, 시장 안에서는 평가금액이 큰 순서입니다."""
     rows = conn.execute(

@@ -31,6 +31,7 @@ def test_job_sends_once_per_day(monkeypatch):
     monkeypatch.setattr("app.briefing_job.db.notice_sent", lambda conn, key: key in marked)
     monkeypatch.setattr("app.briefing_job.db.mark_notice", lambda conn, key: marked.add(key))
     monkeypatch.setattr("app.briefing_job.db.events_on", lambda conn, day: [("policy", "FOMC 금리 결정", "")])
+    monkeypatch.setattr("app.briefing_job.db.earnings_eve", lambda conn, day: [])
     monkeypatch.setattr("app.briefing_job.telegram.send", lambda token, chat, text, http: sent.append(text))
     now = datetime(2026, 10, 27, 11, 5, tzinfo=timezone.utc)
     job = BriefingJob(cfg(), None)
@@ -77,3 +78,27 @@ def test_morning_sends_even_when_an_index_fails(monkeypatch):
     job.run(None, now)
     job.run(None, now)
     assert len(sent) == 1 and "morning:2026-10-20" in marked and "밤사이 미국장" not in sent[0]
+
+
+def test_earnings_eve_message():
+    e = briefing.EarningsEve("아이온큐", "US", "장 마감 후 · 예상 EPS -0.25", 5.0, 12.4, 38.5, 55.0, 18.2)
+    text = briefing.earnings_eve_message(date(2026, 10, 28), e)
+    assert text.splitlines()[:2] == ["[LODESTAR] 내일 실적 발표 · 아이온큐", "10.28 (수) · 장 마감 후 · 예상 EPS -0.25"]
+    assert "예상보다 +18% 좋았어요" in text and "평단 대비 +5.0% · 내 돈의 12%" in text and "손절 $38.50 · 익절 $55.00" in text
+    bare = briefing.earnings_eve_message(date(2026, 10, 28), briefing.EarningsEve("X", "KR", "", -3.0, None, None, None, None))
+    assert "손절·익절 알림이 없어요" in bare and "지난번" not in bare
+
+
+def test_earnings_eve_sends_once_per_stock(monkeypatch):
+    sent, marked = [], set()
+    monkeypatch.setattr("app.briefing_job.db.notice_sent", lambda conn, key: key in marked)
+    monkeypatch.setattr("app.briefing_job.db.mark_notice", lambda conn, key: marked.add(key))
+    monkeypatch.setattr("app.briefing_job.db.events_on", lambda conn, day: [])
+    monkeypatch.setattr("app.briefing_job.db.earnings_eve", lambda conn, day: [
+        ("IONQ", ("아이온큐", "US", "", 5.0, 10.0, None, None, None)), ("NVDA", ("엔비디아", "US", "", 1.0, 20.0, None, None, None))])
+    monkeypatch.setattr("app.briefing_job.telegram.send", lambda token, chat, text, http: sent.append(text))
+    now = datetime(2026, 10, 27, 11, 5, tzinfo=timezone.utc)
+    job = BriefingJob(cfg(), None)
+    job.run(None, now)
+    job.run(None, now)
+    assert len(sent) == 2 and {"earnings:IONQ:2026-10-28", "earnings:NVDA:2026-10-28"} <= marked
