@@ -144,6 +144,73 @@ def _dart_json(http: httpx.Client, path: str, params: dict) -> dict:
 EARNINGS_TITLE = re.compile(r"영업\(잠정\)실적|사업보고서|반기보고서|분기보고서")
 
 
+# 국내는 실적 발표일을 미리 알려 주는 무료 달력이 없어서, 회사가 미리 내는 '기업설명회(IR) 개최 안내' 공시를 읽습니다.
+# IR 목적에 '실적'이 들어 있고 개최일이 앞으로인 것만 실적 발표일로 씁니다. IR 공시를 안 내는 회사는 알 수 없어요.
+IR_TITLE = re.compile(r"기업설명회\s*\(IR\)\s*개최")
+IR_DATE = re.compile(r"(20\d{2})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})")
+IR_TIME = re.compile(r"(\d{1,2})\s*:\s*(\d{2})")
+
+
+def parse_ir_notice(text: str) -> tuple[date, str] | None:
+    """IR 개최 안내 본문에서 (개최일, 시각)을 찾습니다. 실적 설명회가 아니면 None."""
+    plain = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", text)))
+    if "실적" not in plain:
+        return None
+    at = re.search(r"(개최\s*일시|일\s*시|일\s*자)", plain)
+    window = plain[at.end():at.end() + 120] if at else plain
+    m = IR_DATE.search(window)
+    if not m:
+        return None
+    try:
+        day = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+    t = IR_TIME.search(window[m.end():m.end() + 40])
+    return day, f"{int(t.group(1)):02d}:{t.group(2)}" if t else ""
+
+
+def dart_document_text(rcept_no: str, key: str, http: httpx.Client) -> str:
+    res = http.get(f"{DART}/document.xml", params={"crtfc_key": key, "rcept_no": rcept_no})
+    res.raise_for_status()
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(res.content))
+    except zipfile.BadZipFile:
+        raise RuntimeError(f"DART 공시 원문 다운로드 실패: {res.text[:200]}")
+    out = []
+    for name in archive.namelist():
+        raw = archive.read(name)
+        for enc in ("utf-8", "euc-kr"):
+            try:
+                out.append(raw.decode(enc))
+                break
+            except UnicodeDecodeError:
+                continue
+    return "\n".join(out)
+
+
+def dart_ir_earnings(ticker: str, name: str, corp_code: str, key: str, today: date, http: httpx.Client,
+                     seen: dict[str, tuple[date, str] | None]) -> list:
+    """앞으로 열릴 실적 IR을 일정(calendar.Event)으로. seen은 이미 읽은 공시 원문의 결과(접수번호별)라 다시 받지 않습니다."""
+    from .calendar import Event
+
+    body = _dart_json(http, "list.json", {
+        "crtfc_key": key, "corp_code": corp_code, "bgn_de": (today - timedelta(days=60)).strftime("%Y%m%d"),
+        "end_de": today.strftime("%Y%m%d"), "pblntf_ty": "I", "page_count": "100",
+    })
+    out = []
+    for row in body.get("list", []):
+        if not IR_TITLE.search(row.get("report_nm", "")):
+            continue
+        no = row["rcept_no"]
+        if no not in seen:
+            seen[no] = parse_ir_notice(dart_document_text(no, key, http))
+        found = seen[no]
+        if found and found[0] >= today:
+            detail = " · ".join(p for p in ("기업설명회(IR)", found[1]) if p)
+            out.append(Event(found[0], "earnings", "KR", ticker, f"{name} 실적 발표", detail))
+    return sorted(set(out), key=lambda e: e.day)
+
+
 def dart_earnings(ticker: str, corp_code: str, key: str, today: date, http: httpx.Client) -> list[Earnings]:
     body = _dart_json(http, "list.json", {
         "crtfc_key": key, "corp_code": corp_code, "bgn_de": (today - timedelta(days=365)).strftime("%Y%m%d"),

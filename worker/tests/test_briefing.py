@@ -32,6 +32,7 @@ def test_job_sends_once_per_day(monkeypatch):
     monkeypatch.setattr("app.briefing_job.db.mark_notice", lambda conn, key: marked.add(key))
     monkeypatch.setattr("app.briefing_job.db.events_on", lambda conn, day: [("policy", "FOMC 금리 결정", "")])
     monkeypatch.setattr("app.briefing_job.db.earnings_eve", lambda conn, day: [])
+    monkeypatch.setattr("app.briefing_job.db.review_inputs", lambda conn: ([], {}, set()))
     monkeypatch.setattr("app.briefing_job.telegram.send", lambda token, chat, text, http: sent.append(text))
     now = datetime(2026, 10, 27, 11, 5, tzinfo=timezone.utc)
     job = BriefingJob(cfg(), None)
@@ -96,9 +97,49 @@ def test_earnings_eve_sends_once_per_stock(monkeypatch):
     monkeypatch.setattr("app.briefing_job.db.events_on", lambda conn, day: [])
     monkeypatch.setattr("app.briefing_job.db.earnings_eve", lambda conn, day: [
         ("IONQ", ("아이온큐", "US", "", 5.0, 10.0, None, None, None)), ("NVDA", ("엔비디아", "US", "", 1.0, 20.0, None, None, None))])
+    monkeypatch.setattr("app.briefing_job.db.review_inputs", lambda conn: ([], {}, set()))
     monkeypatch.setattr("app.briefing_job.telegram.send", lambda token, chat, text, http: sent.append(text))
     now = datetime(2026, 10, 27, 11, 5, tzinfo=timezone.utc)
     job = BriefingJob(cfg(), None)
     job.run(None, now)
     job.run(None, now)
     assert len(sent) == 2 and {"earnings:IONQ:2026-10-28", "earnings:NVDA:2026-10-28"} <= marked
+
+
+def _t(day, side, qty, price, fee=None, ticker="000660"):
+    from decimal import Decimal
+    from app.books import Trade
+    return Trade("KR", ticker, "SK하이닉스", date.fromisoformat(day), None, side, Decimal(qty), Decimal(price), Decimal(fee) if fee else None)
+
+
+def test_closed_books_match_the_web_diary():
+    from decimal import Decimal
+    from app.books import closed_books
+    trades = [_t("2026-08-04", "buy", 10, 168000, 250), _t("2026-08-21", "buy", 5, 181500), _t("2026-09-15", "sell", 7, 214000, 3000),
+              _t("2026-10-14", "sell", 8, 251000, 3000), _t("2026-10-17", "buy", 2, 260000)]
+    [b] = closed_books(trades, {("KR", "000660"): Decimal(2)})
+    realized = 7 * 41500 + 8 * 78500 - 6250
+    assert (b.key, b.start, b.realized, b.return_pct) == ("KR:000660:2026-10-14", date(2026, 8, 4), realized, round(realized / (15 * 172500) * 100, 2))
+    [old] = closed_books([_t("2026-08-01", "sell", 3, 50000)], {})
+    assert (old.start, old.realized, old.return_pct) == (None, None, None)
+
+
+def test_review_reminder_once_after_full_sell(monkeypatch):
+    sent, marked = [], set()
+    monkeypatch.setattr("app.briefing_job.db.notice_sent", lambda conn, key: key in marked)
+    monkeypatch.setattr("app.briefing_job.db.mark_notice", lambda conn, key: marked.add(key))
+    monkeypatch.setattr("app.briefing_job.db.events_on", lambda conn, day: [])
+    monkeypatch.setattr("app.briefing_job.db.earnings_eve", lambda conn, day: [])
+    trades = [_t("2026-10-01", "buy", 10, 100), _t("2026-10-14", "sell", 10, 120),
+              _t("2026-10-01", "buy", 1, 100, ticker="X"), _t("2026-10-20", "sell", 1, 90, ticker="X")]
+    monkeypatch.setattr("app.briefing_job.db.review_inputs", lambda conn: (trades, {}, set()))
+    monkeypatch.setattr("app.briefing_job.telegram.send", lambda token, chat, text, http: sent.append(text))
+    job = BriefingJob(cfg(), None)
+    job.run(None, datetime(2026, 10, 20, 11, 5, tzinfo=timezone.utc))  # 10-20 20:05 KST
+    job.run(None, datetime(2026, 10, 20, 11, 35, tzinfo=timezone.utc))
+    reviews = [t for t in sent if "다 팔았어요" in t]
+    assert len(reviews) == 1  # 오늘(10-20) 판 X는 내일 알려요
+    assert reviews[0].splitlines()[:2] == ["[LODESTAR] 다 팔았어요 · SK하이닉스", "10.01 → 10.14 · 13일 · 수익률 +20.0% (+200원)"]
+    monkeypatch.setattr("app.briefing_job.db.review_inputs", lambda conn: (trades, {}, {"KR:X:2026-10-20"}))
+    job.run(None, datetime(2026, 10, 21, 11, 5, tzinfo=timezone.utc))
+    assert len([t for t in sent if "다 팔았어요" in t]) == 1  # 강평을 이미 쓴 권은 안 알려요

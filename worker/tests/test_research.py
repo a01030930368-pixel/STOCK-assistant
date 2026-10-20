@@ -177,3 +177,37 @@ def test_sec_revenue_merges_old_and_new_tags():
     }}}
     rows = research.parse_sec_financials("IONQ", facts)
     assert [(r.period, r.revenue) for r in rows] == [("FY2024", Decimal(43)), ("FY2023", Decimal(22))]
+
+
+IR_DOC = """<DOCUMENT><BODY><TABLE><TR><TD>1. 개최일시</TD><TD>2026-10-29 10:00</TD></TR>
+<TR><TD>2. 개최장소</TD><TD>컨퍼런스콜</TD></TR><TR><TD>4. 개최목적</TD><TD>2026년 3분기 경영실적 설명</TD></TR></TABLE></BODY></DOCUMENT>"""
+
+
+def test_parse_ir_notice_finds_date_and_time_of_earnings_ir():
+    assert research.parse_ir_notice(IR_DOC) == (date(2026, 10, 29), "10:00")
+    assert research.parse_ir_notice("<P>개최일시 : 2026년 11월 3일 (화) 16시</P><P>목적: 2026년 3분기 실적발표</P>") == (date(2026, 11, 3), "")
+    assert research.parse_ir_notice("1. 개최일시 2026-11-05 2. 목적: 국내 기관투자자 NDR") is None
+
+
+def test_dart_ir_earnings_reads_each_notice_once():
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(req.url.path)
+        if req.url.path.endswith("list.json"):
+            assert req.url.params["pblntf_ty"] == "I"
+            return httpx.Response(200, json={"status": "000", "list": [
+                {"rcept_no": "20261015000111", "report_nm": "기업설명회(IR)개최(안내공시)"},
+                {"rcept_no": "20261001000222", "report_nm": "영업(잠정)실적(공정공시)"},
+            ]})
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("20261015000111.xml", IR_DOC.encode("utf-8"))
+        return httpx.Response(200, content=buf.getvalue())
+
+    http, seen = httpx.Client(transport=httpx.MockTransport(handler)), {}
+    [e] = research.dart_ir_earnings("000660", "SK하이닉스", "00164779", "k", date(2026, 10, 20), http, seen)
+    assert (e.day, e.market, e.title, e.detail) == (date(2026, 10, 29), "KR", "SK하이닉스 실적 발표", "기업설명회(IR) · 10:00")
+    research.dart_ir_earnings("000660", "SK하이닉스", "00164779", "k", date(2026, 10, 20), http, seen)
+    assert len([c for c in calls if c.endswith("document.xml")]) == 1
+    assert research.dart_ir_earnings("000660", "SK하이닉스", "00164779", "k", date(2026, 10, 30), http, seen) == []

@@ -1,11 +1,11 @@
 """저녁 일정 알림과 아침 브리핑을 하루 한 번씩만 보냅니다. 보낸 기록은 DB에 남겨 워커를 다시 켜도 두 번 가지 않습니다."""
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import psycopg
 
-from . import briefing, db, prices, telegram
+from . import books, briefing, db, prices, telegram
 from .config import Config
 
 log = logging.getLogger("worker")
@@ -22,6 +22,7 @@ class BriefingJob:
         now = now or datetime.now(timezone.utc)
         self._evening(conn, now)
         self._earnings_eve(conn, now)
+        self._reviews(conn, now)
         self._morning(conn, now)
 
     def _send(self, text: str) -> None:
@@ -50,6 +51,23 @@ class BriefingJob:
                 continue
             self._send(briefing.earnings_eve_message(day, briefing.EarningsEve(*eve)))
             log.info("%s 실적 전날 알림을 보냈습니다", ticker)
+            db.mark_notice(conn, key)
+
+    def _reviews(self, conn: psycopg.Connection, now: datetime) -> None:
+        # 지난 일주일 안에 전량 매도했고 아직 사후강평이 없는 권을, 판 다음 날 저녁 8시부터 한 번씩 알려 줍니다.
+        day = briefing.evening_due(now)
+        if day is None:
+            return
+        today = day - timedelta(days=1)
+        trades, held, reviewed = db.review_inputs(conn)
+        for book in books.closed_books(trades, held):
+            if not (today - timedelta(days=7) <= book.end < today) or book.key in reviewed:
+                continue
+            key = f"review:{book.key}"
+            if db.notice_sent(conn, key):
+                continue
+            self._send(briefing.review_message(book))
+            log.info("%s 사후강평 알림을 보냈습니다", book.name)
             db.mark_notice(conn, key)
 
     def _morning(self, conn: psycopg.Connection, now: datetime) -> None:

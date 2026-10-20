@@ -28,6 +28,7 @@ class ResearchJob:
         self.sec_ciks: dict[str, int] = {}
         self.codes_at: datetime | None = None
         self.tried_prices: set[str] = set()
+        self.ir_seen: dict = {}
 
     @property
     def user_agent(self) -> str:
@@ -108,10 +109,11 @@ class ResearchJob:
         if self.cfg.fred_api_key:
             self._try("미국 경제지표 일정", lambda: db.save_calendar(
                 conn, "economic", calendar.fred_release_events(self.cfg.fred_api_key, today, self.http)))
-        if not self.cfg.finnhub_api_key:
-            return
         for ticker, name, market in db.watched_stocks(conn):
-            if market == "US":
+            if market == "KR" and self.cfg.dart_api_key and (corp := self.dart_codes.get(ticker)):
+                self._try(f"{name} 실적 일정", lambda: db.save_calendar(conn, "earnings", research.dart_ir_earnings(
+                    ticker, name, corp, self.cfg.dart_api_key, today, self.http, self.ir_seen), ticker))
+            elif market == "US" and self.cfg.finnhub_api_key:
                 self._try(f"{ticker} 실적 일정", lambda: db.save_calendar(
                     conn, "earnings", calendar.finnhub_earnings_calendar(ticker, name, self.cfg.finnhub_api_key, today, self.http), ticker))
 
