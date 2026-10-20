@@ -12,10 +12,11 @@ export type Memo = { id: number; day: string; body: string };
 export type Trade = { day: string; side: "buy" | "sell"; price: number; quantity: number };
 export type Level = { kind: "avg" | "stop" | "target" | "alert"; price: number };
 export type { Doodle, Mark };
-type Tool = "none" | "line" | "zone" | "pen" | "eraser";
+type Tool = "none" | "line" | "zone" | "move" | "pen" | "eraser";
 const TOOLS: { key: Tool; label: string; hint: string }[] = [
   { key: "line", label: "― 선", hint: "차트에서 원하는 높이를 한 번 누르세요. 지금 가격보다 위면 저항, 아래면 지지예요." },
   { key: "zone", label: "▭ 구간", hint: "구간의 위·아래를 차례로 한 번씩 누르세요." },
+  { key: "move", label: "↕ 옮기기", hint: "옮길 선이나 구간의 위·아래 끝을 잡고 위아래로 끄세요. 다 옮겼으면 ↕ 옮기기를 다시 눌러 끝내요." },
   { key: "pen", label: "✎ 낙서", hint: "손가락이나 마우스로 그리세요. 낙서는 이 차트에서만 보여요. 다 그렸으면 ✎ 낙서를 다시 눌러 끝내요." },
   { key: "eraser", label: "지우개", hint: "지울 낙서나 선을 누르세요." },
 ];
@@ -220,7 +221,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
 
       chart.subscribeCrosshairMove((p: MouseEventParams<Time>) => setHover(p.time ? index.get(String(p.time)) ?? null : null));
       chart.subscribeClick((p: MouseEventParams<Time>) => {
-        if (dragged.current) {
+        if (dragged.current || toolRef.current === "move") {
           dragged.current = false;
           return;
         }
@@ -339,20 +340,21 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     if (at !== null && at > 0) drawAt(toolRef.current === "eraser" ? at : snapAt(y, x, at), x, y);
   }
 
-  // 오른쪽 가격 칸 가까이에서 선(구간이면 위·아래 끝)을 잡고 위아래로 끌면 옮겨져요.
+  // ↕ 옮기기 모드에서 선(구간이면 위·아래 끝)을 잡고 위아래로 끌면 옮겨져요.
   useEffect(() => {
     const el = box.current;
     if (!el) return;
-    let drag: { id: number; edge: "low" | "high"; mark: Mark } | null = null;
+    // moved: 손 떨림보다 크게(마우스 4px, 손가락 8px) 움직였을 때만 진짜 끌기로 봐요. 그냥 누르면 선이 그대로예요.
+    let drag: { id: number; edge: "low" | "high"; mark: Mark; startY: number; slop: number; moved: boolean } | null = null;
     const pos = (e: PointerEvent) => {
       const r = el.getBoundingClientRect();
       return [e.clientX - r.left, e.clientY - r.top] as const;
     };
     const grab = (e: PointerEvent) => {
       const chart = chartRef.current, d = drawRef.current;
-      if (!chart || !d || toolRef.current !== "none" || !drawShownRef.current) return null;
-      const [x, y] = pos(e);
-      if (x < chart.timeScale().width() - 90) return null;
+      // ↕ 옮기기 모드에서만 잡혀요. 보통 때 차트를 누르거나 끌면 선은 그대로예요.
+      if (!chart || !d || toolRef.current !== "move" || !drawShownRef.current) return null;
+      const [, y] = pos(e);
       const reach = e.pointerType === "touch" ? 16 : 9;
       let best: { id: number; edge: "low" | "high"; mark: Mark; gap: number } | null = null;
       for (const m of marksRef.current) {
@@ -368,7 +370,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     const down = (e: PointerEvent) => {
       const g = grab(e);
       if (!g) return;
-      drag = { id: g.id, edge: g.edge, mark: g.mark };
+      drag = { id: g.id, edge: g.edge, mark: g.mark, startY: pos(e)[1], slop: e.pointerType === "touch" ? 8 : 4, moved: false };
       e.preventDefault();
       e.stopPropagation();
       chartRef.current?.applyOptions({ handleScroll: false, handleScale: false });
@@ -380,10 +382,11 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         return;
       }
       const [x, y] = pos(e);
+      if (!drag.moved && Math.abs(y - drag.startY) < drag.slop) return;
+      drag.moved = true;
       const raw = priceRef.current?.coordinateToPrice(y) ?? null;
       if (raw === null || raw <= 0) return;
-      // 오른쪽 끝에서 끄는 거라 근처 봉이 아니라 화면에 보이는 봉 전체의 꼬리·몸통에 붙여요.
-      drag.mark = moveEdge(drag.mark, drag.edge, snapAt(y, x < (chartRef.current?.timeScale().width() ?? 0) - 90 ? x : null, raw));
+      drag.mark = moveEdge(drag.mark, drag.edge, snapAt(y, x, raw));
       if (drag.mark.high !== null && drag.edge === "high" && drag.mark.high < drag.mark.low) drag.edge = "low";
       const next = marksRef.current.map((m) => (m.id === drag!.id ? drag!.mark : m));
       marksRef.current = next;
@@ -391,6 +394,11 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     };
     const up = () => {
       if (!drag) return;
+      if (!drag.moved) {
+        drag = null;
+        chartRef.current?.applyOptions({ handleScroll: true, handleScale: true });
+        return;
+      }
       const m = drag.mark;
       // 구간 끝을 서로 넘겨 끌었을 수 있어서, 위·아래는 저장 전에 다시 맞춰요.
       const fixed = m.high === null ? m : { ...m, low: Math.min(m.low, m.high), high: Math.max(m.low, m.high) };
@@ -548,7 +556,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           </div>
         )}
         <p className="chart-foot">
-          휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 지지·저항은 모든 차트에, 낙서는 그린 차트에만 보여요. 선·구간 끝은 오른쪽 가격 칸 가까이에서 잡고 위아래로 끌면 옮겨지고, 🧲 자석이 켜져 있으면 캔들 꼬리·몸통에 붙어요. 차트:{" "}
+          휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 지지·저항은 모든 차트에, 낙서는 그린 차트에만 보여요. 선·구간은 ↕ 옮기기를 켜고 잡아 끌면 옮겨지고, 🧲 자석이 켜져 있으면 캔들 꼬리·몸통에 붙어요. 차트:{" "}
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a> Lightweight Charts
         </p>
       </div>
