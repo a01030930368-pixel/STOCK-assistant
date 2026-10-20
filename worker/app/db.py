@@ -301,6 +301,8 @@ MIGRATIONS = [
     # 매수 당시 기록: 그날 매크로 값(워커가 채움)과 그날까지의 차트 그림(화면이 처음 열 때 한 번 저장)
     "ALTER TABLE buy_entries ADD COLUMN IF NOT EXISTS context JSONB",
     "ALTER TABLE buy_entries ADD COLUMN IF NOT EXISTS chart_png TEXT",
+    "ALTER TABLE sell_entries ADD COLUMN IF NOT EXISTS context JSONB",
+    "ALTER TABLE sell_entries ADD COLUMN IF NOT EXISTS chart_png TEXT",
     # 손으로 적은 미국 종목이 국내로 저장돼 일기장이 둘로 갈라지던 것을 바로잡습니다. 숫자 없이 영문만인 티커는 미국이에요(국내 ETN Q530036 같은 건 숫자가 있어요).
     "UPDATE positions SET ticker = upper(ticker) WHERE ticker <> upper(ticker)",
     """UPDATE positions SET market = 'US', book_key = CASE WHEN book_key LIKE 'KR:%' THEN 'US:' || substr(book_key, 4) ELSE book_key END
@@ -403,17 +405,21 @@ def save_isa_fills(conn: psycopg.Connection, fills) -> None:
         )
 
 
-def buys_without_context(conn: psycopg.Connection, limit: int = 5) -> list[tuple]:
-    """매수 당시 매크로를 아직 못 채운 매수 일지: (id, 매수일, 티커, 시장)"""
+def entries_without_context(conn: psycopg.Connection, limit: int = 5) -> list[tuple]:
+    """그날 매크로를 아직 못 채운 매수·매도 일지: (buy/sell, id, 거래일, 티커, 시장). 매수 먼저예요."""
     return conn.execute(
-        """SELECT b.id, b.trade_date, p.ticker, p.market FROM buy_entries b JOIN positions p ON p.id = b.position_id
-           WHERE b.context IS NULL ORDER BY b.id DESC LIMIT %s""",
-        (limit,),
+        """(SELECT 'buy', b.id, b.trade_date, p.ticker, p.market FROM buy_entries b JOIN positions p ON p.id = b.position_id
+            WHERE b.context IS NULL ORDER BY b.id DESC LIMIT %s)
+           UNION ALL
+           (SELECT 'sell', s.id, s.trade_date, p.ticker, p.market FROM sell_entries s JOIN positions p ON p.id = s.position_id
+            WHERE s.context IS NULL ORDER BY s.id DESC LIMIT %s)""",
+        (limit, limit),
     ).fetchall()
 
 
-def save_buy_context(conn: psycopg.Connection, entry_id: int, context: dict) -> None:
-    conn.execute("UPDATE buy_entries SET context = %s WHERE id = %s", (Jsonb(context), entry_id))
+def save_entry_context(conn: psycopg.Connection, side: str, entry_id: int, context: dict) -> None:
+    table = "sell_entries" if side == "sell" else "buy_entries"
+    conn.execute(f"UPDATE {table} SET context = %s WHERE id = %s", (Jsonb(context), entry_id))
 
 
 def price_rows_before(conn: psycopg.Connection, ticker: str, day, days: int = 200) -> int:
