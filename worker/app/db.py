@@ -223,6 +223,10 @@ MIGRATIONS = [
       updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "ALTER TABLE positions ADD COLUMN IF NOT EXISTS book_key TEXT",
+    """CREATE TABLE IF NOT EXISTS asset_history (
+      day    DATE PRIMARY KEY,
+      total  NUMERIC(20, 2) NOT NULL
+    )""",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -605,6 +609,11 @@ def events_on(conn: psycopg.Connection, day) -> list[tuple[str, str, str]]:
     ).fetchall()
 
 
+TOTAL_KRW = """SELECT COALESCE((SELECT total_eval FROM account_summary WHERE id = 1), 0)
+     + COALESCE((SELECT total_eval * exch_rate FROM us_account_summary WHERE id = 1), 0)
+     + COALESCE((SELECT sum(deposit) FROM cash_balances WHERE currency = 'KRW'), 0)"""
+
+
 def earnings_eve(conn: psycopg.Connection, day) -> list[tuple[str, tuple]]:
     """그날 실적을 발표하는 보유 종목: (티커, (이름, 시장, 일정 설명, 평단 대비 %, 비중 %, 손절, 익절, 지난 서프라이즈 %))"""
     rows = conn.execute(
@@ -618,11 +627,7 @@ def earnings_eve(conn: psycopg.Connection, day) -> list[tuple[str, tuple]]:
            WHERE c.kind = 'earnings' AND c.day = %s ORDER BY h.name""",
         (day,),
     ).fetchall()
-    total = conn.execute(
-        """SELECT COALESCE((SELECT total_eval FROM account_summary WHERE id = 1), 0)
-                + COALESCE((SELECT total_eval * exch_rate FROM us_account_summary WHERE id = 1), 0)
-                + COALESCE((SELECT sum(deposit) FROM cash_balances WHERE currency = 'KRW'), 0)"""
-    ).fetchone()[0]
+    total = conn.execute(TOTAL_KRW).fetchone()[0]
     out = []
     for ticker, name, market, detail, pnl, value, stop, target, surprise in rows:
         weight = float(value) / float(total) * 100 if total and value is not None else None
@@ -630,6 +635,32 @@ def earnings_eve(conn: psycopg.Connection, day) -> list[tuple[str, tuple]]:
                              float(stop) if stop else None, float(target) if target else None,
                              float(surprise) if surprise is not None else None)))
     return out
+
+
+def record_assets(conn: psycopg.Connection, day) -> None:
+    """오늘(한국 날짜) 내 돈 전체(원화 환산)를 적어 둡니다. 하루에 여러 번 불려도 마지막 값이 남아요."""
+    total = conn.execute(TOTAL_KRW).fetchone()[0]
+    if total and total > 0:
+        conn.execute("INSERT INTO asset_history (day, total) VALUES (%s, %s) ON CONFLICT (day) DO UPDATE SET total = EXCLUDED.total",
+                     (day, total))
+
+
+def weekly_inputs(conn: psycopg.Connection, start, end):
+    """주간 성적표에 쓸 값: (지금 전체, start 전날까지 마지막 전체, 보유 종목 주간 등락, 다음 주 일정)."""
+    now = conn.execute("SELECT total FROM asset_history WHERE day <= %s ORDER BY day DESC LIMIT 1", (end,)).fetchone()
+    before = conn.execute("SELECT total FROM asset_history WHERE day < %s ORDER BY day DESC LIMIT 1", (start,)).fetchone()
+    moves = conn.execute(
+        """SELECT h.name, (SELECT close FROM price_history p WHERE p.ticker = h.ticker AND p.day <= %s ORDER BY day DESC LIMIT 1),
+                  (SELECT close FROM price_history p WHERE p.ticker = h.ticker AND p.day < %s ORDER BY day DESC LIMIT 1)
+           FROM holdings h WHERE h.quantity > 0""",
+        (end, start),
+    ).fetchall()
+    events = conn.execute(
+        "SELECT day, kind, title FROM calendar_events WHERE day > %s AND day <= %s + 7 ORDER BY day, kind, title", (end, end)
+    ).fetchall()
+    return (float(now[0]) if now else None, float(before[0]) if before else None,
+            [(n, (float(a) / float(b) - 1) * 100) for n, a, b in moves if a and b],
+            [(d, k, t) for d, k, t in events])
 
 
 def review_inputs(conn: psycopg.Connection):

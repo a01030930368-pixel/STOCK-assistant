@@ -3,6 +3,7 @@
 - 저녁 일정 알림: 매일 저녁 8시(한국 시간)에 다음 날 일정(금리 결정·경제지표·만기·휴장·내 종목 실적)을 보냅니다.
 - 아침 브리핑: 평일 아침 8시에 밤사이 미국장, 내 종목, 오늘 일정을 한 번에 보냅니다.
 - 실적 전날 알림: 저녁 8시에, 내일 실적을 발표하는 보유 종목마다 따로 한 통씩 보냅니다.
+- 주간 성적표: 일요일 저녁 8시에 이번 주 내 돈 변화, 보유 종목 등락, 매매, 강평 안 쓴 일기장, 다음 주 일정을 보냅니다.
 """
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -136,3 +137,78 @@ def review_message(book) -> str:
         "첫 매수부터 전량 매도까지, 일기장 한 권이 끝났어요. 기억이 생생할 때 사후강평을 써 보세요.",
         "LODESTAR → 매매일지 → 일기장",
     ])
+
+
+def weekly_due(now: datetime) -> date | None:
+    """일요일 저녁 8시가 지났으면 이번 주 월요일을, 아니면 None을 돌려줍니다."""
+    local = now.astimezone(KST)
+    if local.weekday() != 6 or local.time() < EVENING:
+        return None
+    return local.date() - timedelta(days=6)
+
+
+def _won_short(v: float) -> str:
+    """1억 2,345만원 / 3,210만원 / 8,500원처럼 읽기 쉽게."""
+    n = round(abs(v))
+    sign = "-" if v < 0 else ""
+    if n >= 100_000_000:
+        eok, man = divmod(n // 10_000, 10_000)
+        return f"{sign}{eok}억" + (f" {man:,}만원" if man else "원")
+    if n >= 10_000:
+        return f"{sign}{n // 10_000:,}만원"
+    return f"{sign}{n:,}원"
+
+
+@dataclass(frozen=True)
+class Week:
+    start: date
+    total: float | None
+    last_total: float | None
+    moves: list  # (이름, 주간 %)
+    buys: int
+    sells: int
+    realized: dict  # 시장 -> 판 것 손익 합(원가 모르는 매도는 빠짐)
+    closed: list  # (이름, 수익률 %)
+    unreviewed: int
+    events: list  # (날짜, 종류, 제목)
+
+
+def weekly_message(w: Week) -> str:
+    end = w.start + timedelta(days=6)
+    lines = [f"[LODESTAR] 이번 주 성적표 · {day_label(w.start)} ~ {day_label(end)}"]
+    if w.total is not None and w.last_total:
+        diff = w.total - w.last_total
+        lines.append(f"내 돈 {_won_short(w.total)} · 지난주보다 {diff / w.last_total * 100:+.1f}% ({'+' if diff >= 0 else ''}{_won_short(diff)})")
+    elif w.total is not None:
+        lines.append(f"내 돈 {_won_short(w.total)} · 지난주 기록이 없어서 다음 주부터 비교해 드려요")
+    if w.moves:
+        ups = sorted((m for m in w.moves if m[1] > 0), key=lambda m: -m[1])[:3]
+        downs = sorted((m for m in w.moves if m[1] < 0), key=lambda m: m[1])[:3]
+        lines.append("")
+        lines.append("내 종목 이번 주")
+        if ups:
+            lines.append("· 오른 종목: " + ", ".join(f"{n} {p:+.1f}%" for n, p in ups))
+        if downs:
+            lines.append("· 내린 종목: " + ", ".join(f"{n} {p:+.1f}%" for n, p in downs))
+    lines.append("")
+    if w.buys or w.sells:
+        lines.append(f"이번 주 매매 · 매수 {w.buys}번 · 매도 {w.sells}번")
+        for market, v in w.realized.items():
+            money = _won_short(v) if market == "KR" else f"{'-' if v < 0 else ''}${abs(v):,.2f}"
+            lines.append(f"· 판 것 손익({'국내' if market == 'KR' else '미국'}) {'+' if v > 0 else ''}{money}")
+        if w.closed:
+            lines.append("· 다 판 종목: " + ", ".join(f"{n} {_pct(p)}" for n, p in w.closed))
+    else:
+        lines.append("이번 주 매매 · 없었어요")
+    if w.unreviewed:
+        lines.append(f"사후강평 안 쓴 일기장 {w.unreviewed}권 · 매매일지 → 일기장에서 써 보세요")
+    lines.append("")
+    if w.events:
+        lines.append("다음 주 일정")
+        shown = sorted(w.events, key=lambda e: (e[0], ORDER.get(e[1], 9), e[2]))
+        lines += [f"· {day_label(d)} {t}" for d, k, t in shown[:8]]
+        if len(shown) > 8:
+            lines.append(f"· 그 밖에 {len(shown) - 8}개는 일정 화면에서 보세요")
+    else:
+        lines.append("다음 주 일정 · 큰 일정은 없어요")
+    return "\n".join(lines)

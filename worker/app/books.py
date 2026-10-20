@@ -34,11 +34,26 @@ class ClosedBook:
     realized: float | None
 
 
+@dataclass(frozen=True)
+class Sold:
+    market: str
+    ticker: str
+    name: str
+    day: date
+    pnl: float | None  # 평단 대비 손익에서 그날 수수료·세금을 뺀 값. 원가를 모르면 None
+
+
 def _order(t: Trade):
     return (t.day, t.time or "", 0 if t.side == "buy" else 1)
 
 
 def closed_books(trades: list[Trade], held: dict[tuple[str, str], Decimal]) -> list[ClosedBook]:
+    return replay(trades, held)[0]
+
+
+def replay(trades: list[Trade], held: dict[tuple[str, str], Decimal]) -> tuple[list[ClosedBook], list[Sold]]:
+    """(끝난 권, 매도마다의 손익)."""
+    sold: list[Sold] = []
     by_stock: dict[tuple[str, str], list[Trade]] = {}
     for t in trades:
         by_stock.setdefault((t.market, t.ticker), []).append(t)
@@ -61,9 +76,11 @@ def closed_books(trades: list[Trade], held: dict[tuple[str, str], Decimal]) -> l
             else:
                 if not active or t.quantity > q + EPS:
                     active, known, q = True, False, t.quantity
-                if known:
-                    pnl += t.quantity * (t.price - avg)
+                one = t.quantity * (t.price - avg) if known else None
+                if one is not None:
+                    pnl += one
                     cost += t.quantity * avg
+                sold.append(Sold(market, ticker, t.name, t.day, float(one - (t.fee or 0)) if one is not None else None))
                 q -= t.quantity
             fees += t.fee or 0
             if q <= EPS:
@@ -72,4 +89,4 @@ def closed_books(trades: list[Trade], held: dict[tuple[str, str], Decimal]) -> l
                 out.append(ClosedBook(f"{market}:{ticker}:{t.day.isoformat()}", market, ticker, t.name,
                                       start if known else None, t.day, ret, realized))
                 active, q, start = False, Decimal(0), None
-    return out
+    return out, sold
