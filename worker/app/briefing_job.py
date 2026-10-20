@@ -22,14 +22,15 @@ class BriefingJob:
         db.record_assets(conn, now.astimezone(briefing.KST).date())
         if not (self.cfg.telegram_bot_token and self.cfg.telegram_chat_id):
             return
-        self._evening(conn, now)
-        self._earnings_eve(conn, now)
-        self._reviews(conn, now)
-        self._weekly(conn, now)
-        self._morning(conn, now)
+        # 하나가 실패해도 나머지 알림은 그대로 보냅니다.
+        for step in (self._evening, self._earnings_eve, self._reviews, self._weekly, self._morning):
+            try:
+                step(conn, now)
+            except Exception:
+                log.exception("%s 알림 실패", step.__name__)
 
-    def _send(self, text: str) -> None:
-        telegram.send(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, text, self.http)
+    def _send(self, text: str) -> bool:
+        return telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, text, self.http)
 
     def _evening(self, conn: psycopg.Connection, now: datetime) -> None:
         day = briefing.evening_due(now)
@@ -40,7 +41,8 @@ class BriefingJob:
             return
         text = briefing.evening_message(day, [briefing.Item(*r) for r in db.events_on(conn, day)])
         if text:
-            self._send(text)
+            if not self._send(text):
+                return
             log.info("내일 일정 알림을 보냈습니다")
         db.mark_notice(conn, key)
 
@@ -52,7 +54,8 @@ class BriefingJob:
             key = f"earnings:{ticker}:{day.isoformat()}"
             if db.notice_sent(conn, key):
                 continue
-            self._send(briefing.earnings_eve_message(day, briefing.EarningsEve(*eve)))
+            if not self._send(briefing.earnings_eve_message(day, briefing.EarningsEve(*eve))):
+                continue
             log.info("%s 실적 전날 알림을 보냈습니다", ticker)
             db.mark_notice(conn, key)
 
@@ -69,7 +72,8 @@ class BriefingJob:
             key = f"review:{book.key}"
             if db.notice_sent(conn, key):
                 continue
-            self._send(briefing.review_message(book))
+            if not self._send(briefing.review_message(book)):
+                continue
             log.info("%s 사후강평 알림을 보냈습니다", book.name)
             db.mark_notice(conn, key)
 
@@ -91,9 +95,10 @@ class BriefingJob:
                 realized[s.market] = realized.get(s.market, 0.0) + s.pnl
         closed = [(b.name, b.return_pct) for b in closed_all if start <= b.end <= end]
         unreviewed = sum(1 for b in closed_all if b.key not in reviewed and b.end > end - timedelta(days=30))
-        self._send(briefing.weekly_message(briefing.Week(
-            start, total, last_total, moves, sum(t.side == "buy" for t in week), sum(t.side == "sell" for t in week),
-            realized, closed, unreviewed, events)))
+        if not self._send(briefing.weekly_message(briefing.Week(
+                start, total, last_total, moves, sum(t.side == "buy" for t in week), sum(t.side == "sell" for t in week),
+                realized, closed, unreviewed, events))):
+            return
         log.info("주간 성적표를 보냈습니다")
         db.mark_notice(conn, key)
 
@@ -106,7 +111,8 @@ class BriefingJob:
             return
         holdings = [briefing.Holding(*r) for r in db.briefing_holdings(conn)]
         items = [briefing.Item(*r) for r in db.events_on(conn, day)]
-        self._send(briefing.morning_message(day, self._indexes(), holdings, items))
+        if not self._send(briefing.morning_message(day, self._indexes(), holdings, items)):
+            return
         log.info("아침 브리핑을 보냈습니다")
         db.mark_notice(conn, key)
 

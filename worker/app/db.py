@@ -253,7 +253,16 @@ MIGRATIONS = [
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS chart_doodles_ticker_idx ON chart_doodles (ticker, view)",
+    # 날짜 계산(CURRENT_DATE)을 한국 날짜로. 새벽 0~9시에 날짜가 하루 밀리던 문제를 막습니다.
+    """DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET timezone TO %L', current_database(), 'Asia/Seoul'); END $$""",
+    # 키움 기록보다 먼저 산 주식을 팔면 평단을 몰라요. 0%로 두면 통계에서 손실로 세서 비워 둡니다.
+    "ALTER TABLE sell_entries ALTER COLUMN avg_buy_price DROP NOT NULL",
+    "ALTER TABLE sell_entries ALTER COLUMN return_pct DROP NOT NULL",
+    """UPDATE sell_entries s SET avg_buy_price = NULL, return_pct = NULL FROM positions p
+       WHERE p.id = s.position_id AND p.book_key IS NOT NULL AND s.return_pct = 0 AND s.avg_buy_price = s.price""",
 ]
+
+
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
         conn.execute(statement)
@@ -292,7 +301,8 @@ def save_us_balance(conn: psycopg.Connection, balance: UsBalance) -> None:
                VALUES (1, %s, %s, %s, %s, %s, now())
                ON CONFLICT (id) DO UPDATE SET total_buy = EXCLUDED.total_buy, total_eval = EXCLUDED.total_eval,
                  total_pnl = EXCLUDED.total_pnl, total_pnl_pct = EXCLUDED.total_pnl_pct,
-                 exch_rate = EXCLUDED.exch_rate, synced_at = now()""",
+                 exch_rate = COALESCE(NULLIF(EXCLUDED.exch_rate, 0), NULLIF(us_account_summary.exch_rate, 0), 0),
+                 synced_at = now()""",
             (balance.total_buy, balance.total_eval, balance.total_pnl, balance.total_pnl_pct, balance.exch_rate),
         )
 
@@ -394,8 +404,8 @@ def save_financials(conn: psycopg.Connection, items: list[Financials]) -> None:
 def current_prices(conn: psycopg.Connection) -> dict[str, Decimal]:
     """알림 확인용 현재가. 보유 종목은 잔고 값, 관심종목은 30분 안에 받은 현재가."""
     prices = {row[0]: row[1] for row in conn.execute(
-        "SELECT ticker, price FROM watch_quotes WHERE fetched_at > now() - interval '30 minutes'")}
-    prices.update({row[0]: row[1] for row in conn.execute("SELECT ticker, cur_price FROM holdings")})
+        "SELECT ticker, price FROM watch_quotes WHERE fetched_at > now() - interval '30 minutes' AND price > 0")}
+    prices.update({row[0]: row[1] for row in conn.execute("SELECT ticker, cur_price FROM holdings WHERE cur_price > 0")})
     return prices
 
 
@@ -456,6 +466,25 @@ def save_level_seen(conn: psycopg.Connection, level_id: int, price: Decimal, ale
     )
 
 
+def close_sold_positions(conn: psycopg.Connection, market: str) -> list[int]:
+    """키움에서 다 판 종목의 '보유 중' 일지를 끝난 것으로 바꾸고 손절·익절 알림을 끕니다.
+
+    잔고에 없고, 마지막 매수 일지 날 이후 매도 체결이 있는 것만요(일지를 먼저 쓰고 아직 안 산 경우는 그대로 둡니다)."""
+    with conn.transaction():
+        ids = [r[0] for r in conn.execute(
+            """UPDATE positions p SET status = 'closed', closed_at = now()
+               WHERE p.status = 'open' AND p.market = %s
+                 AND NOT EXISTS (SELECT 1 FROM holdings h WHERE h.ticker = p.ticker AND h.market = p.market AND h.quantity > 0)
+                 AND EXISTS (SELECT 1 FROM trade_fills f WHERE f.ticker = p.ticker AND f.market = p.market AND f.side = 'sell'
+                   AND f.trade_date >= COALESCE((SELECT max(trade_date) FROM buy_entries b WHERE b.position_id = p.id), p.created_at::date))
+               RETURNING p.id""",
+            (market,),
+        ).fetchall()]
+        if ids:
+            conn.execute("UPDATE alerts SET active = false WHERE position_id = ANY(%s) AND kind IN ('stop', 'target') AND active", (ids,))
+    return ids
+
+
 def mark_triggered(conn: psycopg.Connection, alert_id: int) -> None:
     conn.execute("UPDATE alerts SET active = false, triggered_at = now() WHERE id = %s", (alert_id,))
 
@@ -474,6 +503,25 @@ def save_calendar(conn: psycopg.Connection, kind: str, events: list[Event], tick
                 (e.day, e.kind, e.market, e.ticker, e.title, e.detail),
             )
         conn.execute("DELETE FROM calendar_events WHERE day < CURRENT_DATE - 30")
+
+
+def balance_synced(conn: psycopg.Connection) -> bool:
+    return conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM account_summary) OR EXISTS (SELECT 1 FROM us_account_summary)").fetchone()[0]
+
+
+def prune_calendar(conn: psycopg.Connection) -> None:
+    """팔았거나 관심종목에서 뺀 종목의 앞으로 일정은 지웁니다. 실적은 지켜보는 종목, 배당은 들고 있는 종목만 남겨요."""
+    conn.execute(
+        """DELETE FROM calendar_events c WHERE c.kind = 'earnings' AND c.day >= CURRENT_DATE AND c.ticker IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM holdings h WHERE h.ticker = c.ticker)
+             AND NOT EXISTS (SELECT 1 FROM positions p WHERE p.ticker = c.ticker AND p.status = 'open')
+             AND NOT EXISTS (SELECT 1 FROM watchlist w WHERE w.ticker = c.ticker)"""
+    )
+    conn.execute(
+        """DELETE FROM calendar_events c WHERE c.kind = 'dividend' AND c.day >= CURRENT_DATE AND c.ticker IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM holdings h WHERE h.ticker = c.ticker AND h.quantity > 0)"""
+    )
 
 
 def held_quantities(conn: psycopg.Connection) -> list[tuple[str, str, str, Decimal]]:
@@ -500,19 +548,23 @@ def save_prices(conn: psycopg.Connection, ticker: str, rows) -> None:
         )
 
 
-def snapshot_prices(conn: psycopg.Connection) -> None:
+def snapshot_prices(conn: psycopg.Connection, markets: list[str]) -> None:
     """보유 종목 현재가를 그 시장의 오늘 날짜 종가로 적어 둡니다. 장 마감 뒤 마지막 값이 그날 종가가 됩니다.
 
+    정규장이 열린 시장(markets)만 적습니다. 주말·장 전에 켜도 가짜 일봉이 생기지 않아요.
     고가·저가는 지금까지 본 값으로 넓히고, 일봉을 받아 오면 정확한 값으로 덮어씁니다."""
+    if not markets:
+        return
     conn.execute(
         """INSERT INTO price_history (ticker, day, open, high, low, close)
            SELECT ticker, (now() AT TIME ZONE CASE market WHEN 'KR' THEN 'Asia/Seoul' ELSE 'America/New_York' END)::date,
              cur_price, cur_price, cur_price, cur_price
-           FROM holdings WHERE cur_price > 0
+           FROM holdings WHERE cur_price > 0 AND market = ANY(%s)
            ON CONFLICT (ticker, day) DO UPDATE SET close = EXCLUDED.close,
              open = COALESCE(price_history.open, EXCLUDED.close),
              high = GREATEST(COALESCE(price_history.high, EXCLUDED.close), EXCLUDED.close),
-             low = LEAST(COALESCE(price_history.low, EXCLUDED.close), EXCLUDED.close)"""
+             low = LEAST(COALESCE(price_history.low, EXCLUDED.close), EXCLUDED.close)""",
+        (markets,),
     )
 
 
@@ -653,16 +705,22 @@ def events_on(conn: psycopg.Connection, day) -> list[tuple[str, str, str]]:
     ).fetchall()
 
 
-TOTAL_KRW = """SELECT COALESCE((SELECT total_eval FROM account_summary WHERE id = 1), 0)
-     + COALESCE((SELECT total_eval * exch_rate FROM us_account_summary WHERE id = 1), 0)
-     + COALESCE((SELECT sum(deposit) FROM cash_balances WHERE currency = 'KRW'), 0)"""
+# 원/달러 환율: 키움 잔고의 환율, 없으면(미국 주식이 없을 때 등) 한국은행 환율.
+USD_KRW = """COALESCE(NULLIF((SELECT exch_rate FROM us_account_summary WHERE id = 1), 0),
+     (SELECT value FROM macro_indicators WHERE code = 'usdkrw'), 0)"""
+
+# 내 돈 전체(원): 국내·미국 주식 평가 + 예수금. 예수금은 /잔고와 같이 D+2 값(없으면 지금 값), 달러는 원화로 바꿉니다.
+TOTAL_KRW = f"""SELECT COALESCE((SELECT total_eval FROM account_summary WHERE id = 1), 0)
+     + COALESCE((SELECT total_eval FROM us_account_summary WHERE id = 1), 0) * {USD_KRW}
+     + COALESCE((SELECT sum(COALESCE(d2_deposit, deposit)) FROM cash_balances WHERE currency = 'KRW'), 0)
+     + COALESCE((SELECT sum(COALESCE(d2_deposit, deposit)) FROM cash_balances WHERE currency = 'USD'), 0) * {USD_KRW}"""
 
 
 def earnings_eve(conn: psycopg.Connection, day) -> list[tuple[str, tuple]]:
     """그날 실적을 발표하는 보유 종목: (티커, (이름, 시장, 일정 설명, 평단 대비 %, 비중 %, 손절, 익절, 지난 서프라이즈 %))"""
     rows = conn.execute(
-        """SELECT h.ticker, h.name, h.market, c.detail, h.pnl_pct,
-                  h.eval_amount * CASE WHEN h.market = 'US' THEN COALESCE((SELECT exch_rate FROM us_account_summary WHERE id = 1), 1) ELSE 1 END,
+        f"""SELECT h.ticker, h.name, h.market, c.detail, h.pnl_pct,
+                  h.eval_amount * CASE WHEN h.market = 'US' THEN {USD_KRW} ELSE 1 END,
                   (SELECT max(price) FROM alerts a WHERE a.ticker = h.ticker AND a.active AND a.kind = 'stop'),
                   (SELECT min(price) FROM alerts a WHERE a.ticker = h.ticker AND a.active AND a.kind = 'target'),
                   (SELECT (e.eps_actual - e.eps_estimate) / NULLIF(abs(e.eps_estimate), 0) * 100 FROM stock_earnings e
@@ -785,7 +843,10 @@ def command_accounts(conn: psycopg.Connection) -> tuple[list[tuple], float]:
         row = conn.execute(f"SELECT total_eval, total_pnl, total_pnl_pct FROM {table} WHERE id = 1").fetchone()
         if row:
             out.append((market, float(row[0]), float(row[1]), float(row[2]), cash.get(market)))
-    rate = conn.execute("SELECT exch_rate FROM us_account_summary WHERE id = 1").fetchone()
+        elif market in cash:
+            # 주식은 없어도 예수금만 있는 계좌도 총자산에 넣습니다.
+            out.append((market, 0.0, 0.0, 0.0, cash[market]))
+    rate = conn.execute(f"SELECT {USD_KRW}").fetchone()
     return out, float(rate[0]) if rate else 0.0
 
 

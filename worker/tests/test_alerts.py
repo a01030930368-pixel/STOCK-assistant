@@ -31,3 +31,8 @@ def test_market_hours_kst():
 def test_custom_message_names_watchlist():
     a = Alert(9, "PLTR", "PLTR", "custom", "above", Decimal("45"))
     assert message(a, Decimal("45.3")) == "관심종목 PLTR(PLTR) 가격이 정해 둔 45 위로 올라왔어요. 현재가 45.30"
+
+
+def test_zero_price_never_triggers_stop():
+    # 가격을 아직 못 받아 0으로 들어오면 손절 알림을 보내지 않습니다.
+    assert due([STOP], {"005930": Decimal(0)}) == []

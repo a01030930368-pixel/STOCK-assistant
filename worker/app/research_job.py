@@ -48,6 +48,9 @@ class ResearchJob:
             self._dividends(conn, now)
             self._prices(conn, now)
         self._new_prices(conn, now)
+        # 잔고가 비어 있을 때(키움 조회 전) 지우면 안 되므로, 잔고를 받아 온 뒤에만 정리합니다.
+        if db.balance_synced(conn):
+            db.prune_calendar(conn)
 
     def _try(self, what: str, fn) -> None:
         # 한 종목·한 출처가 실패해도 나머지는 계속 모읍니다.
