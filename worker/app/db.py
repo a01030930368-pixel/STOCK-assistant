@@ -442,6 +442,16 @@ def ai_context(conn: psycopg.Connection, ticker: str, name: str, market: str) ->
             (ticker,),
         ).fetchall()
     ]
+    # 미국 금리·지표는 국내 종목에도 영향을 주므로 미국 일정은 늘 넣고, 국내 일정은 국내 종목에만 넣습니다.
+    ctx["macro"] = [
+        f"{d} {t} {detail}".strip()
+        for d, t, detail in conn.execute(
+            """SELECT to_char(day, 'YYYY-MM-DD'), title, detail FROM calendar_events
+               WHERE kind IN ('policy', 'economic') AND (market = 'US' OR market = %s)
+                 AND day BETWEEN CURRENT_DATE AND CURRENT_DATE + 7 ORDER BY day LIMIT 6""",
+            (market,),
+        ).fetchall()
+    ]
     ctx["news"] = [
         f"{d} {t}" for d, t in conn.execute(
             """SELECT to_char(published_at, 'MM-DD'), COALESCE(title_ko, title) FROM stock_news

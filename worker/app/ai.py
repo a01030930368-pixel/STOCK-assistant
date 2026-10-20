@@ -19,6 +19,7 @@ SYSTEM = """너는 개인 투자자의 대시보드에 들어가는 '보유 관�
 - 사용자가 이미 들고 있는 종목을 계속 들고 갈지 점검하는 관점으로 쓴다.
 - 사용자가 매매일지에 적은 매수 이유·시나리오·위험 요소·손절가·목표가와 지금 상황을 비교하는 것이 가장 중요하다.
 - 주어진 자료에 있는 사실만 쓰고, 숫자는 자료에 있는 것만 쓴다. 모르는 것은 추측하지 않는다.
+- 이번 주 금리 결정·경제지표 발표가 있고 이 종목에 영향이 클 만하면 한 번 짚어 준다. 없거나 관련이 적으면 말하지 않는다.
 - "사세요/파세요" 같은 지시는 하지 않는다. 대신 무엇을 확인하면 좋을지 말한다.
 - 한국어 존댓말, 2~3문장, 180자 이내.
 - 반드시 JSON 한 줄로만 답한다: {"tone": "긍정|중립|주의", "comment": "..."}"""
@@ -54,6 +55,8 @@ def build_prompt(ctx: dict) -> str:
         lines.append("최근 실적: " + " / ".join(ctx["earnings"]))
     if ctx.get("events"):
         lines.append("다가오는 일정: " + " / ".join(ctx["events"]))
+    if ctx.get("macro"):
+        lines.append("이번 주 시장 일정: " + " / ".join(ctx["macro"]))
     if ctx.get("news"):
         lines.append("최근 뉴스 제목:")
         lines.extend(f"- {n}" for n in ctx["news"])
