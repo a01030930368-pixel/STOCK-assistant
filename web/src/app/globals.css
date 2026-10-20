@@ -511,3 +511,18 @@ p.small { font-size: 0.82rem; margin: 6px 0 0; }
 .isa-set input[type="date"] { width: auto; }
 .isa-set button { padding: 8px 14px; }
 @media (max-width: 720px) { .isa-set form { grid-template-columns: 1fr; } }
+
+/* 해외 계좌 원화 어림값, 매수 일지 읽기 */
+.krw-about { color: var(--muted); font-size: 0.82em; white-space: nowrap; }
+.field-note { display: block; font-size: 0.78rem; margin-top: 4px; }
+.entry-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.entry-view { display: grid; gap: 14px; }
+.entry-view .panel-title { margin-top: 4px; }
+.entry-text { margin: 4px 0 14px; line-height: 1.6; white-space: pre-wrap; }
+.entry-risks { margin: 4px 0 14px; padding-left: 20px; line-height: 1.7; }
+.entry-macro { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 16px; margin: 0; }
+.entry-macro dt { color: var(--muted); font-size: 0.8rem; }
+.entry-macro dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; }
+.buy-shot { display: block; width: 100%; height: auto; border-radius: 8px; }
+.buy-shot-live { width: 100%; height: 280px; }
+@media (max-width: 720px) { .entry-macro { grid-template-columns: repeat(2, 1fr); } }

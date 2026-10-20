@@ -56,6 +56,8 @@ CREATE TABLE buy_entries (
   target_basis       TEXT NOT NULL CHECK (target_basis IN ('chart', 'percent')),
   macro_snapshot_id  INT REFERENCES macro_snapshots(id),
   fill_key           TEXT,
+  context            JSONB,  -- 매수일 기준 매크로 값(워커가 채움)
+  chart_png          TEXT,   -- 매수일까지의 차트 그림(data:image/png)
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (stop_price < price AND price < target_price)
 );

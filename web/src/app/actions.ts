@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { pool, query } from "@/lib/db";
 import { optionalNumber, validateMacro, type MacroInput } from "@/lib/macro";
 import { rulesFromForm } from "@/lib/screener";
-import { averageBefore, averagePrice, holdingDays, remainingQuantity, returnPct, sameQuantity, validateBuy, type BuyInput, type Fill } from "@/lib/journal";
+import { averageBefore, averagePrice, holdingDays, marketOf as tickerMarket, remainingQuantity, returnPct, sameQuantity, validateBuy, type BuyInput, type Fill } from "@/lib/journal";
 import type { Book } from "@/lib/books";
 import { loadBook } from "@/lib/booksData";
 import { KIND_LABEL, validColor, validDoodle, type DoodlePoint, type LevelKind } from "@/lib/drawings";
@@ -76,7 +76,7 @@ function buyInput(form: FormData): BuyInput {
     tradeDate: text(form, "tradeDate"),
     ticker: text(form, "ticker").toUpperCase(),
     name: text(form, "name"),
-    market: text(form, "market") === "US" ? "US" : "KR",
+    market: tickerMarket(text(form, "ticker"), text(form, "market") === "US" ? "US" : "KR"),
     quantity: num(form, "quantity"),
     price: num(form, "price"),
     reason: text(form, "reason"),
@@ -161,7 +161,11 @@ export async function createBuy(_prev: FormState, form: FormData): Promise<FormS
 async function updateBuy(id: number, input: BuyInput, bookKey: string): Promise<FormState> {
   const [row] = await query<{ position_id: number }>(
     `UPDATE buy_entries SET trade_date = $2, quantity = $3, price = $4, reason = $5, scenario = $6, risk_1 = $7, risk_2 = $8, risk_3 = $9,
-       weight_pct = $10, stop_price = $11, target_price = $12, target_basis = $13 WHERE id = $1 RETURNING position_id`,
+       weight_pct = $10, stop_price = $11, target_price = $12, target_basis = $13,
+       -- 날짜·가격이 바뀌었을 수 있어 당시 차트와 매크로를 다시 남깁니다.
+       chart_png = CASE WHEN trade_date = $2 AND price = $4 AND stop_price = $11 AND target_price = $12 THEN chart_png END,
+       context = CASE WHEN trade_date = $2 THEN context END
+     WHERE id = $1 RETURNING position_id`,
     [id, input.tradeDate, input.quantity, input.price, input.reason, input.scenario, ...input.risks,
       input.weightPct, input.stopPrice, input.targetPrice, input.targetBasis],
   );
@@ -518,6 +522,12 @@ export async function saveLimits(form: FormData) {
     [JSON.stringify(value)],
   );
   revalidatePath("/weights");
+}
+
+// 매수 일지에 그날까지의 차트 그림을 한 번만 저장합니다(이미 있으면 그대로).
+export async function saveBuyChart(id: number, dataUrl: string) {
+  if (!Number.isInteger(id) || !dataUrl.startsWith("data:image/png;base64,") || dataUrl.length > 1_500_000) return;
+  await query("UPDATE buy_entries SET chart_png = $2 WHERE id = $1 AND chart_png IS NULL", [id, dataUrl]);
 }
 
 // ISA 유형(비과세 한도)과 개설일(만기 계산)

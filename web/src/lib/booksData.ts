@@ -1,6 +1,7 @@
 import { query } from "./db";
 import { attachEntries, buildBooks, findBook, type Book, type EntryRow, type FillRow, type Holding, type Market } from "./books";
 import { today } from "./format";
+import { marketOf } from "./journal";
 
 type HoldingRow = { market: Market; ticker: string; name: string; quantity: string; avg_price: string; pnl_pct: string | null };
 
@@ -22,6 +23,8 @@ export async function loadBooks(): Promise<Book[]> {
   );
   const holdings = await query<HoldingRow>("SELECT market, ticker, name, quantity, avg_price, pnl_pct FROM holdings");
 
+  // 미국 종목을 국내로 적은 예전 일지도 체결과 같은 권에 묶이게 티커 모양으로 시장을 맞춥니다.
+  for (const e of entries) e.market = marketOf(e.ticker, e.market);
   const events = attachEntries(fills, entries);
   const used = new Set(events.flatMap((e) => e.entryIds));
   for (const e of entries) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { averagePrice, holdingDays, remainingQuantity, returnPct, validateBuy, type BuyInput } from "./journal";
+import { averagePrice, holdingDays, marketOf, remainingQuantity, returnPct, validateBuy, type BuyInput } from "./journal";
 
 const valid: BuyInput = {
   tradeDate: "2026-10-19",
@@ -54,5 +54,15 @@ describe("sell calculations", () => {
 
   it("tracks remaining quantity", () => {
     expect(remainingQuantity(buys, [{ tradeDate: "2026-02-01", quantity: 15, price: 130 }])).toBe(5);
+  });
+});
+
+describe("marketOf", () => {
+  it("reads the market from the ticker", () => {
+    expect(marketOf("spym", "KR")).toBe("US");
+    expect(marketOf("BRK.B", "KR")).toBe("US");
+    expect(marketOf("005930", "US")).toBe("KR");
+    expect(marketOf("0001A0", "US")).toBe("KR");
+    expect(marketOf("Q530036", "KR")).toBe("KR");
   });
 });

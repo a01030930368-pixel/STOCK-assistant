@@ -65,3 +65,12 @@ export function averageBefore(buys: Fill[], sellDate: string): number {
   const before = buys.filter((b) => b.tradeDate <= sellDate);
   return averagePrice(before.length ? before : buys);
 }
+
+// 티커 모양으로 시장을 정합니다. 영문만(BRK.B 같은 점·하이픈 포함)이면 미국, 숫자로 시작하면 국내.
+// 국내 ETN(Q530036)처럼 섞인 건 고른 값을 따라요. 미국 종목을 국내로 잘못 골라 일기장이 갈라지던 것을 막습니다.
+export function marketOf(ticker: string, chosen: "KR" | "US"): "KR" | "US" {
+  const t = ticker.trim().toUpperCase();
+  if (/^[A-Z]+([.-][A-Z]+)?$/.test(t)) return "US";
+  if (/^\d/.test(t)) return "KR";
+  return chosen;
+}

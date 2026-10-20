@@ -298,6 +298,16 @@ MIGRATIONS = [
       fee         NUMERIC(18, 4),
       fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
+    # 매수 당시 기록: 그날 매크로 값(워커가 채움)과 그날까지의 차트 그림(화면이 처음 열 때 한 번 저장)
+    "ALTER TABLE buy_entries ADD COLUMN IF NOT EXISTS context JSONB",
+    "ALTER TABLE buy_entries ADD COLUMN IF NOT EXISTS chart_png TEXT",
+    # 손으로 적은 미국 종목이 국내로 저장돼 일기장이 둘로 갈라지던 것을 바로잡습니다. 숫자 없이 영문만인 티커는 미국이에요(국내 ETN Q530036 같은 건 숫자가 있어요).
+    "UPDATE positions SET ticker = upper(ticker) WHERE ticker <> upper(ticker)",
+    """UPDATE positions SET market = 'US', book_key = CASE WHEN book_key LIKE 'KR:%' THEN 'US:' || substr(book_key, 4) ELSE book_key END
+       WHERE market = 'KR' AND ticker ~ '^[A-Z]+([.-][A-Z]+)?$'""",
+    """UPDATE book_reviews SET book_key = 'US:' || substr(book_key, 4)
+       WHERE book_key LIKE 'KR:%' AND split_part(book_key, ':', 2) ~ '^[A-Z]+([.-][A-Z]+)?$'
+         AND NOT EXISTS (SELECT 1 FROM book_reviews r WHERE r.book_key = 'US:' || substr(book_reviews.book_key, 4))""",
 ]
 
 
@@ -391,6 +401,26 @@ def save_isa_fills(conn: psycopg.Connection, fills) -> None:
                  price = EXCLUDED.price, fee = EXCLUDED.fee, fetched_at = now()""",
             (f.key, f.day, f.ticker, f.name, f.side, f.quantity, f.price, f.fee),
         )
+
+
+def buys_without_context(conn: psycopg.Connection, limit: int = 5) -> list[tuple]:
+    """매수 당시 매크로를 아직 못 채운 매수 일지: (id, 매수일, 티커, 시장)"""
+    return conn.execute(
+        """SELECT b.id, b.trade_date, p.ticker, p.market FROM buy_entries b JOIN positions p ON p.id = b.position_id
+           WHERE b.context IS NULL ORDER BY b.id DESC LIMIT %s""",
+        (limit,),
+    ).fetchall()
+
+
+def save_buy_context(conn: psycopg.Connection, entry_id: int, context: dict) -> None:
+    conn.execute("UPDATE buy_entries SET context = %s WHERE id = %s", (Jsonb(context), entry_id))
+
+
+def price_rows_before(conn: psycopg.Connection, ticker: str, day, days: int = 200) -> int:
+    return conn.execute(
+        "SELECT count(*) FROM price_history WHERE ticker = %s AND day <= %s AND day > %s::date - %s",
+        (ticker, day, day, days),
+    ).fetchone()[0]
 
 
 def save_indicators(conn: psycopg.Connection, indicators: list[Indicator]) -> None:

@@ -67,11 +67,13 @@ def fetch_ecos(key: str, today: date, http: httpx.Client) -> list[Indicator]:
     return out
 
 
-def fetch_fred(key: str, http: httpx.Client) -> list[Indicator]:
+def fetch_fred(key: str, http: httpx.Client, day: date | None = None) -> list[Indicator]:
+    # day를 주면 그날까지의 마지막 값(매수 당시 매크로)을 가져옵니다.
+    end = {"observation_end": day.isoformat()} if day else {}
     out = []
-    if rows := _fred_rows(http, key, "DFEDTARU"):
+    if rows := _fred_rows(http, key, "DFEDTARU", **end):
         out.append(Indicator("us_base_rate", Decimal(rows[0]["value"]), rows[0]["date"]))
     # units=pc1: 전년 동기 대비 변화율(%)
-    if rows := _fred_rows(http, key, "CPIAUCSL", units="pc1"):
+    if rows := _fred_rows(http, key, "CPIAUCSL", units="pc1", **end):
         out.append(Indicator("us_cpi_yoy", Decimal(rows[0]["value"]).quantize(Decimal("0.01")), rows[0]["date"]))
     return out
