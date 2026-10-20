@@ -17,6 +17,8 @@ MORNING, MORNING_UNTIL = time(8, 0), time(11, 0)  # 워커가 늦게 켜져도 �
 INDEXES = [("^GSPC", "S&P 500"), ("^IXIC", "나스닥"), ("^SOX", "필라델피아 반도체"), ("KRW=X", "원/달러")]
 # 같은 날 여러 일정이 있으면 시장 전체에 영향이 큰 것부터 보여 줍니다.
 ORDER = {"policy": 0, "economic": 1, "earnings": 2, "dividend": 3, "holiday": 4}
+# 텔레그램에서 한눈에 알아보게 일정 종류마다 이모지를 붙여요.
+ICON = {"policy": "🏦", "economic": "📊", "earnings": "💼", "dividend": "💰", "holiday": "🏖️"}
 
 
 @dataclass(frozen=True)
@@ -36,13 +38,17 @@ def evening_due(now: datetime) -> date | None:
     return local.date() + timedelta(days=1) if local.time() >= EVENING else None
 
 
+def _items(items: list[Item]) -> list[str]:
+    lines = []
+    for it in sorted(items, key=lambda i: (ORDER.get(i.kind, 9), i.title)):
+        lines.append(f"{ICON.get(it.kind, '📌')} {it.title}" + (f"\n      {it.detail}" if it.detail else ""))
+    return lines
+
+
 def evening_message(day: date, items: list[Item]) -> str | None:
     if not items:
         return None
-    lines = [f"[LODESTAR] 내일 일정 · {day_label(day)}"]
-    for it in sorted(items, key=lambda i: (ORDER.get(i.kind, 9), i.title)):
-        lines.append(f"· {it.title}" + (f"\n  {it.detail}" if it.detail else ""))
-    return "\n".join(lines)
+    return "\n".join([f"🗓️ 내일 일정 · {day_label(day)}", "", *_items(items), "", "편안한 저녁 보내세요 🌙"])
 
 
 @dataclass(frozen=True)
@@ -73,24 +79,25 @@ def _pct(v: float | None) -> str:
     return "-" if v is None else f"{v:+.1f}%"
 
 
+def dot(v: float | None) -> str:
+    """오르면 빨강, 내리면 파랑(한국식)."""
+    return "⚪" if not v else "🔴" if v > 0 else "🔵"
+
+
 def _price(market: str, v: float) -> str:
     return f"{v:,.0f}원" if market == "KR" else f"${v:,.2f}"
 
 
 def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], items: list[Item]) -> str:
-    lines = [f"[LODESTAR] 아침 브리핑 · {day_label(day)}"]
+    lines = [f"☀️ 좋은 아침이에요 · {day_label(day)}"]
     if indexes:
-        lines += ["", "밤사이 미국장"]
-        lines += [f"· {q.name} {q.last:,.2f} ({_pct(q.change_pct)})" for q in indexes]
+        lines += ["", "🌙 밤사이 미국장"]
+        lines += [f"{dot(q.change_pct)} {q.name}  {q.last:,.2f} ({_pct(q.change_pct)})" for q in indexes]
     if holdings:
-        lines += ["", "내 종목 (전일 대비 · 평단 대비)"]
-        lines += [f"· {h.name} {_price(h.market, h.price)} · {_pct(h.day_change_pct)} · {_pct(h.pnl_pct)}" for h in holdings]
-    lines += ["", "오늘 일정"]
-    if items:
-        for it in sorted(items, key=lambda i: (ORDER.get(i.kind, 9), i.title)):
-            lines.append(f"· {it.title}" + (f"\n  {it.detail}" if it.detail else ""))
-    else:
-        lines.append("· 큰 일정은 없어요")
+        lines += ["", "💼 내 종목", "      전일 대비 · 평단 대비"]
+        lines += [f"{dot(h.day_change_pct)} {h.name}  {_price(h.market, h.price)}\n      {_pct(h.day_change_pct)} · {_pct(h.pnl_pct)}" for h in holdings]
+    lines += ["", "🗓️ 오늘 일정"]
+    lines += _items(items) if items else ["큰 일정은 없어요 😌"]
     return "\n".join(lines)
 
 
@@ -107,17 +114,18 @@ class EarningsEve:
 
 
 def earnings_eve_message(day: date, e: EarningsEve) -> str:
-    lines = [f"[LODESTAR] 내일 실적 발표 · {e.name}", day_label(day) + (f" · {e.detail}" if e.detail else "")]
+    lines = [f"📣 내일 실적 발표 · {e.name}", f"🗓️ {day_label(day)}" + (f" · {e.detail}" if e.detail else ""), ""]
     if e.last_surprise_pct is not None:
-        lines.append(f"지난번 실적은 예상보다 {e.last_surprise_pct:+.0f}% {'좋았어요' if e.last_surprise_pct >= 0 else '나빴어요'}")
-    now = f"지금 평단 대비 {_pct(e.pnl_pct)}"
+        good = e.last_surprise_pct >= 0
+        lines.append(f"{'👍' if good else '👎'} 지난번 실적은 예상보다 {e.last_surprise_pct:+.0f}% {'좋았어요' if good else '나빴어요'}")
+    now = f"{dot(e.pnl_pct)} 지금 평단 대비 {_pct(e.pnl_pct)}"
     if e.weight_pct is not None:
         now += f" · 내 돈의 {e.weight_pct:.0f}%"
     lines.append(now)
-    plan = [f"손절 {_price(e.market, e.stop)}" if e.stop else "", f"익절 {_price(e.market, e.target)}" if e.target else ""]
+    plan = [f"🛑 손절 {_price(e.market, e.stop)}" if e.stop else "", f"🎯 익절 {_price(e.market, e.target)}" if e.target else ""]
     plan = [p for p in plan if p]
-    lines.append(" · ".join(plan) if plan else "손절·익절 알림이 없어요")
-    lines.append("실적 뒤에는 가격이 크게 움직일 수 있어요. 들고 갈지, 줄일지 계획을 한 번 점검해 보세요.")
+    lines.append(" · ".join(plan) if plan else "🔕 손절·익절 알림이 없어요")
+    lines += ["", "실적 뒤에는 가격이 크게 움직일 수 있어요.", "들고 갈지, 줄일지 계획을 한 번 점검해 보세요 🧐"]
     return "\n".join(lines)
 
 
@@ -132,10 +140,14 @@ def review_message(book) -> str:
         sign = "+" if book.realized > 0 else "-" if book.realized < 0 else ""
         result += f" ({sign}{_price(book.market, abs(book.realized))})"
     return "\n".join([
-        f"[LODESTAR] 다 팔았어요 · {book.name}",
-        f"{days} · {result}",
-        "첫 매수부터 전량 매도까지, 일기장 한 권이 끝났어요. 기억이 생생할 때 사후강평을 써 보세요.",
-        "LODESTAR → 매매일지 → 일기장",
+        f"📕 다 팔았어요 · {book.name}",
+        f"🗓️ {days}",
+        f"{dot(book.return_pct)} {result}",
+        "",
+        "첫 매수부터 전량 매도까지, 일기장 한 권이 끝났어요.",
+        "기억이 생생할 때 사후강평을 써 보세요 ✍️",
+        "",
+        "👉 LODESTAR → 매매일지 → 일기장",
     ])
 
 
@@ -175,40 +187,40 @@ class Week:
 
 def weekly_message(w: Week) -> str:
     end = w.start + timedelta(days=6)
-    lines = [f"[LODESTAR] 이번 주 성적표 · {day_label(w.start)} ~ {day_label(end)}"]
+    lines = [f"📊 이번 주 성적표", f"🗓️ {day_label(w.start)} ~ {day_label(end)}", ""]
     if w.total is not None and w.last_total:
         diff = w.total - w.last_total
-        lines.append(f"내 돈 {_won_short(w.total)} · 지난주보다 {diff / w.last_total * 100:+.1f}% ({'+' if diff >= 0 else ''}{_won_short(diff)})")
+        lines.append(f"💰 내 돈 {_won_short(w.total)}")
+        lines.append(f"{dot(diff)} 지난주보다 {diff / w.last_total * 100:+.1f}% ({'+' if diff >= 0 else ''}{_won_short(diff)})")
     elif w.total is not None:
-        lines.append(f"내 돈 {_won_short(w.total)} · 지난주 기록이 없어서 다음 주부터 비교해 드려요")
+        lines.append(f"💰 내 돈 {_won_short(w.total)}")
+        lines.append("지난주 기록이 없어서 다음 주부터 비교해 드려요")
     if w.moves:
         ups = sorted((m for m in w.moves if m[1] > 0), key=lambda m: -m[1])[:3]
         downs = sorted((m for m in w.moves if m[1] < 0), key=lambda m: m[1])[:3]
-        lines.append("")
-        lines.append("내 종목 이번 주")
-        if ups:
-            lines.append("· 오른 종목: " + ", ".join(f"{n} {p:+.1f}%" for n, p in ups))
-        if downs:
-            lines.append("· 내린 종목: " + ", ".join(f"{n} {p:+.1f}%" for n, p in downs))
+        lines += ["", "💼 내 종목 이번 주"]
+        lines += [f"🔴 {n} {p:+.1f}%" for n, p in ups]
+        lines += [f"🔵 {n} {p:+.1f}%" for n, p in downs]
     lines.append("")
     if w.buys or w.sells:
-        lines.append(f"이번 주 매매 · 매수 {w.buys}번 · 매도 {w.sells}번")
+        lines.append(f"🔁 이번 주 매매 · 매수 {w.buys}번 · 매도 {w.sells}번")
         for market, v in w.realized.items():
             money = _won_short(v) if market == "KR" else f"{'-' if v < 0 else ''}${abs(v):,.2f}"
-            lines.append(f"· 판 것 손익({'국내' if market == 'KR' else '미국'}) {'+' if v > 0 else ''}{money}")
-        if w.closed:
-            lines.append("· 다 판 종목: " + ", ".join(f"{n} {_pct(p)}" for n, p in w.closed))
+            lines.append(f"{dot(v)} 판 것 손익({'국내' if market == 'KR' else '미국'}) {'+' if v > 0 else ''}{money}")
+        for n, p in w.closed:
+            lines.append(f"📕 다 판 종목 · {n} {_pct(p)}")
     else:
-        lines.append("이번 주 매매 · 없었어요")
+        lines.append("🔁 이번 주 매매 · 없었어요")
     if w.unreviewed:
-        lines.append(f"사후강평 안 쓴 일기장 {w.unreviewed}권 · 매매일지 → 일기장에서 써 보세요")
+        lines.append(f"✍️ 사후강평 안 쓴 일기장 {w.unreviewed}권\n      매매일지 → 일기장에서 써 보세요")
     lines.append("")
     if w.events:
-        lines.append("다음 주 일정")
+        lines.append("🗓️ 다음 주 일정")
         shown = sorted(w.events, key=lambda e: (e[0], ORDER.get(e[1], 9), e[2]))
-        lines += [f"· {day_label(d)} {t}" for d, k, t in shown[:8]]
+        lines += [f"{ICON.get(k, '📌')} {day_label(d)} {t}" for d, k, t in shown[:8]]
         if len(shown) > 8:
-            lines.append(f"· 그 밖에 {len(shown) - 8}개는 일정 화면에서 보세요")
+            lines.append(f"➕ 그 밖에 {len(shown) - 8}개는 일정 화면에서 보세요")
     else:
-        lines.append("다음 주 일정 · 큰 일정은 없어요")
+        lines.append("🗓️ 다음 주 일정 · 큰 일정은 없어요")
+    lines += ["", "한 주 수고 많으셨어요 🙌"]
     return "\n".join(lines)

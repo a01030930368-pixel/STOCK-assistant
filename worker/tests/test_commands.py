@@ -15,16 +15,16 @@ def test_parse_korean_english_and_bot_suffix():
 def test_balance_converts_dollars():
     text = commands.balance_text([Account("KR", 2_000_000, 100_000, 5.26, 500_000), Account("US", 1_000, -50, -4.76, 200)], 1_400)
     assert "총자산 4,180,000원" in text
-    assert "· 해외 주식 $1,000.00 (-4.76%, $-50.00)" in text
+    assert "🇺🇸 해외\n   주식 $1,000.00\n   🔵 -4.76% ($-50.00)\n   💵 예수금 $200.00" in text
     assert "예수금 500,000원" in text
     isa = commands.balance_text([Account("KR", 1_000_000, 0, 0, None), Account("ISA", 3_000_000, 200_000, 7.14, 50_000)], 1_400)
     assert "총자산 4,050,000원" in isa
-    assert "· ISA 주식 3,000,000원 (+7.14%, 200,000원)" in isa
+    assert "🏦 ISA\n   주식 3,000,000원\n   🔴 +7.14% (200,000원)" in isa
 
 
 def test_lists():
-    assert "· 삼성전자 61,200원 · +3.10%" in commands.holdings_text([("삼성전자", "KR", 61200, 3.1)])
-    assert "· 카카오 알림 36,500원 아래로 · -6.3%" in commands.alerts_text([("카카오", "KR", "custom", "below", 36500, 38950)])
+    assert "🔴 삼성전자\n      61,200원 · +3.10%" in commands.holdings_text([("삼성전자", "KR", 61200, 3.1)])
+    assert "🔔 카카오 알림\n      36,500원 ⬇️ 아래로 · -6.3%" in commands.alerts_text([("카카오", "KR", "custom", "below", 36500, 38950)])
     assert commands.calendar_text([(date(2026, 10, 21), "미국 CPI"), (date(2026, 10, 21), "FOMC")]).count("10.21 (수)") == 1
     assert "목표 $45.00 (+6.9%)" in commands.watch_text([("팔란티어", "US", 42.1, 2.4, 45)])
     assert "현재가 확인 중" in commands.watch_text([("삼성전자", "KR", None, None, 58000)])

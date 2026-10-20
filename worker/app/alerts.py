@@ -28,14 +28,15 @@ def format_price(value: Decimal) -> str:
 
 def message(alert: Alert, current: Decimal) -> str:
     if alert.kind == "custom":
-        way = "아래로 내려왔어요" if alert.direction == "below" else "위로 올라왔어요"
-        return (f"관심종목 {alert.name}({alert.ticker}) 가격이 정해 둔 {format_price(alert.price)} {way}. "
-                f"현재가 {format_price(current)}")
-    label = KIND_LABEL[alert.kind]
-    return (
-        f"{alert.name}({alert.ticker}) 종목이 {label} 목표가인 {format_price(alert.price)}에 도달했습니다. "
-        f"현재가 {format_price(current)}"
-    )
+        way = "⬇️ 아래로 내려왔어요" if alert.direction == "below" else "⬆️ 위로 올라왔어요"
+        return "\n".join([f"🔔 관심종목 알림 · {alert.name}({alert.ticker})", "",
+                          f"정해 둔 {format_price(alert.price)} {way}", f"💲 현재가 {format_price(current)}"])
+    if alert.kind == "stop":
+        head, tail = f"🛑 손절가 도달 · {alert.name}({alert.ticker})", "원칙대로 정리할지 확인해 보세요."
+    else:
+        head, tail = f"🎯 익절가 도달 · {alert.name}({alert.ticker})", "축하해요! 계획대로 차익을 챙길지 확인해 보세요 🎉"
+    return "\n".join([head, "", f"{KIND_LABEL[alert.kind]} 목표가 {format_price(alert.price)}에 닿았어요.",
+                      f"💲 현재가 {format_price(current)}", "", tail])
 
 
 def due(alerts: list[Alert], prices: dict[str, Decimal]) -> list[tuple[Alert, Decimal]]:

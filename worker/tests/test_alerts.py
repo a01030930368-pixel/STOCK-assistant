@@ -17,8 +17,8 @@ def test_due_respects_direction_and_missing_prices():
 
 
 def test_message_wording():
-    assert message(TARGET, Decimal(91000)) == "삼성전자(005930) 종목이 익절 목표가인 90,000에 도달했습니다. 현재가 91,000"
-    assert "손절 목표가인 65,000" in message(STOP, Decimal(64000))
+    assert message(TARGET, Decimal(91000)).splitlines()[:4] == ["🎯 익절가 도달 · 삼성전자(005930)", "", "익절 목표가 90,000에 닿았어요.", "💲 현재가 91,000"]
+    assert message(STOP, Decimal(64000)).startswith("🛑 손절가 도달") and "손절 목표가 65,000" in message(STOP, Decimal(64000))
 
 
 def test_market_hours_kst():
@@ -30,7 +30,7 @@ def test_market_hours_kst():
 
 def test_custom_message_names_watchlist():
     a = Alert(9, "PLTR", "PLTR", "custom", "above", Decimal("45"))
-    assert message(a, Decimal("45.3")) == "관심종목 PLTR(PLTR) 가격이 정해 둔 45 위로 올라왔어요. 현재가 45.30"
+    assert message(a, Decimal("45.3")) == "🔔 관심종목 알림 · PLTR(PLTR)\n\n정해 둔 45 ⬆️ 위로 올라왔어요\n💲 현재가 45.30"
 
 
 def test_zero_price_never_triggers_stop():
