@@ -627,6 +627,18 @@ def save_fills(conn: psycopg.Connection, fills) -> None:
         )
 
 
+def us_tickers(conn: psycopg.Connection) -> list[str]:
+    """체결을 종목별로 물어야 할 때 쓸 미국 종목: 보유, 매매일지, 관심종목, 이미 받은 체결"""
+    rows = conn.execute(
+        """SELECT ticker FROM holdings WHERE market = 'US'
+           UNION SELECT ticker FROM positions WHERE market = 'US'
+           UNION SELECT ticker FROM watchlist WHERE market = 'US'
+           UNION SELECT ticker FROM trade_fills WHERE market = 'US'
+           ORDER BY 1""",
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
 def get_setting(conn: psycopg.Connection, key: str):
     row = conn.execute("SELECT value FROM app_settings WHERE key = %s", (key,)).fetchone()
     return row[0] if row else None

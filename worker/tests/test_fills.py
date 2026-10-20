@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -91,7 +92,7 @@ class FakeKiwoom:
         self.calls.append(("kr", start, end))
         return []
 
-    def us_fills(self, start, end):
+    def us_fills(self, start, end, ticker=None):
         self.calls.append(("us", start, end))
         raise RuntimeError("키움 API 오류 ust21180: 모의투자 미지원")
 
@@ -129,7 +130,46 @@ def test_post_pages_treats_no_data_as_empty():
     def handler(req: httpx.Request) -> httpx.Response:
         if req.url.path == "/oauth2/token":
             return httpx.Response(200, json={"token": "t", "expires_dt": "20991231000000", "return_code": 0})
-        return httpx.Response(200, json={"return_code": 20, "return_msg": "조회할 자료가 없습니다"})
+        return httpx.Response(200, json={"return_code": 20, "return_msg": "[2000](501724:관련자료가없습니다)"})
 
     client = KiwoomClient("https://x", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
     assert client._post_pages("/api/us/acnt", "ust21180", {}, "result_list") == []
+
+
+def test_us_fills_sends_no_exchange_or_empty_ticker():
+    sent = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/oauth2/token":
+            return httpx.Response(200, json={"token": "t", "expires_dt": "20991231000000", "return_code": 0})
+        sent.append(json.loads(req.content))
+        return httpx.Response(200, json={"return_code": 0, "result_list": []})
+
+    client = KiwoomClient("https://x", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
+    client.us_fills("20261001", "20261020")
+    client.us_fills("20261001", "20261020", "PLTR")
+    assert sent == [{"strt_dt": "20261001", "end_dt": "20261020", "slby_tp": "0"},
+                    {"strt_dt": "20261001", "end_dt": "20261020", "slby_tp": "0", "stk_cd": "PLTR"}]
+
+
+class TickerKiwoom(FakeKiwoom):
+    def us_fills(self, start, end, ticker=None):
+        self.calls.append(("us", start, end, ticker))
+        if not ticker:
+            raise RuntimeError("키움 API 오류 ust21180: 파라미터=stk_cd 실패사유= 종목 코드값이 없습니다.")
+        return []
+
+    def kr_day_fills(self, day):
+        raise RuntimeError("키움 API 오류 kt00009: 일시 오류")
+
+
+def test_job_falls_back_to_per_ticker_and_survives_day_errors(monkeypatch):
+    store = {}
+    monkeypatch.setattr("app.db.get_setting", lambda conn, key: store.get(key))
+    monkeypatch.setattr("app.db.set_setting", lambda conn, key, value: store.__setitem__(key, dict(value)))
+    monkeypatch.setattr("app.db.save_fills", lambda conn, rows: None)
+    monkeypatch.setattr("app.db.us_tickers", lambda conn: ["NVDA", "PLTR"])
+    k = TickerKiwoom()
+    FillsJob(k).run(FakeConn(), datetime(2026, 10, 20, 3, tzinfo=timezone.utc))
+    assert store["fills_status"]["KR"]["ok"] and store["fills_status"]["US"]["ok"]
+    assert {c[3] for c in k.calls if c[0] == "us"} == {None, "NVDA", "PLTR"}

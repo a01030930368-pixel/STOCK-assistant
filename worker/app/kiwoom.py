@@ -10,7 +10,8 @@ import time
 import httpx
 
 KST_FORMAT = "%Y%m%d%H%M%S"
-NO_DATA = ("자료가 없", "내역이 없", "데이터가 없", "조회건수가 없")
+# 띄어쓰기 없이 비교합니다. 예: '[2000](501724:관련자료가없습니다)'
+NO_DATA = ("자료가없", "내역이없", "데이터가없", "조회건수가없")
 
 
 @dataclass(frozen=True)
@@ -224,7 +225,7 @@ class KiwoomClient:
                 res = self._request(path, api_id, payload, next_key)
             except RuntimeError as e:
                 # 내역이 없으면 오류 코드로 '조회할 자료가 없습니다' 같은 문구를 돌려줍니다. 빈 목록으로 봅니다.
-                if any(word in str(e) for word in NO_DATA):
+                if any(word in str(e).replace(" ", "") for word in NO_DATA):
                     break
                 raise
             rows.extend(res.json().get(list_key) or [])
@@ -288,10 +289,13 @@ class KiwoomClient:
                    "frgn_stex_code": "", "dmst_stex_tp": "%"}
         return parse_kr_fills(self._post_pages("/api/dostk/acnt", "kt00015", payload, "trst_ovrl_trde_prps_array"))
 
-    def us_fills(self, start: str, end: str) -> list:
+    def us_fills(self, start: str, end: str, ticker: str | None = None) -> list:
         # ust21180 미국주식 기간별 주문내역. 체결 수량이 있는 줄만 씁니다.
+        # 거래소구분(stex_tp)을 넣으면 종목코드도 요구하므로, 전체 조회에서는 둘 다 보내지 않습니다.
         from .fills import parse_us_fills
-        payload = {"strt_dt": start, "end_dt": end, "slby_tp": "0", "stex_tp": "%", "stk_cd": "", "oppo_trde_tp": "%"}
+        payload = {"strt_dt": start, "end_dt": end, "slby_tp": "0"}
+        if ticker:
+            payload["stk_cd"] = ticker
         return parse_us_fills(self._post_pages("/api/us/acnt", "ust21180", payload, "result_list"))
 
     def kr_day_fills(self, day) -> list:
