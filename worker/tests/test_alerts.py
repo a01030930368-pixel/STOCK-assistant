@@ -26,3 +26,8 @@ def test_market_hours_kst():
     assert kr_market_open(datetime(2026, 10, 19, 10, 0, tzinfo=kst))  # 월요일
     assert not kr_market_open(datetime(2026, 10, 19, 16, 0, tzinfo=kst))
     assert not kr_market_open(datetime(2026, 10, 18, 10, 0, tzinfo=kst))  # 일요일
+
+
+def test_custom_message_names_watchlist():
+    a = Alert(9, "PLTR", "PLTR", "custom", "above", Decimal("45"))
+    assert message(a, Decimal("45.3")) == "관심종목 PLTR(PLTR) 가격이 정해 둔 45 위로 올라왔어요. 현재가 45.30"
