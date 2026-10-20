@@ -111,6 +111,8 @@ def test_job_backfills_three_months_then_recent(monkeypatch):
     job = FillsJob(k)
     job.run(FakeConn(), datetime(2026, 10, 20, 3, tzinfo=timezone.utc))
     assert store["fills_backfilled"] == {"KR": True}  # 미국은 실패해서 다음에 다시 3개월
+    assert store["fills_status"]["KR"]["ok"] and not store["fills_status"]["US"]["ok"]
+    assert "모의투자 미지원" in store["fills_status"]["US"]["error"]
     assert [c for c in k.calls if c[0] == "kr"][0][1] == "20260720"
     assert len([c for c in k.calls if c[0] == "day"]) == 5
     k.calls.clear()
@@ -119,3 +121,13 @@ def test_job_backfills_three_months_then_recent(monkeypatch):
     job.run(FakeConn(), datetime(2026, 10, 20, 3, 40, tzinfo=timezone.utc))
     assert [c[1] for c in k.calls if c[0] == "kr"] == ["20261010"]
     assert [c[1] for c in k.calls if c[0] == "us"][0] == "20260720"
+
+
+def test_post_pages_treats_no_data_as_empty():
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/oauth2/token":
+            return httpx.Response(200, json={"token": "t", "expires_dt": "20991231000000", "return_code": 0})
+        return httpx.Response(200, json={"return_code": 20, "return_msg": "조회할 자료가 없습니다"})
+
+    client = KiwoomClient("https://x", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
+    assert client._post_pages("/api/us/acnt", "ust21180", {}, "result_list") == []

@@ -10,6 +10,7 @@ import time
 import httpx
 
 KST_FORMAT = "%Y%m%d%H%M%S"
+NO_DATA = ("자료가 없", "내역이 없", "데이터가 없", "조회건수가 없")
 
 
 @dataclass(frozen=True)
@@ -219,7 +220,13 @@ class KiwoomClient:
         rows: list[dict] = []
         next_key = None
         for _ in range(max_pages):
-            res = self._request(path, api_id, payload, next_key)
+            try:
+                res = self._request(path, api_id, payload, next_key)
+            except RuntimeError as e:
+                # 내역이 없으면 오류 코드로 '조회할 자료가 없습니다' 같은 문구를 돌려줍니다. 빈 목록으로 봅니다.
+                if any(word in str(e) for word in NO_DATA):
+                    break
+                raise
             rows.extend(res.json().get(list_key) or [])
             next_key = res.headers.get("next-key", "").strip()
             if res.headers.get("cont-yn", "N").upper() != "Y" or not next_key:

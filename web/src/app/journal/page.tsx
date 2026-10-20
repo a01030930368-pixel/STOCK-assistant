@@ -23,6 +23,7 @@ export default async function JournalPage() {
   );
   const list = (status: string) => positions.filter((p) => p.status === status);
   const fills = await loadFills();
+  const checked = await fillStatus();
   const todo = fills.filter((f) => !f.done).length;
   const SHOWN = 12;
 
@@ -35,20 +36,30 @@ export default async function JournalPage() {
       {todo > 0 && (
         <div className="callout">키움에서 일지에 안 적은 체결 {todo}건을 찾았어요. &ldquo;일지 쓰기&rdquo;를 누르면 종목·날짜·수량·가격이 채워져 있어요.</div>
       )}
-      {fills.length > 0 && (
-        <section className="fills">
-          <h2>최근 체결 <span className="muted">(최근 3개월, 키움)</span></h2>
+      <section className="fills">
+        <h2>최근 체결 <span className="muted">(최근 3개월, 키움)</span></h2>
+        <p className="muted fill-status">
+          {checked.length === 0
+            ? "아직 키움 체결을 확인하지 않았어요. 워커를 켠 뒤 몇 분 안에 처음 확인하고, 그 뒤로 30분마다 확인해요."
+            : checked.map((c) => (
+                <span key={c.market} className={c.ok ? "" : "warn"}>
+                  {c.market === "KR" ? "국내" : "미국"} {c.at} 확인{c.ok ? "" : ` 실패: ${c.error}`}
+                </span>
+              ))}
+        </p>
+        {fills.length > 0 && (
           <div className="list">
             {fills.slice(0, SHOWN).map((f) => <FillRow key={f.key} f={f} />)}
           </div>
-          {fills.length > SHOWN && (
-            <details>
-              <summary className="muted">나머지 {fills.length - SHOWN}건 보기</summary>
-              <div className="list">{fills.slice(SHOWN).map((f) => <FillRow key={f.key} f={f} />)}</div>
-            </details>
-          )}
-        </section>
-      )}
+        )}
+        {fills.length === 0 && checked.some((c) => c.ok) && <p className="muted">최근 3개월 체결이 없어요.</p>}
+        {fills.length > SHOWN && (
+          <details>
+            <summary className="muted">나머지 {fills.length - SHOWN}건 보기</summary>
+            <div className="list">{fills.slice(SHOWN).map((f) => <FillRow key={f.key} f={f} />)}</div>
+          </details>
+        )}
+      </section>
       <Principles editable />
       <p><Link href="/journal/buy">+ 매수 기록하기</Link></p>
       {(["open", "closed"] as const).map((status) => (
@@ -72,6 +83,23 @@ export default async function JournalPage() {
       ))}
     </>
   );
+}
+
+type Checked = { market: "KR" | "US"; at: string; ok: boolean; error: string };
+
+// 워커가 남긴 마지막 체결 확인 결과(app_settings.fills_status). 없으면 아직 한 번도 안 돈 것
+async function fillStatus(): Promise<Checked[]> {
+  const [row] = await query<{ value: Record<string, { at: string; ok: boolean; error?: string }> }>(
+    "SELECT value FROM app_settings WHERE key = 'fills_status'",
+  ).catch(() => []);
+  const time = (iso: string) => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+      .formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+    return `${p.month}-${p.day} ${p.hour}:${p.minute}`;
+  };
+  return (["KR", "US"] as const)
+    .filter((m) => row?.value[m])
+    .map((m) => ({ market: m, at: time(row.value[m].at), ok: row.value[m].ok, error: row.value[m].error ?? "" }));
 }
 
 function FillRow({ f }: { f: KiwoomFill }) {

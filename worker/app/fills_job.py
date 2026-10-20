@@ -27,6 +27,7 @@ class FillsJob:
         self.last = now
         today = now.astimezone(KST).date()
         done = db.get_setting(conn, "fills_backfilled") or {}
+        status = db.get_setting(conn, "fills_status") or {}
         for market, fetch in (("KR", self._kr), ("US", self._us)):
             days = RECENT_DAYS if done.get(market) else BACKFILL_DAYS
             try:
@@ -41,8 +42,12 @@ class FillsJob:
                 if not done.get(market):
                     done[market] = True
                     db.set_setting(conn, "fills_backfilled", done)
+                status[market] = {"at": now.isoformat(), "ok": True, "count": len(rows)}
             except Exception as e:
                 log.warning("%s 체결 내역 가져오기 실패: %s", "국내" if market == "KR" else "미국", e)
+                # 화면에서 바로 보이도록 마지막 결과를 남깁니다. 키가 섞이지 않게 오류 문구만 짧게 둡니다.
+                status[market] = {"at": now.isoformat(), "ok": False, "error": str(e)[:200]}
+        db.set_setting(conn, "fills_status", status)
 
     def _kr(self, start: str, end: str) -> list:
         return self.kiwoom.kr_fills(start, end)
