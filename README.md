@@ -40,6 +40,7 @@ PC와 휴대폰에서 쓰는 개인 주식투자 보조 앱입니다. 키움증�
    ```
 
 4. 브라우저에서 http://localhost:3000 을 엽니다. 비밀번호는 `.env`의 `APP_PASSWORD`입니다.
+   같은 와이파이의 다른 기기에서도 열리는 주소라, `APP_PASSWORD`가 비어 있거나 예시값(`change-me`)이면 앱이 잠겨 있어요.
 
 휴대폰에서 밖에서 접속하려면 PC와 휴대폰에 [Tailscale](https://tailscale.com)을 설치하고 `http://<PC의 Tailscale 이름>:3000`으로 접속하세요.
 PC가 꺼지거나 절전 모드에 들어가면 알림도 멈추니 절전 모드를 꺼 두세요.
@@ -47,6 +48,19 @@ PC가 꺼지거나 절전 모드에 들어가면 알림도 멈추니 절전 모�
 ### 업데이트
 
 GitHub에서 PR을 머지한 뒤, 이 폴더의 `update.bat`을 더블클릭하세요. main의 최신 코드를 받아 덮어쓰고(`.env`, `pgdata`는 그대로) `docker compose up -d --build`까지 해 줍니다. Docker Desktop이 켜져 있어야 해요.
+
+### 백업
+
+`backup`이 하루 한 번(PC가 켜져 있을 때) DB 전체를 이 폴더의 `backups\lodestar-날짜.sql.gz`로 저장하고 14일치를 남깁니다.
+매매일지·사후강평·차트 메모가 모두 들어 있어요. 가끔 `backups` 폴더를 USB나 클라우드에 복사해 두면 PC가 고장 나도 안전합니다.
+
+되살리기(지금 DB를 백업 시점으로 덮어씁니다). LODESTAR 폴더 주소창에 `cmd`를 입력해 검은 창을 열고, 날짜를 바꿔 차례로 실행하세요.
+
+```bat
+docker compose stop web worker
+docker compose exec backup sh -c "gunzip -c /backups/lodestar-2026-10-20.sql.gz | psql -q"
+docker compose start web worker
+```
 
 ## 개발
 

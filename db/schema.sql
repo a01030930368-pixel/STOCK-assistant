@@ -67,8 +67,8 @@ CREATE TABLE sell_entries (
   trade_date         DATE NOT NULL,
   quantity           NUMERIC(18, 4) NOT NULL CHECK (quantity > 0),
   price              NUMERIC(18, 4) NOT NULL CHECK (price > 0),
-  avg_buy_price      NUMERIC(18, 4) NOT NULL,
-  return_pct         NUMERIC(8, 2) NOT NULL,
+  avg_buy_price      NUMERIC(18, 4),  -- 평단을 모르는 매도(키움 기록보다 먼저 산 주식)면 비어 있어요
+  return_pct         NUMERIC(8, 2),
   holding_days       INT NOT NULL,
   reason_type        TEXT NOT NULL CHECK (reason_type IN ('stop', 'target', 'other')),
   reason_detail      TEXT NOT NULL DEFAULT '',
@@ -390,3 +390,6 @@ CREATE TABLE chart_doodles (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX chart_doodles_ticker_idx ON chart_doodles (ticker, view);
+
+-- 날짜 계산(CURRENT_DATE)을 한국 날짜로 합니다.
+DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET timezone TO %L', current_database(), 'Asia/Seoul'); END $$;
