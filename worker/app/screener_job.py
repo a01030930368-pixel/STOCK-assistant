@@ -46,7 +46,10 @@ class ScreenerJob:
         rank: dict[str, screener.RankRow] = {}
         for code, label in MARKETS.items():
             try:
-                for row in self.kiwoom.value_rank(code)[:PER_MARKET]:
+                rows = self.kiwoom.value_rank(code)
+                if not rows:
+                    log.warning("검색기 %s 거래대금 순위(ka10032) 응답에 종목이 없습니다", label)
+                for row in rows[:PER_MARKET]:
                     rank.setdefault(row.ticker, row)
             except Exception as e:
                 log.warning("검색기 %s 거래대금 순위 실패: %s", label, e)
@@ -69,3 +72,4 @@ class ScreenerJob:
         self.bars = {t: v for t, v in self.bars.items() if t in rank}
         if out:
             db.save_screener(conn, "KR", out)
+        log.info("검색기 갱신: 순위 %d종목 중 %d종목 계산 (screener)", len(rank), len(out))
