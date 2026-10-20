@@ -191,7 +191,7 @@ CREATE TABLE cash_balances (
 -- 다가오는 일정: 한국·미국 휴장일(거래소 달력)과 미국 보유 종목 실적 발표 예정일(Finnhub)
 CREATE TABLE calendar_events (
   day     DATE NOT NULL,
-  kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic')),
+  kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic', 'dividend')),
   market  TEXT NOT NULL CHECK (market IN ('KR', 'US')),
   ticker  TEXT NOT NULL DEFAULT '',
   title   TEXT NOT NULL,
@@ -313,4 +313,12 @@ CREATE TABLE stock_sectors (
 CREATE TABLE app_settings (
   key    TEXT PRIMARY KEY,
   value  JSONB NOT NULL
+);
+
+-- 배당 기록(야후). 배당락일과 주당 배당금
+CREATE TABLE stock_dividends (
+  ticker   TEXT NOT NULL,
+  ex_date  DATE NOT NULL,
+  amount   NUMERIC(18, 4) NOT NULL,
+  PRIMARY KEY (ticker, ex_date)
 );

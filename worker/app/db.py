@@ -76,7 +76,7 @@ MIGRATIONS = [
     )""",
     """CREATE TABLE IF NOT EXISTS calendar_events (
       day     DATE NOT NULL,
-      kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic')),
+      kind    TEXT NOT NULL CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic', 'dividend')),
       market  TEXT NOT NULL CHECK (market IN ('KR', 'US')),
       ticker  TEXT NOT NULL DEFAULT '',
       title   TEXT NOT NULL,
@@ -162,7 +162,7 @@ MIGRATIONS = [
     # 금리 결정·만기일(policy)과 미국 경제지표 발표일(economic)을 일정에 넣을 수 있게 합니다.
     "ALTER TABLE calendar_events DROP CONSTRAINT IF EXISTS calendar_events_kind_check",
     """ALTER TABLE calendar_events ADD CONSTRAINT calendar_events_kind_check
-       CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic'))""",
+       CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic', 'dividend'))""",
     """CREATE TABLE IF NOT EXISTS watchlist (
       ticker      TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
@@ -183,6 +183,12 @@ MIGRATIONS = [
       sector      TEXT NOT NULL DEFAULT '',
       custom      TEXT,
       fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    """CREATE TABLE IF NOT EXISTS stock_dividends (
+      ticker   TEXT NOT NULL,
+      ex_date  DATE NOT NULL,
+      amount   NUMERIC(18, 4) NOT NULL,
+      PRIMARY KEY (ticker, ex_date)
     )""",
     """CREATE TABLE IF NOT EXISTS app_settings (
       key    TEXT PRIMARY KEY,
@@ -391,6 +397,20 @@ def save_calendar(conn: psycopg.Connection, kind: str, events: list[Event], tick
                 (e.day, e.kind, e.market, e.ticker, e.title, e.detail),
             )
         conn.execute("DELETE FROM calendar_events WHERE day < CURRENT_DATE - 30")
+
+
+def held_quantities(conn: psycopg.Connection) -> list[tuple[str, str, str, Decimal]]:
+    """(ticker, name, market, quantity)"""
+    return conn.execute("SELECT ticker, name, market, quantity FROM holdings WHERE quantity > 0 ORDER BY ticker").fetchall()
+
+
+def save_dividends(conn: psycopg.Connection, ticker: str, rows) -> None:
+    for d in rows:
+        conn.execute(
+            """INSERT INTO stock_dividends (ticker, ex_date, amount) VALUES (%s, %s, %s)
+               ON CONFLICT (ticker, ex_date) DO UPDATE SET amount = EXCLUDED.amount""",
+            (ticker, d.ex_date, d.amount),
+        )
 
 
 def save_prices(conn: psycopg.Connection, ticker: str, rows) -> None:
