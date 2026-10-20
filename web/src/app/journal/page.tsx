@@ -43,7 +43,7 @@ export default async function JournalPage() {
             ? "아직 키움 체결을 확인하지 않았어요. 워커를 켠 뒤 몇 분 안에 처음 확인하고, 그 뒤로 30분마다 확인해요."
             : checked.map((c) => (
                 <span key={c.market} className={c.ok ? "" : "warn"}>
-                  {c.market === "KR" ? "국내" : "미국"} {c.at} 확인{c.ok ? "" : ` 실패: ${c.error}`}
+                  {c.market === "KR" ? "국내" : "미국"} {c.at} 확인{c.ok ? (c.count !== null ? ` · ${c.count}건` : "") : ` 실패: ${c.error}`}
                 </span>
               ))}
         </p>
@@ -85,11 +85,11 @@ export default async function JournalPage() {
   );
 }
 
-type Checked = { market: "KR" | "US"; at: string; ok: boolean; error: string };
+type Checked = { market: "KR" | "US"; at: string; ok: boolean; error: string; count: number | null };
 
 // 워커가 남긴 마지막 체결 확인 결과(app_settings.fills_status). 없으면 아직 한 번도 안 돈 것
 async function fillStatus(): Promise<Checked[]> {
-  const [row] = await query<{ value: Record<string, { at: string; ok: boolean; error?: string }> }>(
+  const [row] = await query<{ value: Record<string, { at: string; ok: boolean; error?: string; count?: number }> }>(
     "SELECT value FROM app_settings WHERE key = 'fills_status'",
   ).catch(() => []);
   const time = (iso: string) => {
@@ -99,7 +99,7 @@ async function fillStatus(): Promise<Checked[]> {
   };
   return (["KR", "US"] as const)
     .filter((m) => row?.value[m])
-    .map((m) => ({ market: m, at: time(row.value[m].at), ok: row.value[m].ok, error: row.value[m].error ?? "" }));
+    .map((m) => ({ market: m, at: time(row.value[m].at), ok: row.value[m].ok, error: row.value[m].error ?? "", count: row.value[m].count ?? null }));
 }
 
 function FillRow({ f }: { f: KiwoomFill }) {

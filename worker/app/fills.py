@@ -57,11 +57,12 @@ def _time(raw: str | None) -> str | None:
 def parse_kr_fills(rows: list[dict]) -> list[Fill]:
     out = []
     for r in rows:
-        kind = (r.get("trde_kind_nm") or "").strip()
+        # 매매가 아닌 줄(입출금 등)은 종목코드가 없거나 매수·매도 글자가 없어서 걸러집니다.
+        # 거래종류 이름(trde_kind_nm)은 '매매', '장내매매'처럼 달라질 수 있어 거르는 데 쓰지 않습니다.
         side = _side(r.get("io_tp_nm"), r.get("rmrk_nm"))
         day = _day(r.get("cntr_dt")) or _day(r.get("trde_dt"))
         qty = parse_number(r.get("trde_qty_jwa_cnt"))
-        if (kind and kind != "매매") or not side or not day or qty <= 0:
+        if not (r.get("stk_cd") or "").strip() or not side or not day or qty <= 0:
             continue
         price = parse_price(r.get("trde_unit"))
         if price <= 0:

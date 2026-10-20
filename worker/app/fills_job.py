@@ -13,6 +13,8 @@ EVERY = timedelta(minutes=30)
 BACKFILL_DAYS = 92
 RECENT_DAYS = 10
 KST = ZoneInfo("Asia/Seoul")
+# 읽는 방식을 고치면 이름을 바꿔 최근 3개월을 다시 받습니다. v2: 국내 거래종류 이름으로 거르던 것을 없앰
+BACKFILL_KEY = "fills_backfilled_v2"
 
 
 class FillsJob:
@@ -26,7 +28,7 @@ class FillsJob:
             return
         self.last = now
         today = now.astimezone(KST).date()
-        done = db.get_setting(conn, "fills_backfilled") or {}
+        done = db.get_setting(conn, BACKFILL_KEY) or {}
         status = db.get_setting(conn, "fills_status") or {}
         for market, fetch in (("KR", self._kr), ("US", self._us)):
             days = RECENT_DAYS if done.get(market) else BACKFILL_DAYS
@@ -38,11 +40,13 @@ class FillsJob:
                     # kt00015에 아직 안 잡혔을 수 있는 최근 닷새(주말 낀 결제 전 체결)는 하루치 조회로 채웁니다.
                     for back in range(5):
                         rows += self.kiwoom.kr_day_fills(today - timedelta(days=back))
-                db.save_fills(conn, self._merge(rows))
+                merged = self._merge(rows)
+                db.save_fills(conn, merged)
+                log.info("%s 체결 내역 확인: %d건", "국내" if market == "KR" else "미국", len(merged))
                 if not done.get(market):
                     done[market] = True
-                    db.set_setting(conn, "fills_backfilled", done)
-                status[market] = {"at": now.isoformat(), "ok": True, "count": len(rows)}
+                    db.set_setting(conn, BACKFILL_KEY, done)
+                status[market] = {"at": now.isoformat(), "ok": True, "count": len(merged)}
             except Exception as e:
                 log.warning("%s 체결 내역 가져오기 실패: %s", "국내" if market == "KR" else "미국", e)
                 # 화면에서 바로 보이도록 마지막 결과를 남깁니다. 키가 섞이지 않게 오류 문구만 짧게 둡니다.
