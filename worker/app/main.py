@@ -7,7 +7,7 @@ import psycopg
 
 import httpx
 
-from . import alerts, config, db, logsafe, macro, telegram
+from . import alerts, config, db, levels, logsafe, macro, telegram
 from .kiwoom import KiwoomClient
 from .research_job import ResearchJob
 from .screener_job import ScreenerJob
@@ -54,6 +54,13 @@ def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | No
             telegram.send(cfg.telegram_bot_token, cfg.telegram_chat_id, text)
         log.info("알림 발송: %s", text)
         db.mark_triggered(conn, alert.id)
+    for level, price, send in levels.due(db.chart_levels(conn), prices, datetime.now(timezone.utc)):
+        if send:
+            text = levels.message(level, price)
+            if cfg.telegram_bot_token and cfg.telegram_chat_id:
+                telegram.send(cfg.telegram_bot_token, cfg.telegram_chat_id, text)
+            log.info("지지·저항 알림 발송: %s", text)
+        db.save_level_seen(conn, level.id, price, send)
 
 
 MACRO_EVERY = timedelta(hours=6)

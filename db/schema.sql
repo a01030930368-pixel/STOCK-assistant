@@ -362,3 +362,30 @@ CREATE TABLE asset_history (
   day    DATE PRIMARY KEY,
   total  NUMERIC(20, 2) NOT NULL
 );
+
+-- 차트에 그린 지지·저항. 가격 기준이라 분·일·주·월봉 어디서나 보여요. high가 NULL이면 선, 있으면 구간.
+CREATE TABLE chart_levels (
+  id          SERIAL PRIMARY KEY,
+  ticker      TEXT NOT NULL,
+  name        TEXT NOT NULL DEFAULT '',
+  kind        TEXT NOT NULL CHECK (kind IN ('support', 'resistance')),
+  low         NUMERIC(18, 4) NOT NULL,
+  high        NUMERIC(18, 4),
+  memo        TEXT NOT NULL DEFAULT '',
+  alert       BOOLEAN NOT NULL DEFAULT false,  -- 가격이 닿으면 텔레그램
+  last_price  NUMERIC(18, 4),                  -- 워커가 지난번에 본 가격(닿았는지 판단용)
+  alerted_at  TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX chart_levels_ticker_idx ON chart_levels (ticker);
+
+-- 차트 낙서. 그린 차트(1분봉, 일봉 등)에서만 보여요. points = [[봉 키, 봉 안 위치(0~1), 가격], ...]
+CREATE TABLE chart_doodles (
+  id          SERIAL PRIMARY KEY,
+  ticker      TEXT NOT NULL,
+  view        TEXT NOT NULL,
+  color       TEXT NOT NULL DEFAULT '#c9a96b',
+  points      JSONB NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX chart_doodles_ticker_idx ON chart_doodles (ticker, view);

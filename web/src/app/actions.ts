@@ -8,6 +8,7 @@ import { rulesFromForm } from "@/lib/screener";
 import { averagePrice, holdingDays, remainingQuantity, returnPct, validateBuy, type BuyInput, type Fill } from "@/lib/journal";
 import type { Book } from "@/lib/books";
 import { loadBook } from "@/lib/booksData";
+import { KIND_LABEL, validDoodle, type DoodlePoint, type LevelKind } from "@/lib/drawings";
 
 // values: 오류가 났을 때 입력한 값을 폼에 되돌려 주기 위해 사용합니다.
 export type FormState = { errors: string[]; values?: Record<string, string> };
@@ -492,4 +493,43 @@ export async function saveSector(form: FormData) {
     [ticker, marketOf(form), custom],
   );
   revalidatePath("/weights");
+}
+
+// ---- 차트 그림(지지·저항, 낙서). 차트를 다시 그리지 않도록 화면은 새로 고치지 않고, 화면 쪽 상태로 바로 보여 줘요.
+const TICKER = /^[A-Z0-9.\-]{1,12}$/;
+const positive = (v: number) => Number.isFinite(v) && v > 0;
+
+export async function addLevel(input: { ticker: string; name: string; kind: LevelKind; low: number; high: number | null }): Promise<number | null> {
+  const ticker = input.ticker.toUpperCase();
+  if (!TICKER.test(ticker) || !(input.kind in KIND_LABEL) || !positive(input.low) || (input.high !== null && !positive(input.high))) return null;
+  const [row] = await query<{ id: number }>(
+    "INSERT INTO chart_levels (ticker, name, kind, low, high) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    [ticker, input.name.slice(0, 60), input.kind, input.low, input.high],
+  );
+  return row.id;
+}
+
+export async function updateLevel(id: number, change: { memo?: string; alert?: boolean; kind?: LevelKind }): Promise<void> {
+  if (change.memo !== undefined) await query("UPDATE chart_levels SET memo = $2 WHERE id = $1", [id, change.memo.slice(0, 100)]);
+  // 알림을 새로 켜면 지금 가격부터 다시 봐요(켜자마자 예전 움직임으로 울리지 않게).
+  if (change.alert !== undefined) await query("UPDATE chart_levels SET alert = $2, last_price = NULL, alerted_at = NULL WHERE id = $1", [id, change.alert]);
+  if (change.kind && change.kind in KIND_LABEL) await query("UPDATE chart_levels SET kind = $2 WHERE id = $1", [id, change.kind]);
+}
+
+export async function deleteLevel(id: number): Promise<void> {
+  await query("DELETE FROM chart_levels WHERE id = $1", [id]);
+}
+
+export async function addDoodle(input: { ticker: string; view: string; color: string; points: DoodlePoint[] }): Promise<number | null> {
+  const ticker = input.ticker.toUpperCase();
+  if (!TICKER.test(ticker) || !/^[0-9DWM]{1,3}$/.test(input.view) || !/^#[0-9a-f]{6}$/i.test(input.color) || !validDoodle(input.points)) return null;
+  const [row] = await query<{ id: number }>(
+    "INSERT INTO chart_doodles (ticker, view, color, points) VALUES ($1, $2, $3, $4) RETURNING id",
+    [ticker, input.view, input.color, JSON.stringify(input.points)],
+  );
+  return row.id;
+}
+
+export async function deleteDoodle(id: number): Promise<void> {
+  await query("DELETE FROM chart_doodles WHERE id = $1", [id]);
 }
