@@ -1,14 +1,32 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { createBuy, type FormState } from "@/app/actions";
 
 type Props = {
   ticker: string; name: string; market: string; today: string; quantity?: string; price?: string; fillKey?: string;
   bookKey?: string; entryId?: number; initial?: Record<string, string>; // 일기장에서 열었거나 예전 일지를 고칠 때
+  known?: Known[]; // 가진 적 있거나 지켜본 종목. 티커를 치면 이름·시장을 채워요
 };
+export type Known = { ticker: string; name: string; market: "KR" | "US" };
 
-export default function BuyForm({ ticker, name, market, today, quantity = "", price = "", fillKey = "", bookKey = "", entryId, initial = {} }: Props) {
+// 영문만이면 미국, 숫자로 시작하면 국내(서버도 같은 규칙으로 한 번 더 맞춰요)
+const guessMarket = (t: string) => (/^[A-Z]+([.-][A-Z]+)?$/.test(t) ? "US" : /^\d/.test(t) ? "KR" : null);
+
+export default function BuyForm({ ticker, name, market, today, quantity = "", price = "", fillKey = "", bookKey = "", entryId, initial = {}, known = [] }: Props) {
+  const nameRef = useRef<HTMLInputElement>(null);
+  const marketRef = useRef<HTMLSelectElement>(null);
+  const [marketNote, setMarketNote] = useState("");
+  const onTicker = (raw: string) => {
+    const t = raw.trim().toUpperCase();
+    const hit = known.find((k) => k.ticker === t);
+    const m = hit?.market ?? guessMarket(t);
+    if (hit && nameRef.current && !nameRef.current.value.trim()) nameRef.current.value = hit.name;
+    if (m && marketRef.current && marketRef.current.value !== m) {
+      marketRef.current.value = m;
+      setMarketNote(m === "US" ? "영문 티커라 미국으로 바꿨어요" : "숫자 티커라 국내로 바꿨어요");
+    }
+  };
   const [state, action, pending] = useActionState<FormState, FormData>(createBuy, { errors: [] });
   const v = (key: string, fallback = "") => state.values?.[key] ?? initial[key] ?? fallback;
   const fixed = Boolean(bookKey || entryId); // 일기장·고치기에서는 종목을 바꾸지 않아요
@@ -33,13 +51,20 @@ export default function BuyForm({ ticker, name, market, today, quantity = "", pr
           </>
         ) : (
           <>
-            <label>종목명<input name="name" defaultValue={v("name", name)} required /></label>
-            <label>티커<input name="ticker" defaultValue={v("ticker", ticker)} required /></label>
+            <label>티커
+              <input name="ticker" defaultValue={v("ticker", ticker)} list="known-stocks" autoCapitalize="characters"
+                onChange={(e) => onTicker(e.target.value)} required />
+            </label>
+            <datalist id="known-stocks">
+              {known.map((k) => <option key={k.market + k.ticker} value={k.ticker}>{k.name}</option>)}
+            </datalist>
+            <label>종목명<input ref={nameRef} name="name" defaultValue={v("name", name)} required /></label>
             <label>시장
-              <select name="market" defaultValue={v("market", market || "KR")}>
+              <select ref={marketRef} name="market" defaultValue={v("market", market || "KR")} onChange={() => setMarketNote("")}>
                 <option value="KR">국내</option>
                 <option value="US">미국</option>
               </select>
+              {marketNote && <span className="muted field-note">{marketNote}</span>}
             </label>
           </>
         )}

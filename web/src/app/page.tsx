@@ -70,8 +70,17 @@ function HoldingRows({ rows, summaries, isa = false }: { rows: Holding[]; summar
   );
 }
 
-function AccountCard({ title, market, scope, summary, cash, fmt }: {
+// 달러 금액 옆에 붙이는 원화 어림값: (약 452만원)
+function KrwAbout({ v, rate }: { v: number | string; rate?: number }) {
+  if (!rate || rate <= 0) return null;
+  const krwValue = Number(v) * rate;
+  const text = Math.abs(krwValue) >= 1_000_000 ? `${won(Math.round(krwValue / 10_000))}만원` : `${won(Math.round(krwValue))}원`;
+  return <span className="krw-about"> (약 {text})</span>;
+}
+
+function AccountCard({ title, market, scope, summary, cash, fmt, rate }: {
   title: string; market: "KR" | "US"; scope: Scope; summary: Summary | undefined; cash: Cash | undefined; fmt: (v: number | string) => string;
+  rate?: number; // 해외 계좌는 원화 어림값을 같이 보여 줘요
 }) {
   const dim = scope !== "all" && scope !== market;
   return (
@@ -79,13 +88,13 @@ function AccountCard({ title, market, scope, summary, cash, fmt }: {
       <div className="panel-title">{title}</div>
       {summary ? (
         <dl>
-          <dt>주식 평가</dt><dd>{fmt(summary.total_eval)}</dd>
+          <dt>주식 평가</dt><dd>{fmt(summary.total_eval)}<KrwAbout v={summary.total_eval} rate={rate} /></dd>
           <dt>평가손익</dt>
           <dd className={signClass(summary.total_pnl)}>
             {signed(Number(summary.total_pnl), fmt(summary.total_pnl))} <span className="muted">({signed(Number(summary.total_pnl_pct), fixedPct(summary.total_pnl_pct))})</span>
           </dd>
           <dt>남은 예수금</dt>
-          <dd className="cash">{cash ? fmt(cash.d2_deposit ?? cash.deposit) : "확인 중"}</dd>
+          <dd className="cash">{cash ? <>{fmt(cash.d2_deposit ?? cash.deposit)}<KrwAbout v={cash.d2_deposit ?? cash.deposit} rate={rate} /></> : "확인 중"}</dd>
         </dl>
       ) : (
         <div className="muted">아직 잔고를 불러오지 않았습니다.</div>
@@ -214,11 +223,11 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
               </div>
             ) : <div className="split">
               <div><div className="label">원화 예수금</div><div className="num">{krCash ? krw(krCash.d2_deposit ?? krCash.deposit) : "-"}</div></div>
-              <div><div className="label">달러 예수금</div><div className="num">{usCash ? usd(usCash.d2_deposit ?? usCash.deposit) : "-"}</div></div>
+              <div><div className="label">달러 예수금</div><div className="num">{usCash ? <>{usd(usCash.d2_deposit ?? usCash.deposit)}<KrwAbout v={usCash.d2_deposit ?? usCash.deposit} rate={rate} /></> : "-"}</div></div>
             </div>}
           </div>
           <AccountCard title="국내 주식 계좌" market="KR" scope={scope} summary={krSummary} cash={krCash} fmt={krw} />
-          <AccountCard title="해외 주식 계좌" market="US" scope={scope} summary={usSummary} cash={usCash} fmt={usd} />
+          <AccountCard title="해외 주식 계좌" market="US" scope={scope} summary={usSummary} cash={usCash} fmt={usd} rate={rate} />
           {hasIsa && (
             <IsaCard
               dim={scope !== "all" && scope !== "ISA"}
