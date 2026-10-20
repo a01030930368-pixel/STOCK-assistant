@@ -3,13 +3,16 @@
 import { useActionState } from "react";
 import { createSell, type FormState } from "@/app/actions";
 
-export default function SellForm({ positionId, remaining, today }: { positionId: number; remaining: number; today: string }) {
+type Props = { positionId: number; remaining: number; today: string; quantity?: string; price?: string; fillKey?: string };
+
+export default function SellForm({ positionId, remaining, today, quantity, price = "", fillKey = "" }: Props) {
   const [state, action, pending] = useActionState<FormState, FormData>(createSell, { errors: [] });
   const v = (key: string, fallback = "") => state.values?.[key] ?? fallback;
 
   return (
     <form action={action} className="stack">
       <input type="hidden" name="positionId" value={positionId} />
+      {fillKey && <input type="hidden" name="fillKey" value={fillKey} />}
       {state.errors.length > 0 && (
         <div className="card errors">
           {state.errors.map((e) => <div key={e}>{e}</div>)}
@@ -17,8 +20,8 @@ export default function SellForm({ positionId, remaining, today }: { positionId:
       )}
       <div className="row">
         <label>매도일<input type="date" name="tradeDate" defaultValue={v("tradeDate", today)} required /></label>
-        <label>수량 (남은 {remaining})<input name="quantity" inputMode="decimal" defaultValue={v("quantity", String(remaining))} required /></label>
-        <label>매도가<input name="price" defaultValue={v("price")} inputMode="decimal" required /></label>
+        <label>수량 (남은 {remaining})<input name="quantity" inputMode="decimal" defaultValue={v("quantity", quantity ?? String(remaining))} required /></label>
+        <label>매도가<input name="price" defaultValue={v("price", price)} inputMode="decimal" required /></label>
       </div>
       <div className="row">
         <label>매도 이유

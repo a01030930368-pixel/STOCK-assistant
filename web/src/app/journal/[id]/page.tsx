@@ -6,6 +6,8 @@ import { signClass, today, won } from "@/lib/format";
 import MacroCard, { SNAPSHOT_COLUMNS, type Snapshot } from "@/app/macro/MacroCard";
 import Principles from "../Principles";
 import SellForm from "./SellForm";
+import { formNumber } from "@/lib/fills";
+import { loadFills } from "@/lib/fillsData";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +26,9 @@ type Alert = { id: number; kind: string; price: string; active: boolean; trigger
 
 const REASON = { stop: "손절", target: "익절", other: "다른 사유" } as Record<string, string>;
 
-export default async function PositionPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PositionPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   const id = Number((await params).id);
+  const fillKey = (await searchParams).fill;
   if (!Number.isInteger(id)) notFound();
   const [position] = await query<Position>("SELECT * FROM positions WHERE id = $1", [id]);
   if (!position) notFound();
@@ -42,6 +45,7 @@ export default async function PositionPage({ params }: { params: Promise<{ id: s
     return s && <MacroCard s={s} title={`당시 매크로 (${s.snapshot_day} 메모)`} />;
   };
   const remaining = buys.reduce((s, b) => s + Number(b.quantity), 0) - sells.reduce((s, x) => s + Number(x.quantity), 0);
+  const [fill] = fillKey ? (await loadFills(fillKey)).filter((f) => f.side === "sell" && f.ticker === position.ticker && !f.done) : [];
 
   return (
     <>
@@ -91,8 +95,16 @@ export default async function PositionPage({ params }: { params: Promise<{ id: s
       ))}
       {position.status === "open" && remaining > 0 && (
         <>
-          <h2>매도 기록하기</h2>
-          <SellForm positionId={id} remaining={remaining} today={today()} />
+          <h2 id="sell">매도 기록하기</h2>
+          {fill && <div className="callout fill-note">키움 체결에서 매도일·수량·가격을 채웠어요. 이유와 배운 것만 적으면 돼요.</div>}
+          <SellForm
+            positionId={id}
+            remaining={remaining}
+            today={fill?.day ?? today()}
+            quantity={fill ? formNumber(Math.min(fill.quantity, remaining), "US") : undefined}
+            price={fill ? formNumber(fill.price, fill.market) : ""}
+            fillKey={fill?.key ?? ""}
+          />
         </>
       )}
     </>

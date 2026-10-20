@@ -75,10 +75,10 @@ export async function createBuy(_prev: FormState, form: FormData): Promise<FormS
       ).rows[0].id;
     await client.query(
       `INSERT INTO buy_entries (position_id, trade_date, quantity, price, reason, scenario, risk_1, risk_2, risk_3,
-         weight_pct, stop_price, target_price, target_basis, macro_snapshot_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+         weight_pct, stop_price, target_price, target_basis, macro_snapshot_id, fill_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [positionId, input.tradeDate, input.quantity, input.price, input.reason, input.scenario, ...input.risks,
-        input.weightPct, input.stopPrice, input.targetPrice, input.targetBasis, snapshotId],
+        input.weightPct, input.stopPrice, input.targetPrice, input.targetBasis, snapshotId, text(form, "fillKey") || null],
     );
     // 가장 최근 매수 기록의 손절·익절가로 알림을 교체합니다.
     await client.query("UPDATE alerts SET active = false WHERE position_id = $1 AND kind IN ('stop', 'target') AND active", [positionId]);
@@ -129,10 +129,10 @@ export async function createSell(_prev: FormState, form: FormData): Promise<Form
   const avgBuy = averagePrice(buys);
   await query(
     `INSERT INTO sell_entries (position_id, trade_date, quantity, price, avg_buy_price, return_pct, holding_days,
-       reason_type, reason_detail, lesson, followed_rules, macro_snapshot_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+       reason_type, reason_detail, lesson, followed_rules, macro_snapshot_id, fill_key)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
     [positionId, tradeDate, quantity, price, avgBuy, returnPct(avgBuy, price), holdingDays(buys, tradeDate),
-      reasonType, text(form, "reasonDetail"), lesson, followed === "yes", await snapshotFor(tradeDate)],
+      reasonType, text(form, "reasonDetail"), lesson, followed === "yes", await snapshotFor(tradeDate), text(form, "fillKey") || null],
   );
   if (quantity === remaining) {
     await query("UPDATE positions SET status = 'closed', closed_at = now() WHERE id = $1", [positionId]);
@@ -141,6 +141,12 @@ export async function createSell(_prev: FormState, form: FormData): Promise<Form
   revalidatePath(`/journal/${positionId}`);
   revalidatePath("/journal");
   return { errors: [] };
+}
+
+// 일지에 남기지 않을 체결(예: 단타 테스트)은 목록에서 숨깁니다.
+export async function hideFill(form: FormData) {
+  await query("UPDATE trade_fills SET hidden = true WHERE fill_key = $1", [text(form, "key")]);
+  revalidatePath("/journal");
 }
 
 export async function saveNotes(form: FormData) {

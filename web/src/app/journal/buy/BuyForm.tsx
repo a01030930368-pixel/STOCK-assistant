@@ -3,14 +3,15 @@
 import { useActionState } from "react";
 import { createBuy, type FormState } from "@/app/actions";
 
-type Props = { ticker: string; name: string; market: string; today: string };
+type Props = { ticker: string; name: string; market: string; today: string; quantity?: string; price?: string; fillKey?: string };
 
-export default function BuyForm({ ticker, name, market, today }: Props) {
+export default function BuyForm({ ticker, name, market, today, quantity = "", price = "", fillKey = "" }: Props) {
   const [state, action, pending] = useActionState<FormState, FormData>(createBuy, { errors: [] });
   const v = (key: string, fallback = "") => state.values?.[key] ?? fallback;
 
   return (
     <form action={action} className="stack">
+      {fillKey && <input type="hidden" name="fillKey" value={fillKey} />}
       {state.errors.length > 0 && (
         <div className="card errors">
           {state.errors.map((e) => <div key={e}>{e}</div>)}
@@ -28,8 +29,8 @@ export default function BuyForm({ ticker, name, market, today }: Props) {
         </label>
       </div>
       <div className="row">
-        <label>수량<input name="quantity" defaultValue={v("quantity")} inputMode="decimal" required /></label>
-        <label>매수가<input name="price" defaultValue={v("price")} inputMode="decimal" required /></label>
+        <label>수량<input name="quantity" defaultValue={v("quantity", quantity)} inputMode="decimal" required /></label>
+        <label>매수가<input name="price" defaultValue={v("price", price)} inputMode="decimal" required /></label>
       </div>
 
       <fieldset className="checklist">

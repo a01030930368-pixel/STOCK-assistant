@@ -54,6 +54,7 @@ CREATE TABLE buy_entries (
   target_price       NUMERIC(18, 4) NOT NULL CHECK (target_price > 0),
   target_basis       TEXT NOT NULL CHECK (target_basis IN ('chart', 'percent')),
   macro_snapshot_id  INT REFERENCES macro_snapshots(id),
+  fill_key           TEXT,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (stop_price < price AND price < target_price)
 );
@@ -73,6 +74,7 @@ CREATE TABLE sell_entries (
   lesson             TEXT NOT NULL CHECK (length(trim(lesson)) > 0),
   followed_rules     BOOLEAN NOT NULL,
   macro_snapshot_id  INT REFERENCES macro_snapshots(id),
+  fill_key           TEXT,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -321,4 +323,22 @@ CREATE TABLE stock_dividends (
   ex_date  DATE NOT NULL,
   amount   NUMERIC(18, 4) NOT NULL,
   PRIMARY KEY (ticker, ex_date)
+);
+
+-- 키움 체결(조회 전용). 하루·종목·매수/매도 한 묶음. fill_key = 시장:날짜:종목:buy|sell
+CREATE TABLE trade_fills (
+  fill_key    TEXT PRIMARY KEY,
+  market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+  trade_date  DATE NOT NULL,
+  ticker      TEXT NOT NULL,
+  name        TEXT NOT NULL DEFAULT '',
+  side        TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+  quantity    NUMERIC(18, 4) NOT NULL,
+  price       NUMERIC(18, 4) NOT NULL,
+  fee         NUMERIC(18, 4),
+  fill_time   TEXT,
+  fill_count  INT NOT NULL DEFAULT 1,
+  source      TEXT NOT NULL,
+  hidden      BOOLEAN NOT NULL DEFAULT false,
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );

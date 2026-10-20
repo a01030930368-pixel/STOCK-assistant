@@ -194,6 +194,24 @@ MIGRATIONS = [
       key    TEXT PRIMARY KEY,
       value  JSONB NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS trade_fills (
+      fill_key    TEXT PRIMARY KEY,
+      market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+      trade_date  DATE NOT NULL,
+      ticker      TEXT NOT NULL,
+      name        TEXT NOT NULL DEFAULT '',
+      side        TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+      quantity    NUMERIC(18, 4) NOT NULL,
+      price       NUMERIC(18, 4) NOT NULL,
+      fee         NUMERIC(18, 4),
+      fill_time   TEXT,
+      fill_count  INT NOT NULL DEFAULT 1,
+      source      TEXT NOT NULL,
+      hidden      BOOLEAN NOT NULL DEFAULT false,
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "ALTER TABLE buy_entries ADD COLUMN IF NOT EXISTS fill_key TEXT",
+    "ALTER TABLE sell_entries ADD COLUMN IF NOT EXISTS fill_key TEXT",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -594,6 +612,20 @@ def briefing_holdings(conn: psycopg.Connection) -> list[tuple[str, str, float, f
 
 
 # ---------------------------------------------------------------- 텔레그램 명령
+
+def save_fills(conn: psycopg.Connection, fills) -> None:
+    # kt00015(수수료 포함)가 정본입니다. 하루치 조회(kt00009) 값은 kt00015 값을 덮지 않습니다.
+    for f in fills:
+        conn.execute(
+            """INSERT INTO trade_fills (fill_key, market, trade_date, ticker, name, side, quantity, price, fee, fill_time, fill_count, source)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (fill_key) DO UPDATE SET name = EXCLUDED.name, quantity = EXCLUDED.quantity, price = EXCLUDED.price,
+                 fee = EXCLUDED.fee, fill_time = COALESCE(EXCLUDED.fill_time, trade_fills.fill_time),
+                 fill_count = EXCLUDED.fill_count, source = EXCLUDED.source, fetched_at = now()
+               WHERE trade_fills.source <> 'kt00015' OR EXCLUDED.source = 'kt00015'""",
+            (f.key, f.market, f.day, f.ticker, f.name, f.side, f.quantity, f.price, f.fee, f.time, f.count, f.source),
+        )
+
 
 def get_setting(conn: psycopg.Connection, key: str):
     row = conn.execute("SELECT value FROM app_settings WHERE key = %s", (key,)).fetchone()
