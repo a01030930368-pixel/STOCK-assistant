@@ -236,3 +236,99 @@ export async function deletePreset(form: FormData) {
   revalidatePath("/screener");
   redirect("/screener");
 }
+
+// ---------------------------------------------------------------- 관심종목·가격 알림
+
+const marketOf = (form: FormData): "KR" | "US" => (text(form, "market") === "US" ? "US" : "KR");
+const tickerOf = (form: FormData) => text(form, "ticker").toUpperCase().replace(/^A(\d{6})$/, "$1");
+
+function refreshWatch(ticker?: string) {
+  revalidatePath("/watch");
+  revalidatePath("/");
+  if (ticker) revalidatePath(`/stock/${ticker}`);
+}
+
+export async function addWatch(form: FormData) {
+  const ticker = tickerOf(form);
+  if (!ticker) return;
+  const name = text(form, "name").slice(0, 60) || ticker;
+  await query(
+    `INSERT INTO watchlist (ticker, name, market, memo) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (ticker) DO UPDATE SET name = EXCLUDED.name, market = EXCLUDED.market,
+       memo = CASE WHEN EXCLUDED.memo = '' THEN watchlist.memo ELSE EXCLUDED.memo END`,
+    [ticker, name, marketOf(form), text(form, "memo").slice(0, 200)],
+  );
+  const price = num(form, "price");
+  if (price > 0) await insertAlert(ticker, name, text(form, "direction"), price, text(form, "memo"));
+  refreshWatch(ticker);
+}
+
+export async function removeWatch(form: FormData) {
+  const ticker = tickerOf(form);
+  // 가진 종목에 건 알림은 남겨 둡니다(잔고 현재가로 계속 확인됨).
+  await query(
+    "DELETE FROM alerts WHERE ticker = $1 AND kind = 'custom' AND NOT EXISTS (SELECT 1 FROM holdings WHERE ticker = $1 AND quantity > 0)",
+    [ticker],
+  );
+  await query("DELETE FROM watchlist WHERE ticker = $1", [ticker]);
+  await query("DELETE FROM watch_quotes WHERE ticker = $1", [ticker]);
+  refreshWatch(ticker);
+}
+
+async function insertAlert(ticker: string, name: string, direction: string, price: number, memo: string) {
+  await query(
+    "INSERT INTO alerts (ticker, name, kind, direction, price, memo) VALUES ($1, $2, 'custom', $3, $4, $5)",
+    [ticker, name, direction === "below" ? "below" : "above", price, memo.slice(0, 200)],
+  );
+}
+
+export async function addAlert(form: FormData) {
+  const ticker = tickerOf(form);
+  const price = num(form, "price");
+  if (!ticker || !(price > 0)) return;
+  await insertAlert(ticker, text(form, "name") || ticker, text(form, "direction"), price, text(form, "memo"));
+  refreshWatch(ticker);
+}
+
+// 울린 알림을 다시 켜거나, 켜진 알림을 잠시 끕니다.
+export async function toggleAlert(form: FormData) {
+  const ticker = tickerOf(form);
+  await query(
+    "UPDATE alerts SET active = NOT active, triggered_at = CASE WHEN active THEN triggered_at ELSE NULL END WHERE id = $1 AND kind = 'custom'",
+    [num(form, "id")],
+  );
+  refreshWatch(ticker);
+}
+
+export async function deleteAlert(form: FormData) {
+  const ticker = tickerOf(form);
+  await query("DELETE FROM alerts WHERE id = $1 AND kind = 'custom'", [num(form, "id")]);
+  refreshWatch(ticker);
+}
+
+// ---------------------------------------------------------------- 비중
+
+export async function saveLimits(form: FormData) {
+  const clamp = (k: string, d: number) => {
+    const v = num(form, k);
+    return v > 0 && v <= 100 ? v : d;
+  };
+  const value = { sectorMax: clamp("sectorMax", 40), stockMax: clamp("stockMax", 20), cashMin: clamp("cashMin", 10) };
+  await query(
+    "INSERT INTO app_settings (key, value) VALUES ('weight_limits', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+    [JSON.stringify(value)],
+  );
+  revalidatePath("/weights");
+}
+
+// 자동으로 받은 업종 이름을 직접 바꿉니다. 비우면 자동 이름으로 돌아갑니다.
+export async function saveSector(form: FormData) {
+  const ticker = tickerOf(form);
+  const custom = text(form, "sector").slice(0, 30) || null;
+  await query(
+    `INSERT INTO stock_sectors (ticker, market, custom) VALUES ($1, $2, $3)
+     ON CONFLICT (ticker) DO UPDATE SET custom = EXCLUDED.custom`,
+    [ticker, marketOf(form), custom],
+  );
+  revalidatePath("/weights");
+}

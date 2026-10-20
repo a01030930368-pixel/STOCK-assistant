@@ -87,6 +87,7 @@ CREATE TABLE alerts (
   price         NUMERIC(18, 4) NOT NULL,
   active        BOOLEAN NOT NULL DEFAULT true,
   triggered_at  TIMESTAMPTZ,
+  memo          TEXT NOT NULL DEFAULT '',
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX alerts_active_idx ON alerts (ticker) WHERE active;
@@ -280,4 +281,36 @@ CREATE TABLE ai_comments (
 CREATE TABLE notices_sent (
   key      TEXT PRIMARY KEY,
   sent_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 관심종목: 가지고 있지 않아도 목표가 알림을 걸어 둘 종목
+CREATE TABLE watchlist (
+  ticker      TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+  memo        TEXT NOT NULL DEFAULT '',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 잔고에 없는 관심종목의 현재가. 장중 2분마다 갱신
+CREATE TABLE watch_quotes (
+  ticker      TEXT PRIMARY KEY,
+  price       NUMERIC(18, 4) NOT NULL,
+  change_pct  NUMERIC(8, 2),
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 종목 업종. sector는 자동(국내 키움, 미국 Finnhub), custom은 직접 고친 이름
+CREATE TABLE stock_sectors (
+  ticker      TEXT PRIMARY KEY,
+  market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+  sector      TEXT NOT NULL DEFAULT '',
+  custom      TEXT,
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 화면 설정 (예: 비중 한도 {"sectorMax":40,"stockMax":20,"cashMin":10})
+CREATE TABLE app_settings (
+  key    TEXT PRIMARY KEY,
+  value  JSONB NOT NULL
 );

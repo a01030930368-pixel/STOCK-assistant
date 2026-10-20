@@ -163,6 +163,10 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
     <>
       <div className="board-head">
         <h1>포트폴리오</h1>
+        <nav className="segment" aria-label="포트폴리오 보기">
+          <Link href="/" aria-current="page">보유 종목</Link>
+          <Link href="/weights">비중</Link>
+        </nav>
         <nav className="segment" aria-label="계좌 범위">
           {tabs.map(([id, label]) => (
             <Link key={id} href={id === "all" ? "/" : `/?m=${id}`} aria-current={id === scope ? "page" : undefined}>{label}</Link>

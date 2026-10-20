@@ -162,6 +162,31 @@ MIGRATIONS = [
     "ALTER TABLE calendar_events DROP CONSTRAINT IF EXISTS calendar_events_kind_check",
     """ALTER TABLE calendar_events ADD CONSTRAINT calendar_events_kind_check
        CHECK (kind IN ('holiday', 'earnings', 'policy', 'economic'))""",
+    """CREATE TABLE IF NOT EXISTS watchlist (
+      ticker      TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+      memo        TEXT NOT NULL DEFAULT '',
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    """CREATE TABLE IF NOT EXISTS watch_quotes (
+      ticker      TEXT PRIMARY KEY,
+      price       NUMERIC(18, 4) NOT NULL,
+      change_pct  NUMERIC(8, 2),
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS memo TEXT NOT NULL DEFAULT ''",
+    """CREATE TABLE IF NOT EXISTS stock_sectors (
+      ticker      TEXT PRIMARY KEY,
+      market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+      sector      TEXT NOT NULL DEFAULT '',
+      custom      TEXT,
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    """CREATE TABLE IF NOT EXISTS app_settings (
+      key    TEXT PRIMARY KEY,
+      value  JSONB NOT NULL
+    )""",
 ]
 def migrate(conn: psycopg.Connection) -> None:
     for statement in MIGRATIONS:
@@ -226,11 +251,20 @@ def save_indicators(conn: psycopg.Connection, indicators: list[Indicator]) -> No
 
 
 def watched_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
-    """뉴스·실적·재무를 모을 종목: 보유 종목과 매매일지에서 보유 중인 종목. (ticker, name, market)"""
+    """뉴스·실적·재무·차트를 모을 종목: 보유 종목, 매매일지에서 보유 중인 종목, 관심종목. (ticker, name, market)"""
     return conn.execute(
         """SELECT ticker, name, market FROM holdings
            UNION SELECT ticker, name, market FROM positions WHERE status = 'open'
+           UNION SELECT ticker, name, market FROM watchlist
            ORDER BY ticker"""
+    ).fetchall()
+
+
+def unpriced_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
+    """일봉이 하나도 없는 관심종목. (ticker, name, market)"""
+    return conn.execute(
+        """SELECT w.ticker, w.name, w.market FROM watchlist w
+           WHERE NOT EXISTS (SELECT 1 FROM price_history p WHERE p.ticker = w.ticker) ORDER BY w.ticker"""
     ).fetchall()
 
 
@@ -287,7 +321,50 @@ def save_financials(conn: psycopg.Connection, items: list[Financials]) -> None:
 
 
 def current_prices(conn: psycopg.Connection) -> dict[str, Decimal]:
-    return {row[0]: row[1] for row in conn.execute("SELECT ticker, cur_price FROM holdings")}
+    """알림 확인용 현재가. 보유 종목은 잔고 값, 관심종목은 30분 안에 받은 현재가."""
+    prices = {row[0]: row[1] for row in conn.execute(
+        "SELECT ticker, price FROM watch_quotes WHERE fetched_at > now() - interval '30 minutes'")}
+    prices.update({row[0]: row[1] for row in conn.execute("SELECT ticker, cur_price FROM holdings")})
+    return prices
+
+
+def watch_targets(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
+    """현재가를 따로 받아야 하는 관심종목: 잔고에 없는 것만. (ticker, name, market)"""
+    return conn.execute(
+        """SELECT w.ticker, w.name, w.market FROM watchlist w
+           WHERE NOT EXISTS (SELECT 1 FROM holdings h WHERE h.ticker = w.ticker AND h.quantity > 0)
+           ORDER BY w.ticker"""
+    ).fetchall()
+
+
+def save_quote(conn: psycopg.Connection, quote) -> None:
+    conn.execute(
+        """INSERT INTO watch_quotes (ticker, price, change_pct) VALUES (%s, %s, %s)
+           ON CONFLICT (ticker) DO UPDATE SET price = EXCLUDED.price, change_pct = EXCLUDED.change_pct, fetched_at = now()""",
+        (quote.ticker, quote.price, quote.change_pct),
+    )
+
+
+def sector_due(conn: psycopg.Connection, max_age_days: int = 7) -> list[tuple[str, str, str]]:
+    """업종 이름을 새로 받아야 하는 보유·관심 종목. (ticker, name, market)"""
+    return conn.execute(
+        """SELECT s.ticker, s.name, s.market FROM (
+             SELECT ticker, name, market FROM holdings WHERE quantity > 0
+             UNION SELECT ticker, name, market FROM watchlist) s
+           LEFT JOIN stock_sectors x ON x.ticker = s.ticker
+           WHERE x.ticker IS NULL OR x.sector = '' OR x.fetched_at < now() - make_interval(days => %s)
+           ORDER BY s.ticker""",
+        (max_age_days,),
+    ).fetchall()
+
+
+def save_sector(conn: psycopg.Connection, ticker: str, market: str, sector: str) -> None:
+    # 직접 고친 업종(custom)은 건드리지 않습니다.
+    conn.execute(
+        """INSERT INTO stock_sectors (ticker, market, sector) VALUES (%s, %s, %s)
+           ON CONFLICT (ticker) DO UPDATE SET sector = EXCLUDED.sector, fetched_at = now()""",
+        (ticker, market, sector),
+    )
 
 
 def active_alerts(conn: psycopg.Connection) -> list[Alert]:

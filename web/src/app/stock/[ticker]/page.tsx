@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { addPeer, deletePeer } from "@/app/actions";
+import { addPeer, addWatch, deletePeer, removeWatch } from "@/app/actions";
 import { query } from "@/lib/db";
 import { loadSummaries } from "@/lib/summaryData";
 import SummaryLine from "@/app/_components/SummaryLine";
@@ -11,7 +11,7 @@ import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from 
 
 export const dynamic = "force-dynamic";
 
-type Stock = { ticker: string; name: string; market: string; position_id: number | null };
+type Stock = { ticker: string; name: string; market: string; position_id: number | null; watched: boolean; cur: string | null };
 type News = { url: string; title: string; source: string; published_at: Date; summary: string };
 type Earnings = { period: string; title: string; url: string; reported_day: string | null; eps_actual: string | null; eps_estimate: string | null };
 type Peer = { peer_ticker: string; peer_name: string; peer_market: string };
@@ -24,13 +24,26 @@ const kst = (d: Date) => d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", mon
 export default async function StockPage({ params }: { params: Promise<{ ticker: string }> }) {
   const ticker = decodeURIComponent((await params).ticker).toUpperCase();
   const [stock] = await query<Stock>(
-    `SELECT s.ticker, s.name, s.market, p.id AS position_id FROM (
+    `SELECT s.ticker, s.name, s.market, p.id AS position_id,
+       EXISTS (SELECT 1 FROM watchlist w WHERE w.ticker = s.ticker) AS watched,
+       COALESCE((SELECT cur_price FROM holdings WHERE ticker = s.ticker), (SELECT price FROM watch_quotes WHERE ticker = s.ticker),
+                (SELECT close FROM price_history WHERE ticker = s.ticker ORDER BY day DESC LIMIT 1)) AS cur
+     FROM (
+       SELECT ticker, name, market, 1 AS rank FROM holdings WHERE ticker = $1
+       UNION ALL SELECT ticker, name, market, 2 FROM positions WHERE ticker = $1
+       UNION ALL SELECT ticker, name, market, 3 FROM watchlist WHERE ticker = $1
+     ) s LEFT JOIN positions p ON p.ticker = s.ticker AND p.status = 'open'
+     ORDER BY s.rank LIMIT 1`,
+    [ticker],
+  ).catch(() => query<Stock>(
+    // 관심종목 테이블이 생기기 전(워커 업데이트 전) DB
+    `SELECT s.ticker, s.name, s.market, p.id AS position_id, false AS watched, NULL AS cur FROM (
        SELECT ticker, name, market, 1 AS rank FROM holdings WHERE ticker = $1
        UNION ALL SELECT ticker, name, market, 2 FROM positions WHERE ticker = $1
      ) s LEFT JOIN positions p ON p.ticker = s.ticker AND p.status = 'open'
      ORDER BY s.rank LIMIT 1`,
     [ticker],
-  );
+  ));
   if (!stock) notFound();
 
   const news = await safe<News>("SELECT url, title, source, published_at, summary FROM stock_news WHERE ticker = $1 ORDER BY published_at DESC LIMIT 15", [ticker]);
@@ -76,7 +89,7 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
   const levels = (await safe<{ kind: Level["kind"]; price: string }>(
     `SELECT 'avg' AS kind, avg_price AS price FROM holdings WHERE ticker = $1 AND avg_price > 0
      UNION ALL
-     SELECT kind, price FROM alerts WHERE ticker = $1 AND active AND kind IN ('stop', 'target')`,
+     SELECT CASE WHEN kind = 'custom' THEN 'alert' ELSE kind END, price FROM alerts WHERE ticker = $1 AND active`,
     [ticker],
   )).map<Level>((l) => ({ kind: l.kind, price: Number(l.price) }));
   const memos = await safe<Memo>(
@@ -89,13 +102,21 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
 
   return (
     <>
-      <h1>{stock.name} <span className="muted">{stock.ticker} · {stock.market}</span></h1>
+      <div className="page-head">
+        <h1>{stock.name} <span className="muted">{stock.ticker} · {stock.market}</span></h1>
+        <form action={stock.watched ? removeWatch : addWatch}>
+          <input type="hidden" name="ticker" value={stock.ticker} />
+          <input type="hidden" name="name" value={stock.name} />
+          <input type="hidden" name="market" value={stock.market} />
+          <button type="submit" className={stock.watched ? "chip-btn on" : "chip-btn"}>{stock.watched ? "★ 관심종목" : "☆ 관심종목에 추가"}</button>
+        </form>
+      </div>
       <SummaryLine parts={summary} />
       {comment && <div className="panel ai-panel"><AiNote c={comment} title={<span className="label">AI 한마디</span>} /></div>}
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}
 
-      <h2>차트 메모</h2>
-      <ChartMemo ticker={ticker} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} />
+      <h2>차트 · 메모 · 가격 알림</h2>
+      <ChartMemo ticker={ticker} name={stock.name} current={stock.cur === null ? null : Number(stock.cur)} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} />
 
       <h2>재무 요약</h2>
       {financials.length === 0 ? (

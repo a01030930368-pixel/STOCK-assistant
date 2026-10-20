@@ -14,6 +14,7 @@ from .screener_job import ScreenerJob
 from .intraday_job import IntradayJob
 from .ai_job import AiJob
 from .briefing_job import BriefingJob
+from .watch_job import WatchJob
 from .market import kr_market_open, us_market_open
 
 log = logging.getLogger("worker")
@@ -90,6 +91,7 @@ def main() -> None:
     minutes = IntradayJob(http, kiwoom)
     comments = AiJob(cfg, http)
     notices = BriefingJob(cfg, http)
+    watching = WatchJob(cfg, http, kiwoom)
     first = True
     last_macro: datetime | None = None
     with psycopg.connect(cfg.database_url, autocommit=True) as conn:
@@ -110,6 +112,10 @@ def main() -> None:
                 research.run(conn, now)
             except Exception:
                 log.exception("종목 정보 수집 실패")
+            try:
+                watching.run(conn, now)
+            except Exception:
+                log.exception("관심종목 갱신 실패")
             try:
                 screener.run(conn, now)
             except Exception:

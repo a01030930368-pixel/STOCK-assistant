@@ -27,6 +27,10 @@ def format_price(value: Decimal) -> str:
 
 
 def message(alert: Alert, current: Decimal) -> str:
+    if alert.kind == "custom":
+        way = "아래로 내려왔어요" if alert.direction == "below" else "위로 올라왔어요"
+        return (f"관심종목 {alert.name}({alert.ticker}) 가격이 정해 둔 {format_price(alert.price)} {way}. "
+                f"현재가 {format_price(current)}")
     label = KIND_LABEL[alert.kind]
     return (
         f"{alert.name}({alert.ticker}) 종목이 {label} 목표가인 {format_price(alert.price)}에 도달했습니다. "

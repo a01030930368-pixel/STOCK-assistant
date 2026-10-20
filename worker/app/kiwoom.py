@@ -243,6 +243,16 @@ class KiwoomClient:
 
         return parse_kr_daily(self._post("/api/dostk/chart", "ka10081", {"stk_cd": ticker, "base_dt": base_day, "upd_stkpc_tp": "1"}))
 
+    def kr_quote(self, ticker: str):
+        # ka10001 주식기본정보요청. 관심종목 현재가
+        from .watch import parse_kr_quote
+        return parse_kr_quote(ticker, self._post("/api/dostk/stkinfo", "ka10001", {"stk_cd": ticker}))
+
+    def kr_sector(self, ticker: str) -> str:
+        # ka10100 종목정보 조회. 업종명(upName)
+        from .watch import parse_kr_sector
+        return parse_kr_sector(self._post("/api/dostk/stkinfo", "ka10100", {"stk_cd": ticker}))
+
     def us_cash(self) -> Cash:
         # ust21110 해외주식 예수금 조회
         return parse_us_cash(self._post("/api/us/acnt", "ust21110", {}))
