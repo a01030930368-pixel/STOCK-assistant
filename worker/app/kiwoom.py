@@ -225,7 +225,7 @@ class KiwoomClient:
     def kr_minutes(self, ticker: str) -> list:
         # ka10080 주식분봉차트조회요청, 1분봉(수정주가). 최근 것부터 한 번에 약 900개
         from .intraday import parse_kr_minutes
-        return parse_kr_minutes(self._post("/api/dostk/chart", "ka10080", {"stk_cd": ticker, "tic_scope": "1", "upd_stkpr_tp": "1"}))
+        return parse_kr_minutes(self._post("/api/dostk/chart", "ka10080", {"stk_cd": ticker, "tic_scope": "1", "upd_stkpc_tp": "1"}))
 
     def value_rank(self, market_code: str) -> list:
         # ka10032 거래대금상위요청. 001 코스피, 101 코스닥, 관리종목 제외, KRX 기준
@@ -235,13 +235,13 @@ class KiwoomClient:
     def kr_bars(self, ticker: str, base_day: str) -> list:
         # ka10081 일봉(수정주가). 검색기는 고가·거래량·거래대금까지 씁니다.
         from .screener import parse_kr_bars
-        return parse_kr_bars(self._post("/api/dostk/chart", "ka10081", {"stk_cd": ticker, "base_dt": base_day, "upd_stkpr_tp": "1"}))
+        return parse_kr_bars(self._post("/api/dostk/chart", "ka10081", {"stk_cd": ticker, "base_dt": base_day, "upd_stkpc_tp": "1"}))
 
     def kr_daily(self, ticker: str, base_day: str) -> list:
-        # ka10081 주식일봉차트조회요청. base_dt부터 과거로, 수정주가(upd_stkpr_tp=1) 기준
+        # ka10081 주식일봉차트조회요청. base_dt부터 과거로, 수정주가(upd_stkpc_tp=1) 기준
         from .prices import parse_kr_daily
 
-        return parse_kr_daily(self._post("/api/dostk/chart", "ka10081", {"stk_cd": ticker, "base_dt": base_day, "upd_stkpr_tp": "1"}))
+        return parse_kr_daily(self._post("/api/dostk/chart", "ka10081", {"stk_cd": ticker, "base_dt": base_day, "upd_stkpc_tp": "1"}))
 
     def us_cash(self) -> Cash:
         # ust21110 해외주식 예수금 조회

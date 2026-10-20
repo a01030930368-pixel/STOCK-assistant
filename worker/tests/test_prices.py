@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -43,6 +44,8 @@ def test_kr_daily_calls_ka10081():
         if request.url.path == "/oauth2/token":
             return httpx.Response(200, json={"token": "t", "expires_dt": "20991231235959", "return_code": 0})
         seen.append((request.url.path, request.headers["api-id"]))
+        # 키움 필수 항목 이름. 틀리면 1511(필수 입력값 누락) 오류가 납니다.
+        assert json.loads(request.content)["upd_stkpc_tp"] == "1"
         return httpx.Response(200, json={"stk_dt_pole_chart_qry": [{"dt": "20261017", "cur_prc": "68400"}], "return_code": 0})
 
     client = KiwoomClient("https://api.kiwoom.com", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
