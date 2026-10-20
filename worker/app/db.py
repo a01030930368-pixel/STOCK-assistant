@@ -632,6 +632,19 @@ def earnings_eve(conn: psycopg.Connection, day) -> list[tuple[str, tuple]]:
     return out
 
 
+def review_inputs(conn: psycopg.Connection):
+    """사후강평 알림에 쓸 (키움 체결 전부, 지금 보유 수량, 강평을 쓴 권 키)."""
+    from .books import Trade
+
+    trades = [Trade(*r) for r in conn.execute(
+        """SELECT market, ticker, COALESCE(NULLIF(name, ''), ticker), trade_date, fill_time, side, quantity, price, fee
+           FROM trade_fills"""
+    ).fetchall()]
+    held = {(m, t): q for m, t, q in conn.execute("SELECT market, ticker, quantity FROM holdings").fetchall()}
+    reviewed = {r[0] for r in conn.execute("SELECT book_key FROM book_reviews").fetchall()}
+    return trades, held, reviewed
+
+
 def briefing_holdings(conn: psycopg.Connection) -> list[tuple[str, str, float, float | None, float]]:
     """아침 브리핑용 보유 종목 (이름, 시장, 현재가, 전일 대비 %, 평단 대비 %). 국내 먼저, 시장 안에서는 평가금액이 큰 순서입니다."""
     rows = conn.execute(

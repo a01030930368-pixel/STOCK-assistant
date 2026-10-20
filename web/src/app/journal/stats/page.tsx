@@ -2,6 +2,8 @@ import Link from "next/link";
 import { query } from "@/lib/db";
 import { today, won } from "@/lib/format";
 import { byRules, monthly, since, summarize, type Sale, type Summary } from "@/lib/stats";
+import { loadBooks, loadReviews } from "@/lib/booksData";
+import { lessons, summarizeReviews, type Reviewed, type ReviewSummary } from "@/lib/reviews";
 import JournalTabs from "../JournalTabs";
 
 export const dynamic = "force-dynamic";
@@ -91,6 +93,89 @@ function Fees({ f, label }: { f: FeeRow; label: string }) {
   );
 }
 
+const starText = (n: number) => "★".repeat(n) + "☆".repeat(5 - n);
+
+// 끝난 일기장의 사후강평. 기간은 전량 매도한 날 기준이에요.
+async function reviewData(months: number | null, day: string): Promise<{ s: ReviewSummary; items: Reviewed[] }> {
+  const [books, reviews] = await Promise.all([loadBooks(), loadReviews()]);
+  const from = months === null ? "" : (() => { const d = new Date(`${day}T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() - months); return d.toISOString().slice(0, 10); })();
+  const closed = books.filter((b) => b.end && b.end > from);
+  const items = closed.flatMap((b): Reviewed[] => {
+    const r = reviews.get(b.key);
+    return r ? [{ key: b.key, name: b.name, end: b.end!, returnPct: b.returnPct, stars: r.stars, followed: r.followed_rules, lesson: r.lesson || r.exit_timing || r.thesis }] : [];
+  });
+  return { s: summarizeReviews(items, closed.length), items };
+}
+
+function StarBars({ rows }: { rows: ReviewSummary["byStars"] }) {
+  const W = 520, H = 210, mid = 100, half = 72;
+  const max = Math.max(1, ...rows.map((r) => Math.abs(r.avgReturn ?? 0)));
+  const bw = W / rows.length;
+  return (
+    <svg className="month-bars" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="별점별 평균 수익률">
+      <line x1="0" x2={W} y1={mid} y2={mid} className="axis" />
+      {rows.map((r, i) => {
+        const v = r.avgReturn ?? 0;
+        const h = Math.max(r.count ? 2 : 0, (Math.abs(v) / max) * half);
+        const x = i * bw + bw * 0.3, y = v >= 0 ? mid - h : mid;
+        return (
+          <g key={r.stars}>
+            <title>{`${r.stars}점 · ${r.count}권 · ${r.avgReturn === null ? "기록 없음" : sp(r.avgReturn)}`}</title>
+            {r.count > 0 && r.avgReturn !== null && <rect x={x} y={y} width={bw * 0.4} height={h} rx="3" className={v >= 0 ? "up" : "down"} />}
+            <text x={x + bw * 0.2} y={v >= 0 ? y - 6 : y + h + 14} textAnchor="middle" className="val">{r.count && r.avgReturn !== null ? sp(r.avgReturn) : ""}</text>
+            <text x={x + bw * 0.2} y={H - 22} textAnchor="middle" className="star-lab">{"★".repeat(r.stars)}</text>
+            <text x={x + bw * 0.2} y={H - 4} textAnchor="middle" className="lab">{r.count}권</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function Reviews({ s, items, label }: { s: ReviewSummary; items: Reviewed[]; label: string }) {
+  const list = lessons(items).slice(0, 8);
+  return (
+    <>
+      <h2>사후강평 모아 보기 <span className="muted">{label} · 전량 매도한 날 기준</span></h2>
+      {s.closed === 0 ? (
+        <p className="muted">이 기간에 끝난 일기장이 없어요. 종목을 전부 팔면 일기장 마지막 장에 사후강평을 쓸 수 있어요.</p>
+      ) : (
+        <>
+          <div className="stats four">
+            <div className="stat"><div className="stat-label">강평 쓴 권</div><div className="stat-value">{s.reviewed} / {s.closed}권</div><div className="stat-sub">끝난 일기장 중</div></div>
+            <div className="stat"><div className="stat-label">평균 별점</div><div className="stat-value">{s.avgStars ?? "-"}</div><div className="stat-sub star">{s.avgStars ? starText(Math.round(s.avgStars)) : "별점 없음"}</div></div>
+            <div className="stat"><div className="stat-label">별점 4~5 평균</div><div className={`stat-value ${cls(s.high.avgReturn)}`}>{sp(s.high.avgReturn)}</div><div className="stat-sub">{s.high.count}권</div></div>
+            <div className="stat"><div className="stat-label">별점 1~2 평균</div><div className={`stat-value ${cls(s.low.avgReturn)}`}>{sp(s.low.avgReturn)}</div><div className="stat-sub">{s.low.count}권</div></div>
+          </div>
+          <div className="stats-grid">
+            <div className="panel">
+              <div className="panel-title">별점별 평균 수익률</div>
+              <StarBars rows={s.byStars} />
+              <p className="muted small">별점을 높게 준 매매가 실제로도 더 벌었는지 보여 줘요.</p>
+            </div>
+            <div className="lessons">
+              <div className="panel-title">내가 쓴 교훈 <span className="muted">최근 순</span></div>
+              {list.length === 0 && <p className="muted">아직 쓴 교훈이 없어요. <Link href="/journal/books?s=unreviewed">강평 안 쓴 일기장 보기</Link></p>}
+              {list.map((r) => (
+                <Link key={r.key} href={`/journal/books?b=${encodeURIComponent(r.key)}`} className="lesson">
+                  <span className="lesson-top">
+                    {r.stars && <span className="star">{starText(r.stars)}</span>}
+                    <b>{r.name}</b>
+                    <span className={cls(r.returnPct)}>{sp(r.returnPct)}</span>
+                    {r.followed !== null && <span className={r.followed ? "chip gold" : "chip"}>{r.followed ? "원칙 지킴" : "못 지킴"}</span>}
+                    <span className="muted lesson-day">{r.end.slice(5)}</span>
+                  </span>
+                  <span className="lesson-text">{r.lesson}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 export default async function StatsPage({ searchParams }: { searchParams: Promise<{ r?: string }> }) {
   const r = (await searchParams).r;
   const range = RANGES.find((x) => x.key === r) ?? RANGES[2];
@@ -112,6 +197,7 @@ export default async function StatsPage({ searchParams }: { searchParams: Promis
   const worstBroken = broken.length ? broken.reduce((a, b) => (b.returnPct < a.returnPct ? b : a)) : null;
   const months = monthly(all, day, range.months === null ? 12 : Math.max(6, range.months));
   const fees = await feeTotals(range.months);
+  const reviewed = await reviewData(range.months, day);
 
   return (
     <>
@@ -189,6 +275,7 @@ export default async function StatsPage({ searchParams }: { searchParams: Promis
           <p className="muted">매도 기록 한 건을 매매 한 번으로 세요. 수익률은 그 매도의 평단 대비 수익률이에요.</p>
         </>
       )}
+      <Reviews s={reviewed.s} items={reviewed.items} label={range.label} />
     </>
   );
 }

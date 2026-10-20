@@ -118,3 +118,21 @@ def earnings_eve_message(day: date, e: EarningsEve) -> str:
     lines.append(" · ".join(plan) if plan else "손절·익절 알림이 없어요")
     lines.append("실적 뒤에는 가격이 크게 움직일 수 있어요. 들고 갈지, 줄일지 계획을 한 번 점검해 보세요.")
     return "\n".join(lines)
+
+
+def review_message(book) -> str:
+    """전량 매도한 다음 날 저녁, 사후강평을 쓰라고 알려 줍니다. book은 books.ClosedBook입니다."""
+    days = f"{book.start.month}.{book.start.day:02d} → " if book.start else "기록 전 → "
+    days += f"{book.end.month}.{book.end.day:02d}"
+    if book.start:
+        days += f" · {(book.end - book.start).days}일"
+    result = f"수익률 {_pct(book.return_pct)}" if book.return_pct is not None else "수익률은 기록 전에 산 주식이 있어 못 구했어요"
+    if book.realized is not None:
+        sign = "+" if book.realized > 0 else "-" if book.realized < 0 else ""
+        result += f" ({sign}{_price(book.market, abs(book.realized))})"
+    return "\n".join([
+        f"[LODESTAR] 다 팔았어요 · {book.name}",
+        f"{days} · {result}",
+        "첫 매수부터 전량 매도까지, 일기장 한 권이 끝났어요. 기억이 생생할 때 사후강평을 써 보세요.",
+        "LODESTAR → 매매일지 → 일기장",
+    ])
