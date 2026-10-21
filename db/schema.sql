@@ -78,6 +78,8 @@ CREATE TABLE sell_entries (
   followed_rules     BOOLEAN NOT NULL,
   macro_snapshot_id  INT REFERENCES macro_snapshots(id),
   fill_key           TEXT,
+  context            JSONB,  -- 매도일 기준 매크로 값(워커가 채움)
+  chart_png          TEXT,   -- 매도일까지의 차트 그림(data:image/png)
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

@@ -6,7 +6,7 @@ import { loadBook } from "@/lib/booksData";
 import Principles from "../../Principles";
 import BuyForm from "../../buy/BuyForm";
 import SellForm from "../../[id]/SellForm";
-import BuyChartShot, { type ShotBar } from "@/app/_components/BuyChartShot";
+import ChartShot, { type ShotBar } from "@/app/_components/ChartShot";
 import MacroCard, { SNAPSHOT_COLUMNS, type Snapshot } from "@/app/macro/MacroCard";
 import { fixedPct, usd, won } from "@/lib/format";
 import { rateGap } from "@/lib/macro";
@@ -74,7 +74,7 @@ export default async function EntryPage({ searchParams }: { searchParams: Promis
           <h1>{name} <span className="muted">{day} · {page?.label ?? (side === "buy" ? "매수" : "매도")}</span></h1>
           <Link className="button" href={editHref}>고치기</Link>
         </div>
-        {side === "buy" ? <BuyView id={entry.id} market={market} ticker={ticker} /> : <SellView id={entry.id} market={market} />}
+        {side === "buy" ? <BuyView id={entry.id} market={market} ticker={ticker} /> : <SellView id={entry.id} market={market} ticker={ticker} />}
       </>
     );
   }
@@ -126,6 +126,17 @@ function MacroThen({ context, day }: { context: Context; day: string }) {
   );
 }
 
+// 그날까지 180일 일봉. 그림을 이미 저장했으면 안 읽어요.
+async function barsUntil(ticker: string, day: string): Promise<ShotBar[]> {
+  const rows = await query<{ day: string; open: string | null; high: string | null; low: string | null; close: string }>(
+    `SELECT to_char(day, 'YYYY-MM-DD') AS day, open, high, low, close FROM price_history
+     WHERE ticker = $1 AND day <= $2 AND day > $2::date - 180 ORDER BY day`, [ticker, day]);
+  return rows.map((b) => {
+    const c = Number(b.close);
+    return { day: b.day, open: Number(b.open ?? c), high: Number(b.high ?? c), low: Number(b.low ?? c), close: c };
+  });
+}
+
 type BuyRow = {
   day: string; quantity: string; price: string; reason: string; scenario: string; risk_1: string; risk_2: string; risk_3: string;
   weight_pct: string; stop_price: string; target_price: string; target_basis: string; macro_snapshot_id: number | null;
@@ -137,12 +148,7 @@ async function BuyView({ id, market, ticker }: { id: number; market: "KR" | "US"
     `SELECT b.*, to_char(b.trade_date, 'YYYY-MM-DD') AS day FROM buy_entries b WHERE b.id = $1`, [id]);
   if (!r) notFound();
   const money = (v: string | number) => (market === "US" ? usd(v) : `${won(v)}원`);
-  const bars = r.chart_png ? [] : (await query<{ day: string; open: string | null; high: string | null; low: string | null; close: string }>(
-    `SELECT to_char(day, 'YYYY-MM-DD') AS day, open, high, low, close FROM price_history
-     WHERE ticker = $1 AND day <= $2 AND day > $2::date - 180 ORDER BY day`, [ticker, r.day])).map((b): ShotBar => {
-    const c = Number(b.close);
-    return { day: b.day, open: Number(b.open ?? c), high: Number(b.high ?? c), low: Number(b.low ?? c), close: c };
-  });
+  const bars = r.chart_png ? [] : await barsUntil(ticker, r.day);
   const [memo] = r.macro_snapshot_id
     ? await query<Snapshot>(`SELECT ${SNAPSHOT_COLUMNS} FROM macro_snapshots WHERE id = $1`, [r.macro_snapshot_id])
     : [];
@@ -163,8 +169,8 @@ async function BuyView({ id, market, ticker }: { id: number; market: "KR" | "US"
       </section>
       <section className="panel">
         <div className="panel-title">그때 차트 <span className="muted">{r.day}까지 일봉</span></div>
-        <BuyChartShot entryId={id} bars={bars} buyDay={r.day} buyPrice={Number(r.price)} stop={Number(r.stop_price)}
-          target={Number(r.target_price)} saved={r.chart_png} />
+        <ChartShot side="buy" entryId={id} bars={bars} day={r.day} price={Number(r.price)} saved={r.chart_png}
+          lines={[{ price: Number(r.stop_price), kind: "down", title: "손절" }, { price: Number(r.target_price), kind: "up", title: "익절" }]} />
       </section>
       <section className="panel">
         <div className="panel-title">그때 매크로 <span className="muted">{r.day} 기준</span></div>
@@ -177,12 +183,14 @@ async function BuyView({ id, market, ticker }: { id: number; market: "KR" | "US"
 
 const SELL_REASON: Record<string, string> = { stop: "손절", target: "익절", other: "다른 사유" };
 
-async function SellView({ id, market }: { id: number; market: "KR" | "US" }) {
+async function SellView({ id, market, ticker }: { id: number; market: "KR" | "US"; ticker: string }) {
   const [r] = await query<{ day: string; quantity: string; price: string; return_pct: string | null; holding_days: number;
-    reason_type: string; reason_detail: string; lesson: string; followed_rules: boolean }>(
+    reason_type: string; reason_detail: string; lesson: string; followed_rules: boolean; avg_buy_price: string | null;
+    context: Context; chart_png: string | null }>(
     "SELECT s.*, to_char(s.trade_date, 'YYYY-MM-DD') AS day FROM sell_entries s WHERE s.id = $1", [id]);
   if (!r) notFound();
   const money = (v: string | number) => (market === "US" ? usd(v) : `${won(v)}원`);
+  const bars = r.chart_png ? [] : await barsUntil(ticker, r.day);
   return (
     <div className="entry-view">
       <div className="stats">
@@ -194,6 +202,15 @@ async function SellView({ id, market }: { id: number; market: "KR" | "US" }) {
         {r.reason_detail && <><div className="panel-title">판 이유</div><p className="entry-text">{r.reason_detail}</p></>}
         <div className="panel-title">배운 것</div>
         <p className="entry-text">{r.lesson || "-"}</p>
+      </section>
+      <section className="panel">
+        <div className="panel-title">그때 차트 <span className="muted">{r.day}까지 일봉</span></div>
+        <ChartShot side="sell" entryId={id} bars={bars} day={r.day} price={Number(r.price)} saved={r.chart_png}
+          lines={r.avg_buy_price ? [{ price: Number(r.avg_buy_price), kind: "muted", title: "평단" }] : []} />
+      </section>
+      <section className="panel">
+        <div className="panel-title">그때 매크로 <span className="muted">{r.day} 기준</span></div>
+        <MacroThen context={r.context} day={r.day} />
       </section>
     </div>
   );

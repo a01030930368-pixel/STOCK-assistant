@@ -207,7 +207,7 @@ def main() -> None:
     threading.Thread(target=alert_loop, args=(cfg, kiwoom, isa), name="alerts", daemon=True).start()
     jobs = [
         ("종목 정보 수집", research.run), ("관심종목 갱신", watching.run), ("체결 내역 갱신", trades.run),
-        ("ISA 체결 갱신", isa_trades.run), ("매수 당시 기록", buy_context.run),
+        ("ISA 체결 갱신", isa_trades.run), ("매매 당시 기록", buy_context.run),
         ("검색기 갱신", screener.run), ("분봉 갱신", minutes.run), ("AI 한마디", comments.run), ("일정 알림", notices.run),
     ]
     while True:

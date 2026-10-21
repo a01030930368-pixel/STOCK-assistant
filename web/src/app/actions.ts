@@ -311,7 +311,9 @@ async function updateSell(id: number, input: SellInput, bookKey: string, values:
   const [row] = await query<{ position_id: number; avg_buy_price: string }>(
     `UPDATE sell_entries SET holding_days = GREATEST(0, holding_days + ($2::date - trade_date)), trade_date = $2, quantity = $3, price = $4,
        return_pct = ROUND(($4 - avg_buy_price) / NULLIF(avg_buy_price, 0) * 100, 2), reason_type = $5, reason_detail = $6, lesson = $7,
-       followed_rules = $8
+       followed_rules = $8,
+       chart_png = CASE WHEN trade_date = $2 AND price = $4 THEN chart_png END,
+       context = CASE WHEN trade_date = $2 THEN context END
      WHERE id = $1 RETURNING position_id, avg_buy_price`,
     [id, input.tradeDate, input.quantity, input.price, input.reasonType, input.reasonDetail, input.lesson, input.followed === "yes"],
   );
@@ -525,9 +527,10 @@ export async function saveLimits(form: FormData) {
 }
 
 // 매수 일지에 그날까지의 차트 그림을 한 번만 저장합니다(이미 있으면 그대로).
-export async function saveBuyChart(id: number, dataUrl: string) {
+export async function saveChart(side: "buy" | "sell", id: number, dataUrl: string) {
   if (!Number.isInteger(id) || !dataUrl.startsWith("data:image/png;base64,") || dataUrl.length > 1_500_000) return;
-  await query("UPDATE buy_entries SET chart_png = $2 WHERE id = $1 AND chart_png IS NULL", [id, dataUrl]);
+  const table = side === "sell" ? "sell_entries" : "buy_entries";
+  await query(`UPDATE ${table} SET chart_png = $2 WHERE id = $1 AND chart_png IS NULL`, [id, dataUrl]);
 }
 
 // ISA 유형(비과세 한도)과 개설일(만기 계산)
