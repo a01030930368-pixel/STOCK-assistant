@@ -323,6 +323,8 @@ MIGRATIONS = [
       seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS stock_disclosures_ticker ON stock_disclosures (ticker, day DESC)",
+    # 중요한 공시를 AI가 본문을 읽고 숫자를 넣어 정리한 한 줄
+    "ALTER TABLE stock_disclosures ADD COLUMN IF NOT EXISTS summary TEXT",
     # 날마다 원/달러 기준 환율(한국은행). 미국 주식을 산 날 환율을 찾는 데 써요.
     """CREATE TABLE IF NOT EXISTS fx_daily (
       day   DATE PRIMARY KEY,
@@ -662,12 +664,13 @@ def held_quantities(conn: psycopg.Connection) -> list[tuple[str, str, str, Decim
     return conn.execute("SELECT ticker, name, market, quantity FROM holdings WHERE quantity > 0 ORDER BY ticker").fetchall()
 
 
-def held_kr_stocks(conn: psycopg.Connection) -> list[tuple[str, str]]:
-    """공시를 볼 국내 종목: 일반 계좌와 ISA에 들고 있는 것. (ticker, name)"""
+def disclosure_stocks(conn: psycopg.Connection) -> list[tuple[str, str, bool]]:
+    """공시를 볼 국내 종목: 일반 계좌·ISA에 들고 있는 것과 국내 관심종목. (ticker, name, 들고 있나)"""
     return conn.execute(
-        """SELECT ticker, max(name) FROM (
-             SELECT ticker, name FROM holdings WHERE market = 'KR' AND quantity > 0
-             UNION ALL SELECT ticker, name FROM isa_holdings WHERE quantity > 0
+        """SELECT ticker, max(name), bool_or(held) FROM (
+             SELECT ticker, name, true AS held FROM holdings WHERE market = 'KR' AND quantity > 0
+             UNION ALL SELECT ticker, name, true FROM isa_holdings WHERE quantity > 0
+             UNION ALL SELECT ticker, name, false FROM watchlist WHERE market = 'KR'
            ) h GROUP BY ticker ORDER BY ticker"""
     ).fetchall()
 
@@ -682,6 +685,15 @@ def save_disclosures(conn: psycopg.Connection, rows) -> None:
             (d.rcept_no, d.ticker, d.name, d.title, d.filer, k.key, k.important, d.day),
         )
     conn.execute("DELETE FROM stock_disclosures WHERE day < now() - interval '400 days'")
+
+
+def disclosure_summary(conn: psycopg.Connection, rcept_no: str) -> str:
+    row = conn.execute("SELECT summary FROM stock_disclosures WHERE rcept_no = %s", (rcept_no,)).fetchone()
+    return (row[0] or "") if row else ""
+
+
+def save_disclosure_summary(conn: psycopg.Connection, rcept_no: str, summary: str) -> None:
+    conn.execute("UPDATE stock_disclosures SET summary = %s WHERE rcept_no = %s", (summary, rcept_no))
 
 
 def fx_range(conn: psycopg.Connection):
