@@ -605,3 +605,4 @@ button:disabled { opacity: 0.6; cursor: default; filter: none; }
   .fx-rate { margin-left: 0; text-align: left; }
   .fx-big { font-size: 1.35rem; }
 }
+.disc .why.ai-line { color: var(--sub); }

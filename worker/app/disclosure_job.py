@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import psycopg
 
-from . import db, disclosures, telegram
+from . import ai, db, disclosures, research, telegram
 from .config import Config
 from .market import KST
 
@@ -23,6 +23,7 @@ class DisclosureJob:
         self.http = http
         self.codes = codes  # 종목코드 -> DART 고유번호를 돌려주는 함수(종목 정보 수집이 하루 한 번 받아 둠)
         self.last: datetime | None = None
+        self.key, self.model, self.ask = ai.text_asker(cfg)
 
     def run(self, conn: psycopg.Connection, now: datetime | None = None) -> None:
         now = now or datetime.now(timezone.utc)
@@ -64,5 +65,22 @@ class DisclosureJob:
         key = f"disclosure:{d.rcept_no}"
         if db.notice_sent(conn, key):
             return
-        if telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, disclosures.message(d, held), self.http):
+        summary = self._summary(conn, d)
+        if telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, disclosures.message(d, held, summary), self.http):
             db.mark_notice(conn, key)
+
+    def _summary(self, conn: psycopg.Connection, d: disclosures.Disclosure) -> str:
+        """AI가 본문을 읽고 숫자를 넣어 한 줄로 정리해요. 키가 없거나 실패하면 빈 글(종류 풀이로 대신)."""
+        if not self.ask:
+            return ""
+        if saved := db.disclosure_summary(conn, d.rcept_no):
+            return saved
+        try:
+            text = disclosures.plain_text(research.dart_document_text(d.rcept_no, self.cfg.dart_api_key, self.http))
+            line = disclosures.clean_summary(self.ask(disclosures.SUMMARY_SYSTEM, disclosures.summary_prompt(d, text), self.key, self.model, self.http, 400))
+        except Exception as e:
+            log.warning("%s 공시 요약 실패: %s", d.name, e)
+            return ""
+        if line:
+            db.save_disclosure_summary(conn, d.rcept_no, line)
+        return line

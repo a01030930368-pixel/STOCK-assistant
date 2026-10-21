@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 type Stock = { ticker: string; name: string; market: string; position_id: number | null; watched: boolean; cur: string | null };
 type News = { url: string; title: string; title_ko: string | null; source: string; published_at: Date; summary: string; summary_ko: string | null };
 type Earnings = { period: string; title: string; url: string; reported_day: string | null; eps_actual: string | null; eps_estimate: string | null };
-type Filing = { rcept_no: string; title: string; kind: string; important: boolean; day: string; seen_at: Date };
+type Filing = { rcept_no: string; title: string; kind: string; important: boolean; day: string; seen_at: Date; summary: string | null };
 type Peer = { peer_ticker: string; peer_name: string; peer_market: string };
 
 // 워커가 처음 돌기 전의 예전 DB에는 종목 정보 테이블이 없을 수 있습니다.
@@ -75,11 +75,12 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
     [ticker],
   );
   // 공시 표는 워커 업데이트 뒤에 생겨요.
-  const filings = stock.market === "KR" ? await safe<Filing>(
-    `SELECT rcept_no, title, kind, important, to_char(day, 'YYYY-MM-DD') AS day, seen_at FROM stock_disclosures
-     WHERE ticker = $1 ORDER BY day DESC, rcept_no DESC LIMIT 20`,
-    [ticker],
-  ) : [];
+  const filingSql = (summary: string) => `SELECT rcept_no, title, kind, important, to_char(day, 'YYYY-MM-DD') AS day, seen_at, ${summary} AS summary
+     FROM stock_disclosures WHERE ticker = $1 ORDER BY day DESC, rcept_no DESC LIMIT 20`;
+  const filings = stock.market === "KR"
+    // 요약 칸은 워커 업데이트 뒤에 생겨요.
+    ? await query<Filing>(filingSql("summary"), [ticker]).catch(() => safe<Filing>(filingSql("NULL"), [ticker]))
+    : [];
   const financials = await safe<FinancialRow>("SELECT * FROM stock_financials WHERE ticker = $1 ORDER BY period DESC", [ticker]);
   const peers = await safe<Peer>("SELECT peer_ticker, peer_name, peer_market FROM stock_peers WHERE ticker = $1 ORDER BY peer_name", [ticker]);
   const peerLatest = await safe<FinancialRow>(
@@ -218,7 +219,7 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
             </p>
           ) : (
             <div className="panel">
-              <div className="muted" style={{ fontSize: "0.8rem" }}>중요한 공시는 텔레그램으로 바로 알려 드려요. 지분·기타 공시는 여기에만 보여요.</div>
+              <div className="muted" style={{ fontSize: "0.8rem" }}>중요한 공시는 텔레그램으로 바로 알려 드려요{process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY ? " (🤖는 AI가 본문을 읽고 정리한 한 줄)" : ""}. 지분·기타 공시는 여기에만 보여요.</div>
               <ul className="disc">
                 {filings.map((f) => {
                   const k = kindOf(f.kind);
@@ -228,7 +229,7 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
                       <div className="what">
                         <span className={`badge ${k.tone}`}>{k.label}</span>
                         <a href={dartUrl(f.rcept_no)} target="_blank" rel="noopener noreferrer">{f.title}</a>
-                        {f.important && k.explain && <div className="why">{k.explain}</div>}
+                        {f.summary ? <div className="why ai-line">🤖 {f.summary}</div> : f.important && k.explain && <div className="why">{k.explain}</div>}
                       </div>
                       <a className="muted" href={dartUrl(f.rcept_no)} target="_blank" rel="noopener noreferrer">DART ›</a>
                     </li>

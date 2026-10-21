@@ -323,6 +323,8 @@ MIGRATIONS = [
       seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS stock_disclosures_ticker ON stock_disclosures (ticker, day DESC)",
+    # 중요한 공시를 AI가 본문을 읽고 숫자를 넣어 정리한 한 줄
+    "ALTER TABLE stock_disclosures ADD COLUMN IF NOT EXISTS summary TEXT",
     # 날마다 원/달러 기준 환율(한국은행). 미국 주식을 산 날 환율을 찾는 데 써요.
     """CREATE TABLE IF NOT EXISTS fx_daily (
       day   DATE PRIMARY KEY,
@@ -683,6 +685,15 @@ def save_disclosures(conn: psycopg.Connection, rows) -> None:
             (d.rcept_no, d.ticker, d.name, d.title, d.filer, k.key, k.important, d.day),
         )
     conn.execute("DELETE FROM stock_disclosures WHERE day < now() - interval '400 days'")
+
+
+def disclosure_summary(conn: psycopg.Connection, rcept_no: str) -> str:
+    row = conn.execute("SELECT summary FROM stock_disclosures WHERE rcept_no = %s", (rcept_no,)).fetchone()
+    return (row[0] or "") if row else ""
+
+
+def save_disclosure_summary(conn: psycopg.Connection, rcept_no: str, summary: str) -> None:
+    conn.execute("UPDATE stock_disclosures SET summary = %s WHERE rcept_no = %s", (summary, rcept_no))
 
 
 def fx_range(conn: psycopg.Connection):

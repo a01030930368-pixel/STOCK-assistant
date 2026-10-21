@@ -451,7 +451,8 @@ CREATE TABLE stock_disclosures (
   kind       TEXT NOT NULL,
   important  BOOLEAN NOT NULL DEFAULT false,
   day        DATE NOT NULL,
-  seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  summary    TEXT  -- 중요한 공시를 AI가 숫자를 넣어 정리한 한 줄
 );
 CREATE INDEX stock_disclosures_ticker ON stock_disclosures (ticker, day DESC);
 

@@ -35,6 +35,36 @@ class Cfg:
     dart_api_key = "k"
     telegram_bot_token = "t"
     telegram_chat_id = "c"
+    gemini_api_key = ""
+    anthropic_api_key = ""
+    ai_model = ""
+
+
+def test_plain_text_and_summary_line():
+    assert disclosures.plain_text("<BODY><P>계약금액 &amp; 3,200억원</P><TD>매출액 대비 4.8%</TD></BODY>") == "계약금액 & 3,200억원 매출액 대비 4.8%"
+    assert disclosures.clean_summary('\n"북미 고객과 3,200억원 공급 계약을 맺었어요."\n두 번째 줄') == "북미 고객과 3,200억원 공급 계약을 맺었어요."
+
+
+def test_alert_uses_ai_summary_and_keeps_it(monkeypatch):
+    summaries, sent = {}, []
+    monkeypatch.setattr("app.db.notice_sent", lambda conn, k: False)
+    monkeypatch.setattr("app.db.mark_notice", lambda conn, k: None)
+    monkeypatch.setattr("app.db.disclosure_summary", lambda conn, no: summaries.get(no, ""))
+    monkeypatch.setattr("app.db.save_disclosure_summary", lambda conn, no, s: summaries.__setitem__(no, s))
+    monkeypatch.setattr("app.research.dart_document_text", lambda no, key, http: "<P>계약금액 3,200억원, 매출액 대비 4.8%</P>")
+    monkeypatch.setattr("app.telegram.deliver", lambda token, chat, text, http: sent.append(text) or True)
+    cfg = Cfg()
+    cfg.gemini_api_key = "g"
+    job = DisclosureJob(cfg, None, lambda: {})
+    prompts = []
+    job.ask = lambda system, prompt, key, model, http, n: prompts.append(prompt) or "3,200억원 공급 계약, 매출의 4.8%예요."
+    d = Disclosure("7", "000660", "SK하이닉스", "단일판매ㆍ공급계약체결", "", date(2026, 10, 21))
+    job._alert(object(), d, True)
+    assert "계약금액 3,200억원" in prompts[0] and "🤖 3,200억원 공급 계약, 매출의 4.8%예요." in sent[0]
+    assert "큰 계약을 맺었어요" not in sent[0] and summaries["7"]
+    job.ask = lambda *a: (_ for _ in ()).throw(RuntimeError("busy"))
+    job._alert(object(), Disclosure("8", "000660", "SK하이닉스", "현금ㆍ현물배당결정", "", date(2026, 10, 21)), True)
+    assert "배당을 정했어요" in sent[1]  # AI가 실패하면 종류 풀이로 보내요
 
 
 def test_job_seeds_quietly_then_alerts_new_important_once(monkeypatch):
