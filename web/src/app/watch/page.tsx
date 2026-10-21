@@ -46,6 +46,7 @@ export default async function WatchPage() {
     <>
       <div className="page-head">
         <h1>관심종목</h1>
+        <Link href="/compare" className="chip-btn">⇄ 종목 비교</Link>
         <span className="muted">안 가진 종목도 정한 가격에 닿으면 텔레그램으로 알려 드려요. 점선이 목표가예요.</span>
       </div>
 

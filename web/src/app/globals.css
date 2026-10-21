@@ -775,3 +775,80 @@ table.heat td.name { position: sticky; left: 0; background: var(--surface); z-in
   table.heat th, table.heat td { padding: 5px 6px; font-size: 0.8rem; }
   table.heat .c { min-width: 54px; }
 }
+
+/* 수급 */
+.flow { padding: 14px; }
+.flow-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.flow-head .segment.small { margin: 0 0 0 auto; }
+.flow-head .segment button { flex: none; }
+.flow-at { font-size: 0.76rem; }
+.flow-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+.flow-chip { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; border: 1px solid var(--line); border-radius: 9px; padding: 4px 10px; background: var(--surface-2); }
+.flow-chip .up { color: var(--up); } .flow-chip .down { color: var(--down); }
+.flow-svg { display: block; }
+.flow-zero { stroke: var(--line); }
+.flow-price { fill: none; stroke: #4a4740; stroke-width: 2; stroke-dasharray: 4 4; }
+.flow-label { font-size: 13px; font-weight: 600; }
+.flow-tick { fill: var(--muted); font-size: 11.5px; }
+.flow-empty { padding: 24px 4px; text-align: center; }
+.flow-themes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-2); font-size: 0.8rem; }
+.flow-theme { border: 1px solid var(--line); border-radius: 8px; padding: 3px 9px; color: var(--fg); }
+.flow-theme:hover { text-decoration: none; border-color: #4a3f28; }
+.flow-theme .up { color: var(--up); } .flow-theme .down { color: var(--down); }
+@media (max-width: 640px) {
+  .flow-head .segment.small { margin-left: 0; width: 100%; }
+  .flow-head .segment.small button { flex: 1; }
+}
+.tile-sub { font-size: 0.74rem; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.sector-table .more { display: block; margin: 8px auto 4px; }
+@media (max-width: 640px) { .theme-table .leaders { display: none; } }
+
+/* 수익률 선 (비교·복기) */
+.rchart { margin-top: 10px; }
+.rchart-box { position: relative; }
+.rchart-box svg { display: block; touch-action: pan-y; }
+.rchart-cross { stroke: var(--muted); stroke-dasharray: 3 3; }
+.rchart-mark { font-size: 11px; font-weight: 700; }
+.rchart-tip { position: absolute; top: 8px; display: grid; gap: 3px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 0.8rem; pointer-events: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rchart-tip i { display: inline-block; width: 8px; height: 8px; border-radius: 4px; margin-right: 6px; }
+a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-decoration: none; }
+
+/* 종목 비교 */
+.compare-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.compare-bar .segment { margin-left: auto; }
+.compare-pick { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 5px 6px 5px 12px; font-weight: 600; font-size: 0.92rem; }
+.compare-pick i, .compare-table .dot { display: inline-block; width: 10px; height: 10px; border-radius: 5px; }
+.compare-table .dot { margin-right: 6px; }
+.compare-pick a { color: var(--fg); }
+.compare-pick button { background: none; border: 0; color: var(--muted); padding: 2px 6px; min-height: 0; font-size: 0.8rem; }
+.compare-add { display: flex; gap: 6px; }
+.compare-add input { width: 220px; }
+.compare-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; align-items: start; }
+.compare-grid.wide { grid-template-columns: 1fr; }
+.compare-table table { width: 100%; margin-top: 6px; }
+.compare-table td, .compare-table th { white-space: nowrap; }
+.compare-table .lead { font-size: 0.7rem; color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 1px 5px; margin-left: 5px; font-weight: 600; }
+.compare-empty p { margin: 0 0 12px; color: var(--sub); }
+.compare-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.compare-quick button { background: var(--surface-2); border: 1px solid var(--line); color: var(--sub); border-radius: 999px; padding: 5px 12px; font-size: 0.85rem; }
+@media (max-width: 760px) {
+  .compare-grid { grid-template-columns: 1fr; }
+  .compare-bar .segment { margin-left: 0; width: 100%; }
+  .compare-bar .segment button { flex: 1; }
+  .compare-add, .compare-add input { width: 100%; flex: 1; }
+  .compare-table { overflow-x: auto; }
+}
+
+/* 매매 복기 */
+.replay-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.replay-pick { max-width: 100%; font-weight: 600; }
+.replay-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.replay-kpis .stat { display: grid; gap: 4px; }
+.replay-kpis .stat-value { font-size: 1.6rem; }
+.replay-kpis .muted { font-size: 0.8rem; }
+.replay-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin-top: 14px; }
+.replay-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.replay-card.early { border-color: #4a3f28; }
+.replay-card > span { font-size: 0.8rem; }
+.replay-card p { margin: 4px 0 0; font-size: 0.95rem; }
+@media (max-width: 640px) { .replay-kpis { grid-template-columns: 1fr; } }

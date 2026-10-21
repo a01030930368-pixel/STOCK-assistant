@@ -610,3 +610,17 @@ export async function askMistakes() {
   );
   revalidatePath("/journal/mistakes");
 }
+
+// 비교·복기 화면에서 일봉이 없는 종목을 워커에게 받아 달라고 남겨요(이미 남긴 요청과 합쳐서 최대 8개).
+export async function askHistory(items: [string, "KR" | "US"][]) {
+  const clean = items.filter(([t, m]) => /^[0-9A-Z.\-]{1,12}$/.test(t) && (m === "KR" || m === "US")).slice(0, 8);
+  if (clean.length === 0) return;
+  const [row] = await query<{ value: { tickers?: [string, string][] } | null }>("SELECT value FROM app_settings WHERE key = 'history_request'").catch(() => []);
+  const merged = [...(row?.value?.tickers ?? [])];
+  for (const it of clean) if (!merged.some(([t]) => t === it[0])) merged.push(it);
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ('history_request', $1::jsonb)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify({ tickers: merged.slice(0, 8), at: new Date().toISOString() })],
+  );
+}

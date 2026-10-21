@@ -380,6 +380,35 @@ MIGRATIONS = [
       close   NUMERIC(18, 4) NOT NULL,
       PRIMARY KEY (market, code, day)
     )""",
+    # 투자자별 수급(국내). 금액은 키움 단위 그대로(백만원)
+    """CREATE TABLE IF NOT EXISTS investor_flows (
+      ticker           TEXT NOT NULL,
+      day              DATE NOT NULL,
+      close            NUMERIC(18, 2) NOT NULL,
+      foreign_net      NUMERIC(20, 0) NOT NULL,
+      institution_net  NUMERIC(20, 0) NOT NULL,
+      individual_net   NUMERIC(20, 0) NOT NULL,
+      PRIMARY KEY (ticker, day)
+    )""",
+    # 테마 동향(국내): 전체 테마와 내 종목이 든 테마
+    """CREATE TABLE IF NOT EXISTS theme_index (
+      code        TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      stocks      INTEGER NOT NULL,
+      change_pct  NUMERIC(8, 2) NOT NULL,
+      week_pct    NUMERIC(8, 2),
+      rising      INTEGER NOT NULL,
+      falling     INTEGER NOT NULL,
+      leader      TEXT NOT NULL DEFAULT '',
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    """CREATE TABLE IF NOT EXISTS stock_themes (
+      ticker      TEXT NOT NULL,
+      code        TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (ticker, code)
+    )""",
 ]
 
 
@@ -1280,3 +1309,56 @@ def save_sector_daily(conn: psycopg.Connection, market: str, code: str, closes: 
                ON CONFLICT (market, code, day) DO UPDATE SET close = EXCLUDED.close""",
             [(market, code, d, c) for d, c in closes],
         )
+
+
+def flow_targets(conn: psycopg.Connection) -> list[tuple[str, str]]:
+    """수급·테마를 볼 국내 종목: 보유(ISA 포함)와 관심종목. (ticker, name)"""
+    return conn.execute(
+        """SELECT ticker, MIN(name) FROM (
+             SELECT ticker, name FROM holdings WHERE quantity > 0 AND market = 'KR'
+             UNION SELECT ticker, name FROM isa_holdings WHERE quantity > 0
+             UNION SELECT ticker, name FROM watchlist WHERE market = 'KR') s
+           WHERE ticker ~ '^[0-9A-Z]{6}$' GROUP BY ticker ORDER BY ticker"""
+    ).fetchall()
+
+
+def save_flows(conn: psycopg.Connection, ticker: str, flows: list) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO investor_flows (ticker, day, close, foreign_net, institution_net, individual_net)
+               VALUES (%s, %s, %s, %s, %s, %s)
+               ON CONFLICT (ticker, day) DO UPDATE SET close = EXCLUDED.close, foreign_net = EXCLUDED.foreign_net,
+                 institution_net = EXCLUDED.institution_net, individual_net = EXCLUDED.individual_net""",
+            [(ticker, f.day, f.close, f.foreign, f.institution, f.individual) for f in flows],
+        )
+
+
+def save_themes(conn: psycopg.Connection, themes: list) -> None:
+    """전체 테마를 새로 넣어요. 이번에 없는 테마는 지워요."""
+    for t in themes:
+        conn.execute(
+            """INSERT INTO theme_index (code, name, stocks, change_pct, week_pct, rising, falling, leader, updated_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+               ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, stocks = EXCLUDED.stocks, change_pct = EXCLUDED.change_pct,
+                 week_pct = EXCLUDED.week_pct, rising = EXCLUDED.rising, falling = EXCLUDED.falling, leader = EXCLUDED.leader, updated_at = now()""",
+            (t.code, t.name, t.stocks, t.change_pct, t.week_pct, t.rising, t.falling, t.leader),
+        )
+    if themes:
+        conn.execute("DELETE FROM theme_index WHERE NOT (code = ANY(%s))", ([t.code for t in themes],))
+
+
+def save_stock_themes(conn: psycopg.Connection, ticker: str, themes: list) -> None:
+    conn.execute("DELETE FROM stock_themes WHERE ticker = %s", (ticker,))
+    for t in themes:
+        conn.execute("INSERT INTO stock_themes (ticker, code, name) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING", (ticker, t.code, t.name))
+
+
+def traded_unwatched(conn: psycopg.Connection) -> list[tuple[str, str]]:
+    """최근 1년 넘게 안 지난 체결이 있는데 지금은 일봉을 모으지 않는 종목(매매 복기용). (ticker, market)"""
+    return conn.execute(
+        """SELECT DISTINCT ticker, market FROM trade_fills WHERE trade_date >= current_date - 400
+           EXCEPT SELECT ticker, market FROM holdings
+           EXCEPT SELECT ticker, 'KR' FROM isa_holdings
+           EXCEPT SELECT ticker, market FROM watchlist
+           ORDER BY 1"""
+    ).fetchall()

@@ -14,7 +14,7 @@ const ICON = {
 const TABS = [
   { href: "/", label: "포트폴리오", icon: ICON.home, match: (p: string) => p === "/" || p.startsWith("/stock") || p.startsWith("/weights") },
   { href: "/journal", label: "매매일지", icon: ICON.journal, match: (p: string) => p.startsWith("/journal") },
-  { href: "/watch", label: "관심종목", icon: ICON.star, match: (p: string) => p.startsWith("/watch") },
+  { href: "/watch", label: "관심종목", icon: ICON.star, match: (p: string) => p.startsWith("/watch") || p.startsWith("/compare") },
   { href: "/screener", label: "검색기", icon: ICON.search, match: (p: string) => p.startsWith("/screener") },
   { href: "/calendar", label: "일정", icon: ICON.calendar, match: (p: string) => p.startsWith("/calendar") },
   { href: "/macro", label: "매크로", icon: ICON.macro, match: (p: string) => p.startsWith("/macro") },
