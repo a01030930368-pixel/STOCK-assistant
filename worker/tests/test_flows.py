@@ -29,3 +29,34 @@ def test_parse_themes():
     assert (t.code, t.name, t.stocks, t.change_pct, t.week_pct, t.rising, t.falling, t.leader) == ("319", "HBM", 22, Decimal("4.80"), Decimal("9.60"), 18, 3, "SK하이닉스")
     with pytest.raises(ValueError):
         flows.parse_themes([{"cd": "1"}])
+
+
+def test_flow_job_fetches_once_after_each_close(monkeypatch):
+    from datetime import datetime, timezone
+    from app import flow_job
+
+    calls = []
+    monkeypatch.setattr(flow_job.db, "save_flows", lambda conn, t, rows: calls.append(t))
+    monkeypatch.setattr(flow_job.db, "set_setting", lambda *a: None)
+
+    class Kiwoom:
+        fail = False
+
+        def investor_flows(self, ticker, day):
+            if self.fail:
+                raise RuntimeError("막힘")
+            return []
+
+    k = Kiwoom()
+    job = flow_job.FlowJob(k)
+    utc = lambda *a: datetime(*a, tzinfo=timezone.utc)
+    targets = [("005930", "삼성전자")]
+    job._flows(None, utc(2026, 10, 19, 15, 0), False, targets)   # 월 자정(KST) 처음 한 번
+    job._flows(None, utc(2026, 10, 19, 15, 5), False, targets)   # 장 전에는 다시 안 받음
+    job._flows(None, utc(2026, 10, 20, 7, 0), False, targets)  # 화 16:00 KST 마감 뒤 → 받음
+    job._flows(None, utc(2026, 10, 20, 7, 30), False, targets)   # 같은 마감은 한 번만
+    k.fail = True
+    job._flows(None, utc(2026, 10, 21, 7, 0), False, targets)    # 수 마감 뒤 실패 → 표시 안 함
+    k.fail = False
+    job._flows(None, utc(2026, 10, 21, 7, 20), False, targets)   # 15분 뒤 다시 받음
+    assert len(calls) == 3

@@ -38,7 +38,19 @@ export type Limits = { sectorMax: number; stockMax: number; cashMin: number };
 export function breaches(w: ReturnType<typeof weights>, limits: Limits): string[] {
   const out: string[] = [];
   for (const s of w.sectors) if (s.key !== CASH && s.key !== UNKNOWN && s.key !== ETF && s.pct > limits.sectorMax) out.push(`${s.label} 업종이 ${s.pct}%로 한도 ${limits.sectorMax}%를 넘었어요.`);
-  for (const s of w.stocks) if (s.market !== "CASH" && !s.etf && s.pct > limits.stockMax) out.push(`${s.label} 비중이 ${s.pct}%로 한 종목 한도 ${limits.stockMax}%를 넘었어요.`);
+  // 같은 종목을 일반 계좌와 ISA에 나눠 들고 있으면 합쳐서 봐요.
+  const byTicker = new Map<string, { label: string; amount: number; both: boolean }>();
+  for (const s of w.stocks) {
+    if (s.market === "CASH" || s.etf) continue;
+    const t = s.key.replace(/^ISA:/, "");
+    const cur = byTicker.get(t);
+    if (cur) { cur.amount += s.amount; cur.both = true; if (s.market !== "ISA") cur.label = s.label; }
+    else byTicker.set(t, { label: s.label, amount: s.amount, both: false });
+  }
+  for (const [, s] of [...byTicker].sort((a, b) => b[1].amount - a[1].amount)) {
+    const p = pct(s.amount, w.total);
+    if (p > limits.stockMax) out.push(`${s.both ? `${s.label.replace(/ \(ISA\)$/, "")} (일반+ISA)` : s.label} 비중이 ${p}%로 한 종목 한도 ${limits.stockMax}%를 넘었어요.`);
+  }
   const cash = w.stocks.find((s) => s.market === "CASH")?.pct ?? 0;
   if (w.total > 0 && cash < limits.cashMin) out.push(`현금이 ${cash}%로 최소 ${limits.cashMin}%보다 적어요.`);
   return out;

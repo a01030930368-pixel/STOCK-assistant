@@ -68,9 +68,14 @@ export function averageBefore(buys: Fill[], sellDate: string): number {
 
 // 티커 모양으로 시장을 정합니다. 영문만(BRK.B 같은 점·하이픈 포함)이면 미국, 숫자로 시작하면 국내.
 // 국내 ETN(Q530036)처럼 섞인 건 고른 값을 따라요. 미국 종목을 국내로 잘못 골라 일기장이 갈라지던 것을 막습니다.
-export function marketOf(ticker: string, chosen: "KR" | "US"): "KR" | "US" {
+// 영문만이면 미국, 숫자로 시작하거나 영문 한 글자 + 숫자(국내 ETN Q500001 등)면 국내, 그 밖은 모름
+export function guessMarket(ticker: string): "KR" | "US" | null {
   const t = ticker.trim().toUpperCase();
   if (/^[A-Z]+([.-][A-Z]+)?$/.test(t)) return "US";
-  if (/^\d/.test(t)) return "KR";
-  return chosen;
+  if (/^\d/.test(t) || /^[A-Z]\d/.test(t)) return "KR";
+  return null;
+}
+
+export function marketOf(ticker: string, chosen: "KR" | "US"): "KR" | "US" {
+  return guessMarket(ticker) ?? chosen;
 }

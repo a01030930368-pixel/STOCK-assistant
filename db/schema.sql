@@ -574,3 +574,14 @@ CREATE TABLE us_ext_quotes (
   quoted_at   TIMESTAMPTZ NOT NULL,
   fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 일반 계좌와 ISA를 합친 보유 종목(종목별 한 줄). 알림·브리핑이 ISA 종목도 보게 합니다.
+CREATE OR REPLACE VIEW held_all AS
+  SELECT ticker, max(name) AS name, max(market) AS market, sum(quantity) AS quantity,
+    sum(quantity * avg_price) / NULLIF(sum(quantity), 0) AS avg_price, max(cur_price) AS cur_price,
+    sum(eval_amount) AS eval_amount, sum(pnl) AS pnl,
+    CASE WHEN count(*) = 1 THEN max(pnl_pct)
+         ELSE round(sum(pnl) / NULLIF(sum(quantity * avg_price), 0) * 100, 2) END AS pnl_pct
+  FROM (SELECT ticker, name, market, quantity, avg_price, cur_price, eval_amount, pnl, pnl_pct FROM holdings WHERE quantity > 0
+        UNION ALL SELECT ticker, name, 'KR', quantity, avg_price, cur_price, eval_amount, pnl, pnl_pct FROM isa_holdings WHERE quantity > 0) t
+  GROUP BY ticker;

@@ -28,6 +28,8 @@ def test_request_fetches_and_clears(monkeypatch):
     saved = {}
     monkeypatch.setattr(history_job.db, "get_setting", lambda conn, k: settings.get(k))
     monkeypatch.setattr(history_job.db, "set_setting", lambda conn, k, v: settings.__setitem__(k, v))
+    monkeypatch.setattr(history_job.db, "clear_setting_if",
+                        lambda conn, k, seen: settings[k] == seen and settings.__setitem__(k, None))
     monkeypatch.setattr(history_job.db, "save_prices", lambda conn, t, rows: saved.__setitem__(t, rows))
     monkeypatch.setattr(history_job.db, "save_sector_daily", lambda conn, m, c, rows: saved.__setitem__(f"{m}:{c}", rows))
     monkeypatch.setattr(history_job.db, "traded_unwatched", lambda conn: [("000660", "KR")])

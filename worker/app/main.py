@@ -37,6 +37,9 @@ def settle(conn: psycopg.Connection, market: str) -> None:
         log.info("다 판 종목의 매매일지(%s)를 끝난 것으로 바꾸고 손절·익절 알림을 껐습니다", pid)
 
 
+ISA_BACKOFF: dict = {"fails": 0, "until": None}
+
+
 def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | None, kr: bool, us: bool,
          now: datetime | None = None, isa: KiwoomClient | None = None) -> None:
     now = now or datetime.now(timezone.utc)
@@ -51,18 +54,23 @@ def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | No
             db.save_cash(conn, "KR", kiwoom.kr_cash())
         except Exception:
             log.exception("국내 예수금 동기화 실패")
-    if isa and kr:
+    if isa and kr and (ISA_BACKOFF["until"] is None or now >= ISA_BACKOFF["until"]):
         try:
             db.save_isa_balance(conn, isa.domestic_balance())
-            db.set_setting(conn, "isa_balance_status", {"at": now.isoformat(), "ok": True})
-        except Exception as e:
-            log.exception("ISA 잔고 동기화 실패")
-            # 화면 ISA 카드에 이유를 보여 줍니다(예: 이 계좌는 REST API를 못 쓰는 경우).
-            db.set_setting(conn, "isa_balance_status", {"at": now.isoformat(), "ok": False, "error": str(e)[:200]})
-        try:
             db.save_isa_cash(conn, isa.kr_cash())
-        except Exception:
-            log.exception("ISA 예수금 동기화 실패")
+            db.set_setting(conn, "isa_balance_status", {"at": now.isoformat(), "ok": True})
+            ISA_BACKOFF.update(fails=0, until=None)
+        except Exception as e:
+            # 계속 실패하면(예: 이 계좌는 REST API를 못 쓰는 경우) 1·2·4…분, 최대 60분 간격으로만 다시 해 봐요.
+            # 자세한 오류는 처음 한 번만 남겨 기록 파일이 커지지 않게 합니다.
+            ISA_BACKOFF["fails"] += 1
+            ISA_BACKOFF["until"] = now + timedelta(minutes=min(60, 2 ** (ISA_BACKOFF["fails"] - 1)))
+            if ISA_BACKOFF["fails"] == 1:
+                log.exception("ISA 잔고 동기화 실패")
+            else:
+                log.warning("ISA 잔고 동기화 실패(%d번째): %s", ISA_BACKOFF["fails"], e)
+            # 화면 ISA 카드에 이유를 보여 줍니다.
+            db.set_setting(conn, "isa_balance_status", {"at": now.isoformat(), "ok": False, "error": str(e)[:200]})
     if kiwoom and us:
         try:
             db.save_us_balance(conn, kiwoom.us_balance())

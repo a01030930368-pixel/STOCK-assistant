@@ -61,6 +61,14 @@ def kr_trading_now(now: datetime) -> bool:
     return start <= local.time() <= _shift(end, 5)
 
 
+def kr_after_close(now: datetime) -> bool:
+    """오늘이 거래일이고 장이 끝난 뒤(마감 10분 뒤부터)인지. 그날 마감 값을 받을 때 써요."""
+    local = now.astimezone(KST)
+    if not _kr_trading_day(local.date()):
+        return False
+    return local.time() > _shift(kr_session(local.date())[1], 10)
+
+
 def us_market_open(now: datetime) -> bool:
     local = now.astimezone(NY)
     return local.weekday() < 5 and US_OPEN <= local.time() <= US_CLOSE and not is_holiday("US", local.date())

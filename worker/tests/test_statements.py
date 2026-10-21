@@ -42,6 +42,17 @@ def test_dart_quarters_from_cumulative_reports():
     assert pick(lines, "Y", "2025", "net_income") is None
 
 
+def test_dart_prefers_parent_owners_share():
+    rows = [row("IS", "ifrs-full_ProfitLoss", "당기순이익", "100"),
+            row("CIS", "ifrs-full_ProfitLossAttributableToOwnersOfParent", "지배기업의 소유주", "60"),
+            row("BS", "ifrs-full_Equity", "자본총계", "1000"),
+            row("BS", "ifrs-full_EquityAttributableToOwnersOfParent", "지배기업 소유주지분", "700")]
+    values = statements.dart_values(rows, "thstrm_amount")
+    assert (values["net_income"], values["equity"]) == (D(60), D(700))
+    plain = statements.dart_values(rows[:1] + rows[2:3], "thstrm_amount")
+    assert (plain["net_income"], plain["equity"]) == (D(100), D(1000))
+
+
 def fact(frame, val, form="10-Q"):
     return {"frame": frame, "val": val, "form": form}
 

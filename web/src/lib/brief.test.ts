@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { buildCells, cautionCell, chartCell, counts, earningsCell, flowCell, newsCell } from "./brief";
+import { buildCells, cautionCell, chartCell, counts, earningsCell, flowCell, newsCell, valueCell } from "./brief";
 import type { Candle } from "./candles";
 
 const day = (i: number) => new Date(Date.parse("2026-01-01") + i * 86400000).toISOString().slice(0, 10);
 const candles = (closes: number[]): Candle[] => closes.map((c, i) => ({ day: day(i), open: c, high: c, low: c, close: c, volume: 1 }));
 
 describe("brief cells", () => {
+  it("says why it used PBR", () => {
+    const base = { candles: candles(Array.from({ length: 120 }, (_, i) => 100 + i)), shares: 10, price: null };
+    const equity = { kind: "Y" as const, period: "2024", item: "equity", value: 1000 };
+    const loss = valueCell({ ...base, statements: [equity, { kind: "Y", period: "2024", item: "net_income", value: -50 }] });
+    expect(loss.text).toContain("적자라 PER 대신 PBR");
+    const missing = valueCell({ ...base, statements: [equity] });
+    expect(missing.text).toContain("순이익 자료가 모자라");
+    expect(missing.text).not.toContain("적자");
+  });
+
   it("earnings from quarterly statements", () => {
     const q = (period: string, v: number) => ({ kind: "Q" as const, period, item: "operating_income", value: v });
     const c = earningsCell({ report: null, market: "KR", statements: [q("2025Q2", 80e9), q("2025Q3", 100e9), q("2026Q2", 100e9), q("2026Q3", 138e9)] });

@@ -145,3 +145,21 @@ def test_job_waits_before_retrying_a_failed_stock(monkeypatch):
     assert len(calls) == 1
     job.run(None, now + timedelta(minutes=21))
     assert len(calls) == 2
+
+
+def test_gemini_forces_json_only_when_asked():
+    import httpx
+    from app.ai import gemini_text
+
+    sent = []
+
+    def handler(request):
+        import json as j
+        sent.append(j.loads(request.content)["generationConfig"])
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "AAPL|좋아요"}]}, "finishReason": "STOP"}]})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    assert gemini_text("티커|문장 줄로 답해", "p", "k", "m", http, 400) == "AAPL|좋아요"
+    gemini_text('JSON 하나만 출력해: {"a": 1}', "p", "k", "m", http, 400)
+    assert "responseMimeType" not in sent[0] and sent[1]["responseMimeType"] == "application/json"
+    assert sent[0]["maxOutputTokens"] >= 4096

@@ -31,6 +31,15 @@ describe("weights", () => {
     expect(isa.stocks.filter((s) => s.label.startsWith("SK")).map((s) => [s.key, s.label])).toEqual([["000660", "SK하이닉스"], ["ISA:000660", "SK하이닉스 (ISA)"]]);
     expect(isa.markets.map((m) => m.label)).toEqual(["국내", "해외", "ISA", "현금"]);
   });
+  it("adds both accounts together for the one-stock limit", () => {
+    // 일반 1,600,000 + ISA 1,600,000 = 32% (따로는 16%씩)
+    const split = weights([
+      { ticker: "005930", name: "삼성전자", market: "KR", evalAmount: 1_600_000, pnlPct: 1, sector: "전기전자" },
+      { ticker: "005930", name: "삼성전자", market: "ISA", evalAmount: 1_600_000, pnlPct: 1, sector: "전기전자" },
+      { ticker: "196170", name: "알테오젠", market: "KR", evalAmount: 1_800_000, pnlPct: 1, sector: "제약" },
+    ], 1_400, 5_000_000, 0);
+    expect(breaches(split, { sectorMax: 100, stockMax: 20, cashMin: 0 })).toEqual(["삼성전자 (일반+ISA) 비중이 32%로 한 종목 한도 20%를 넘었어요."]);
+  });
   it("does not hold an index ETF to the one-stock limit and groups it as ETF", () => {
     const etf = weights([{ ticker: "360750", name: "TIGER 미국S&P500", market: "ISA", evalAmount: 5_000_000, pnlPct: 7, sector: null }, H[0]], 1_400, 0, 0);
     expect(etf.sectors.map((s) => s.label)).toEqual(["ETF", "전기전자"]);

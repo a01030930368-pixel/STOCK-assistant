@@ -1,8 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { makeBrief } from "@/app/actions";
+import { makeBrief, readBrief } from "@/app/actions";
 import { counts, type Cell } from "@/lib/brief";
 
 export type Brief = {
@@ -13,34 +12,43 @@ export type Brief = {
 const STALE_MS = 6 * 3600 * 1000; // 6시간 지난 요약은 열 때 새로 만들어요
 const kst = (d: Date) => new Date(d).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
-export default function BriefPanel({ ticker, name, market, brief, ai, closeHref }: {
+export default function BriefPanel(props: {
   ticker: string; name: string; market: string; brief: Brief | null; ai: boolean; closeHref: string;
 }) {
-  const router = useRouter();
+  const { ticker, name, market, ai, closeHref } = props;
+  const initial = props.brief;
+  // 요약은 이 칸 안에서만 새로 받아요. 페이지 전체를 새로 그리면 차트가 다시 만들어져 확대·그리던 선이 사라져요.
+  const [brief, setBrief] = useState<Brief | null>(initial);
   const [busy, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const asked = useRef(false);
   const remake = () => start(async () => {
     const r = await makeBrief(ticker, name, market);
     setError(r.error);
-    router.refresh();
+    if (!r.error) setBrief(await readBrief(ticker));
   });
   useEffect(() => {
     if (asked.current) return;
     asked.current = true;
     if (!brief || Date.now() - new Date(brief.made_at).getTime() > STALE_MS) remake();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // AI 문장을 기다리는 동안 4초마다 새로 그려요(최대 2분).
+  // AI 문장을 기다리는 동안 4초마다 이 칸만 새로 받아요(최대 2분).
   const pending = brief?.pending ?? false;
+  const [gaveUp, setGaveUp] = useState(false);
   useEffect(() => {
     if (!pending) return;
+    setGaveUp(false);
     let n = 0;
-    const id = setInterval(() => { if (++n > 30) clearInterval(id); router.refresh(); }, 4000);
+    const id = setInterval(async () => {
+      if (++n > 30) { clearInterval(id); setGaveUp(true); return; }
+      const next = await readBrief(ticker).catch(() => null);
+      if (next) setBrief(next);
+    }, 4000);
     return () => clearInterval(id);
-  }, [pending, router]);
+  }, [pending, ticker]);
 
   const cells = brief?.cells ?? [];
-  const writing = pending && ai;
+  const writing = pending && ai && !gaveUp;
   return (
     <div className="panel brief">
       <div className="brief-head">
@@ -74,6 +82,7 @@ export default function BriefPanel({ ticker, name, market, brief, ai, closeHref 
             <button type="button" className="ghost" onClick={remake} disabled={busy || pending}>{busy ? "만드는 중…" : "다시 만들기"}</button>
             {ai ? <span>숫자·색은 앱이 계산했고, 문장은 AI가 쓴 참고용이에요</span> : <span>GEMINI_API_KEY가 있으면 AI가 한 줄 결론을 써요</span>}
           </div>
+          {gaveUp && pending && <p className="muted brief-err">AI 문장이 2분 넘게 안 와요. PC에서 LODESTAR가 켜져 있는지 확인해 주세요. 위 6칸은 그대로 볼 수 있어요.</p>}
           {(error || (brief.error && !pending)) && <p className="muted brief-err">{error ?? `AI가 이번엔 못 썼어요 (${brief.error}). 좋은 점·걱정되는 점은 색으로만 나눴어요.`}</p>}
         </>
       )}

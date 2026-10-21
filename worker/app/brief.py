@@ -66,19 +66,19 @@ class BriefWriter:
         row = db.pending_brief(conn)
         if not row:
             return False
-        ticker, name, market, cells = row
+        ticker, name, market, cells, made_at = row
         cells = cells if isinstance(cells, list) else []
         if not self.ask:
             good, bad = fallback(cells)
-            db.finish_brief(conn, ticker, None, good, bad, None, None)
+            db.finish_brief(conn, ticker, None, good, bad, None, None, made_at=made_at)
             return True
         try:
             one, good, bad = parse(self.ask(SYSTEM, build_prompt(name, market, cells), self.key, self.model, self.http, 1024))
-            db.finish_brief(conn, ticker, one, good, bad, self.model, None)
+            db.finish_brief(conn, ticker, one, good, bad, self.model, None, made_at=made_at)
             log.info("%s 한 장 요약을 썼습니다", name)
         except Exception as e:
             good, bad = fallback(cells)
-            db.finish_brief(conn, ticker, None, good, bad, self.model, str(e)[:200])
+            db.finish_brief(conn, ticker, None, good, bad, self.model, str(e)[:200], made_at=made_at)
             log.warning("%s 한 장 요약 AI 실패: %s", name, e)
         return True
 

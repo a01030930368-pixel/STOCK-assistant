@@ -8,7 +8,7 @@ import { rulesFromForm } from "@/lib/screener";
 import { averageBefore, averagePrice, holdingDays, marketOf as tickerMarket, remainingQuantity, returnPct, sameQuantity, validateBuy, type BuyInput, type Fill } from "@/lib/journal";
 import type { Book } from "@/lib/books";
 import { loadBook } from "@/lib/booksData";
-import { buildCells } from "@/lib/brief";
+import { buildCells, type Cell } from "@/lib/brief";
 import { loadBriefInput } from "@/lib/briefData";
 import { KIND_LABEL, validColor, validDoodle, type DoodlePoint, type LevelKind } from "@/lib/drawings";
 
@@ -642,6 +642,15 @@ export async function makeBrief(ticker: string, name: string, market: string) {
   } catch {
     return { error: "워커를 업데이트하면 쓸 수 있어요. PC에서 update.bat을 한 번 실행해 주세요." };
   }
-  revalidatePath(`/stock/${encodeURIComponent(t)}`);
   return { error: null };
+}
+
+// 한 장 요약 칸이 AI 문장을 기다리며 읽어 가요. 페이지를 새로 그리지 않으려고 따로 둡니다.
+export async function readBrief(ticker: string) {
+  const t = ticker.toUpperCase();
+  if (!/^[0-9A-Z.\-]{1,12}$/.test(t)) return null;
+  const [row] = await query<{ cells: Cell[]; one_line: string | null; good: string[] | null; bad: string[] | null; pending: boolean; error: string | null; made_at: Date }>(
+    "SELECT cells, one_line, good, bad, pending, error, made_at FROM stock_briefs WHERE ticker = $1", [t],
+  ).catch(() => []);
+  return row ?? null;
 }

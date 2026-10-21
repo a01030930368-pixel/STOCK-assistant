@@ -431,6 +431,16 @@ MIGRATIONS = [
       quoted_at   TIMESTAMPTZ NOT NULL,
       fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
+    # 일반 계좌와 ISA를 합친 보유 종목(종목별 한 줄). 알림·브리핑·실적 전날·배당이 ISA 종목도 보게 합니다.
+    """CREATE OR REPLACE VIEW held_all AS
+  SELECT ticker, max(name) AS name, max(market) AS market, sum(quantity) AS quantity,
+    sum(quantity * avg_price) / NULLIF(sum(quantity), 0) AS avg_price, max(cur_price) AS cur_price,
+    sum(eval_amount) AS eval_amount, sum(pnl) AS pnl,
+    CASE WHEN count(*) = 1 THEN max(pnl_pct)
+         ELSE round(sum(pnl) / NULLIF(sum(quantity * avg_price), 0) * 100, 2) END AS pnl_pct
+  FROM (SELECT ticker, name, market, quantity, avg_price, cur_price, eval_amount, pnl, pnl_pct FROM holdings WHERE quantity > 0
+        UNION ALL SELECT ticker, name, 'KR', quantity, avg_price, cur_price, eval_amount, pnl, pnl_pct FROM isa_holdings WHERE quantity > 0) t
+  GROUP BY ticker""",
 ]
 
 
@@ -741,15 +751,15 @@ def current_prices(conn: psycopg.Connection) -> dict[str, Decimal]:
     """알림 확인용 현재가. 보유 종목은 잔고 값, 관심종목은 30분 안에 받은 현재가."""
     prices = {row[0]: row[1] for row in conn.execute(
         "SELECT ticker, price FROM watch_quotes WHERE fetched_at > now() - interval '30 minutes' AND price > 0")}
-    prices.update({row[0]: row[1] for row in conn.execute("SELECT ticker, cur_price FROM holdings WHERE cur_price > 0")})
+    prices.update({row[0]: row[1] for row in conn.execute("SELECT ticker, cur_price FROM held_all WHERE cur_price > 0")})
     return prices
 
 
 def watch_targets(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
-    """현재가를 따로 받아야 하는 관심종목: 잔고에 없는 것만. (ticker, name, market)"""
+    """현재가를 따로 받아야 하는 관심종목: 잔고(ISA 포함)에 없는 것만. (ticker, name, market)"""
     return conn.execute(
         """SELECT w.ticker, w.name, w.market FROM watchlist w
-           WHERE NOT EXISTS (SELECT 1 FROM holdings h WHERE h.ticker = w.ticker AND h.quantity > 0)
+           WHERE NOT EXISTS (SELECT 1 FROM held_all h WHERE h.ticker = w.ticker)
            ORDER BY w.ticker"""
     ).fetchall()
 
@@ -811,7 +821,7 @@ def close_sold_positions(conn: psycopg.Connection, market: str) -> list[int]:
         ids = [r[0] for r in conn.execute(
             """UPDATE positions p SET status = 'closed', closed_at = now()
                WHERE p.status = 'open' AND p.market = %s
-                 AND NOT EXISTS (SELECT 1 FROM holdings h WHERE h.ticker = p.ticker AND h.market = p.market AND h.quantity > 0)
+                 AND NOT EXISTS (SELECT 1 FROM held_all h WHERE h.ticker = p.ticker AND h.market = p.market)
                  AND EXISTS (SELECT 1 FROM trade_fills f WHERE f.ticker = p.ticker AND f.market = p.market AND f.side = 'sell'
                    AND f.trade_date >= COALESCE((SELECT max(trade_date) FROM buy_entries b WHERE b.position_id = p.id), p.created_at::date))
                RETURNING p.id""",
@@ -851,19 +861,19 @@ def prune_calendar(conn: psycopg.Connection) -> None:
     """팔았거나 관심종목에서 뺀 종목의 앞으로 일정은 지웁니다. 실적은 지켜보는 종목, 배당은 들고 있는 종목만 남겨요."""
     conn.execute(
         """DELETE FROM calendar_events c WHERE c.kind = 'earnings' AND c.day >= CURRENT_DATE AND c.ticker IS NOT NULL
-             AND NOT EXISTS (SELECT 1 FROM holdings h WHERE h.ticker = c.ticker)
+             AND NOT EXISTS (SELECT 1 FROM held_all h WHERE h.ticker = c.ticker)
              AND NOT EXISTS (SELECT 1 FROM positions p WHERE p.ticker = c.ticker AND p.status = 'open')
              AND NOT EXISTS (SELECT 1 FROM watchlist w WHERE w.ticker = c.ticker)"""
     )
     conn.execute(
         """DELETE FROM calendar_events c WHERE c.kind = 'dividend' AND c.day >= CURRENT_DATE AND c.ticker IS NOT NULL
-             AND NOT EXISTS (SELECT 1 FROM holdings h WHERE h.ticker = c.ticker AND h.quantity > 0)"""
+             AND NOT EXISTS (SELECT 1 FROM held_all h WHERE h.ticker = c.ticker)"""
     )
 
 
 def held_quantities(conn: psycopg.Connection) -> list[tuple[str, str, str, Decimal]]:
     """(ticker, name, market, quantity)"""
-    return conn.execute("SELECT ticker, name, market, quantity FROM holdings WHERE quantity > 0 ORDER BY ticker").fetchall()
+    return conn.execute("SELECT ticker, name, market, quantity FROM held_all ORDER BY ticker").fetchall()
 
 
 def disclosure_stocks(conn: psycopg.Connection) -> list[tuple[str, str, bool]]:
@@ -983,7 +993,7 @@ def save_minutes(conn: psycopg.Connection, ticker: str, bars, keep_days: int = 8
 
 
 def held_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
-    return conn.execute("SELECT ticker, name, market FROM holdings WHERE quantity > 0 ORDER BY ticker").fetchall()
+    return conn.execute("SELECT ticker, name, market FROM held_all ORDER BY ticker").fetchall()
 
 
 def ai_comment_days(conn: psycopg.Connection) -> dict[str, object]:
@@ -1010,7 +1020,7 @@ def ai_context(conn: psycopg.Connection, ticker: str, name: str, market: str) ->
     from .screener import rsi
 
     ctx: dict = {"ticker": ticker, "name": name, "market": market}
-    h = conn.execute("SELECT quantity, avg_price, cur_price, pnl_pct FROM holdings WHERE ticker = %s", (ticker,)).fetchone()
+    h = conn.execute("SELECT quantity, avg_price, cur_price, pnl_pct FROM held_all WHERE ticker = %s", (ticker,)).fetchone()
     if h:
         ctx["holding"] = {"quantity": _plain(h[0]), "avg_price": _plain(h[1]), "cur_price": _plain(h[2]), "pnl_pct": h[3]}
     j = conn.execute(
@@ -1110,7 +1120,7 @@ def earnings_eve(conn: psycopg.Connection, day) -> list[tuple[str, tuple]]:
                   (SELECT min(price) FROM alerts a WHERE a.ticker = h.ticker AND a.active AND a.kind = 'target'),
                   (SELECT (e.eps_actual - e.eps_estimate) / NULLIF(abs(e.eps_estimate), 0) * 100 FROM stock_earnings e
                     WHERE e.ticker = h.ticker AND e.eps_actual IS NOT NULL AND e.eps_estimate IS NOT NULL ORDER BY e.period DESC LIMIT 1)
-           FROM calendar_events c JOIN holdings h ON h.ticker = c.ticker AND h.quantity > 0
+           FROM calendar_events c JOIN held_all h ON h.ticker = c.ticker
            WHERE c.kind = 'earnings' AND c.day = %s ORDER BY h.name""",
         (day,),
     ).fetchall()
@@ -1195,7 +1205,7 @@ def briefing_holdings(conn: psycopg.Connection) -> list[tuple[str, str, float, f
         """SELECT h.name, h.market, h.cur_price, h.pnl_pct,
                   (SELECT array_agg(close ORDER BY day DESC) FROM
                      (SELECT day, close FROM price_history p WHERE p.ticker = h.ticker ORDER BY day DESC LIMIT 2) t)
-           FROM holdings h WHERE h.quantity > 0 ORDER BY h.market, h.eval_amount DESC"""
+           FROM held_all h ORDER BY h.market, h.eval_amount DESC"""
     ).fetchall()
     out = []
     for name, market, price, pnl, closes in rows:
@@ -1244,6 +1254,11 @@ def set_setting(conn: psycopg.Connection, key: str, value) -> None:
         "INSERT INTO app_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
         (key, Jsonb(value)),
     )
+
+
+def clear_setting_if(conn: psycopg.Connection, key: str, seen) -> None:
+    """읽었던 값 그대로일 때만 비워요. 그 사이 화면이 새 요청을 남겼으면 그대로 둬서 다음 회차에 처리해요."""
+    conn.execute("UPDATE app_settings SET value = %s WHERE key = %s AND value = %s", (Jsonb(None), key, Jsonb(seen)))
 
 
 def command_accounts(conn: psycopg.Connection) -> tuple[list[tuple], float]:
@@ -1426,18 +1441,19 @@ def delete_ext_quote(conn: psycopg.Connection, ticker: str) -> None:
 
 
 def pending_brief(conn: psycopg.Connection):
-    """(ticker, name, market, cells) 가장 먼저 부탁받은 요약 하나."""
+    """(ticker, name, market, cells, made_at) 가장 먼저 부탁받은 요약 하나."""
     return conn.execute(
-        "SELECT ticker, name, market, cells FROM stock_briefs WHERE pending ORDER BY made_at LIMIT 1"
+        "SELECT ticker, name, market, cells, made_at FROM stock_briefs WHERE pending ORDER BY made_at LIMIT 1"
     ).fetchone()
 
 
 def finish_brief(conn: psycopg.Connection, ticker: str, one_line: str | None, good: list[str], bad: list[str],
-                 model: str | None, error: str | None) -> None:
+                 model: str | None, error: str | None, made_at=None) -> None:
+    # 쓰는 사이에 '다시 만들기'로 새 요청이 들어왔으면(made_at이 바뀜) 덮지 않고 새 요청을 다시 처리해요.
     conn.execute(
         """UPDATE stock_briefs SET one_line = %s, good = %s, bad = %s, model = %s, error = %s, pending = false, done_at = now()
-           WHERE ticker = %s""",
-        (one_line, Jsonb(good), Jsonb(bad), model, error, ticker),
+           WHERE ticker = %s AND (%s::timestamptz IS NULL OR made_at = %s)""",
+        (one_line, Jsonb(good), Jsonb(bad), model, error, ticker, made_at, made_at),
     )
 
 
