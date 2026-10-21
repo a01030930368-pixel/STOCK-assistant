@@ -495,3 +495,24 @@ CREATE TABLE stock_shares (
   as_of       DATE NOT NULL,
   fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 섹터 동향: 지금 지수·등락률·비중(지도 크기)·오늘 많이 움직인 종목, 그리고 지난 종가
+CREATE TABLE sector_index (
+  market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+  code        TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  price       NUMERIC(18, 4) NOT NULL,
+  change_pct  NUMERIC(8, 2) NOT NULL,
+  weight      NUMERIC(10, 4),
+  leaders     JSONB NOT NULL DEFAULT '[]',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (market, code)
+);
+
+CREATE TABLE sector_daily (
+  market  TEXT NOT NULL,
+  code    TEXT NOT NULL,
+  day     DATE NOT NULL,
+  close   NUMERIC(18, 4) NOT NULL,
+  PRIMARY KEY (market, code, day)
+);

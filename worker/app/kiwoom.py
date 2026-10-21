@@ -332,6 +332,21 @@ class KiwoomClient:
         from .watch import parse_kr_sector
         return parse_kr_sector(self._post("/api/dostk/stkinfo", "ka10100", {"stk_cd": ticker}))
 
+    def all_sectors(self) -> list:
+        # ka20003 전업종지수요청. 001 코스피 업종 전체
+        from .sectors import parse_all_sectors
+        return parse_all_sectors(self._post("/api/dostk/sect", "ka20003", {"inds_cd": "001"}))
+
+    def sector_daily(self, code: str, base_day: str, price=None) -> list:
+        # ka20006 업종일봉조회요청. base_dt부터 과거로
+        from .sectors import parse_sector_daily
+        return parse_sector_daily(self._post("/api/dostk/chart", "ka20006", {"inds_cd": code, "base_dt": base_day}), price)
+
+    def sector_leaders(self, code: str) -> list:
+        # ka20002 업종별주가요청. 0 코스피, 1 KRX
+        from .sectors import parse_leaders
+        return parse_leaders(self._post("/api/dostk/sect", "ka20002", {"mrkt_tp": "0", "inds_cd": code, "stex_tp": "1"}))
+
     def us_cash(self) -> Cash:
         # ust21110 해외주식 예수금 조회
         return parse_us_cash(self._post("/api/us/acnt", "ust21110", {}))

@@ -730,3 +730,48 @@ button:disabled { opacity: 0.6; cursor: default; filter: none; }
   .draw-rail button { width: 30px; height: 30px; font-size: 0.85rem; }
   .chart-box .chart-legend { left: auto; }
 }
+
+/* 섹터 동향 */
+.sector-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 12px; }
+.sector-tools .segment.small { margin: 0; }
+.sector-tools .segment button { flex: none; white-space: nowrap; }
+.sector-note { font-size: 0.78rem; }
+.mine-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin: 0 3px 1px 6px; vertical-align: middle; }
+.sector-map-wrap { padding: 8px; margin-bottom: 12px; }
+.sector-map { position: relative; height: 260px; }
+.sector-map .tile { position: absolute; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; border: 0; border-radius: 6px; color: var(--fg); text-align: left; overflow: hidden; cursor: pointer; }
+.sector-map .tile:hover { filter: brightness(1.15); }
+.sector-map .tile.picked { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tile-name { font-weight: 600; font-size: 0.98rem; white-space: nowrap; }
+.tile-pct { font-weight: 700; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.tile.small { padding: 6px 8px; }
+.tile.small .tile-name { font-size: 0.78rem; }
+.tile.small .tile-pct { font-size: 0.82rem; }
+.tile.tiny { padding: 3px 5px; gap: 0; }
+.tile.tiny .tile-name { font-size: 0.68rem; }
+.tile.tiny .tile-pct { font-size: 0.7rem; }
+.sector-small { margin: 6px 2px 0; font-size: 0.76rem; }
+.sector-table { padding: 6px 10px; }
+table.heat { border-collapse: separate; border-spacing: 3px; width: 100%; }
+table.heat th, table.heat td { padding: 6px 8px; font-size: 0.86rem; white-space: nowrap; border: 0; }
+table.heat th { color: var(--muted); font-weight: 500; text-align: left; }
+table.heat .c { text-align: center; border-radius: 5px; font-variant-numeric: tabular-nums; min-width: 66px; }
+table.heat th.c { padding: 0; }
+table.heat .sort { background: none; border: 0; color: var(--muted); font-size: 0.82rem; padding: 4px 6px; min-height: 0; }
+table.heat .sort.on { color: var(--accent); font-weight: 600; }
+table.heat tbody tr { cursor: pointer; }
+table.heat tr.picked td { box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent); }
+table.heat tr.picked td:first-child { box-shadow: inset 1px 1px 0 var(--accent), inset 0 -1px 0 var(--accent); }
+table.heat tr.picked td:last-child { box-shadow: inset -1px 1px 0 var(--accent), inset 0 -1px 0 var(--accent); }
+table.heat .name b { font-weight: 600; }
+table.heat .code { font-size: 0.72rem; }
+table.heat .mine { margin-left: 6px; font-size: 0.72rem; color: var(--accent); background: var(--accent-soft); border: 1px solid #4a3f28; border-radius: 7px; padding: 1px 6px; }
+table.heat .leaders { font-size: 0.8rem; }
+table.heat td.name { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+@media (max-width: 640px) {
+  .sector-tools .segment.small { flex: 1 1 100%; }
+  .sector-tools .segment.small button { flex: 1; padding: 5px 0; }
+  .sector-map { height: 330px; }
+  table.heat th, table.heat td { padding: 5px 6px; font-size: 0.8rem; }
+  table.heat .c { min-width: 54px; }
+}
