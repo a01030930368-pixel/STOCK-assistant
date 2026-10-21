@@ -897,6 +897,30 @@ def review_inputs(conn: psycopg.Connection):
     return trades, held, reviewed
 
 
+def mistake_sells(conn: psycopg.Connection, since) -> list[tuple]:
+    """실수 노트에 쓸 매도 일지: (id, 이름, 매도일, 수익률, 보유일, 사유, 사유 설명, 배운 것, 원칙 지킴, 판 가격, 손절가, 익절가)"""
+    return conn.execute(
+        """SELECT s.id, p.name, s.trade_date, s.return_pct, s.holding_days, s.reason_type, s.reason_detail, s.lesson,
+                  s.followed_rules, s.price,
+                  (SELECT b.stop_price FROM buy_entries b WHERE b.position_id = s.position_id AND b.trade_date <= s.trade_date
+                    ORDER BY b.trade_date DESC, b.id DESC LIMIT 1),
+                  (SELECT b.target_price FROM buy_entries b WHERE b.position_id = s.position_id AND b.trade_date <= s.trade_date
+                    ORDER BY b.trade_date DESC, b.id DESC LIMIT 1)
+           FROM sell_entries s JOIN positions p ON p.id = s.position_id
+           WHERE s.trade_date >= %s ORDER BY s.trade_date, s.id""",
+        (since,),
+    ).fetchall()
+
+
+def mistake_reviews(conn: psycopg.Connection) -> list[tuple]:
+    """사후강평: (일기장 키, 별점, 원칙 지킴, 산 이유 돌아보기, 계획대로 했나, 판 타이밍, 교훈). 내용이 하나라도 있는 것만."""
+    return conn.execute(
+        """SELECT book_key, stars, followed_rules, thesis, plan, exit_timing, lesson FROM book_reviews
+           WHERE book_key NOT LIKE '%:open' AND (thesis <> '' OR plan <> '' OR exit_timing <> '' OR lesson <> '')
+           ORDER BY book_key"""
+    ).fetchall()
+
+
 def briefing_holdings(conn: psycopg.Connection) -> list[tuple[str, str, float, float | None, float]]:
     """아침 브리핑용 보유 종목 (이름, 시장, 현재가, 전일 대비 %, 평단 대비 %). 국내 먼저, 시장 안에서는 평가금액이 큰 순서입니다."""
     rows = conn.execute(

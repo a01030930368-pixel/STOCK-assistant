@@ -85,6 +85,7 @@ export default async function WeightsPage() {
         <nav className="segment" aria-label="포트폴리오 보기">
           <Link href="/">보유 종목</Link>
           <Link href="/weights" aria-current="page">비중</Link>
+          <Link href="/daily">달력</Link>
         </nav>
       </div>
 
