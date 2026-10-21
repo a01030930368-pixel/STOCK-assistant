@@ -440,3 +440,23 @@ CREATE TABLE isa_fills (
   fee         NUMERIC(18, 4),
   fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 보유 국내 종목의 DART 공시(접수 번호 하나에 한 줄). seen_at은 워커가 처음 본 시각이에요.
+CREATE TABLE stock_disclosures (
+  rcept_no   TEXT PRIMARY KEY,
+  ticker     TEXT NOT NULL,
+  name       TEXT NOT NULL DEFAULT '',
+  title      TEXT NOT NULL,
+  filer      TEXT NOT NULL DEFAULT '',
+  kind       TEXT NOT NULL,
+  important  BOOLEAN NOT NULL DEFAULT false,
+  day        DATE NOT NULL,
+  seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX stock_disclosures_ticker ON stock_disclosures (ticker, day DESC);
+
+-- 날마다 원/달러 기준 환율(한국은행). 미국 주식을 산 날 환율을 찾는 데 써요.
+CREATE TABLE fx_daily (
+  day   DATE PRIMARY KEY,
+  rate  NUMERIC(12, 4) NOT NULL
+);

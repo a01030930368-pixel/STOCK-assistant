@@ -310,6 +310,24 @@ MIGRATIONS = [
     """UPDATE book_reviews SET book_key = 'US:' || substr(book_key, 4)
        WHERE book_key LIKE 'KR:%' AND split_part(book_key, ':', 2) ~ '^[A-Z]+([.-][A-Z]+)?$'
          AND NOT EXISTS (SELECT 1 FROM book_reviews r WHERE r.book_key = 'US:' || substr(book_reviews.book_key, 4))""",
+    # 보유 국내 종목의 DART 공시(접수 번호 하나에 한 줄). seen_at은 워커가 처음 본 시각이에요.
+    """CREATE TABLE IF NOT EXISTS stock_disclosures (
+      rcept_no   TEXT PRIMARY KEY,
+      ticker     TEXT NOT NULL,
+      name       TEXT NOT NULL DEFAULT '',
+      title      TEXT NOT NULL,
+      filer      TEXT NOT NULL DEFAULT '',
+      kind       TEXT NOT NULL,
+      important  BOOLEAN NOT NULL DEFAULT false,
+      day        DATE NOT NULL,
+      seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS stock_disclosures_ticker ON stock_disclosures (ticker, day DESC)",
+    # 날마다 원/달러 기준 환율(한국은행). 미국 주식을 산 날 환율을 찾는 데 써요.
+    """CREATE TABLE IF NOT EXISTS fx_daily (
+      day   DATE PRIMARY KEY,
+      rate  NUMERIC(12, 4) NOT NULL
+    )""",
 ]
 
 
@@ -642,6 +660,42 @@ def prune_calendar(conn: psycopg.Connection) -> None:
 def held_quantities(conn: psycopg.Connection) -> list[tuple[str, str, str, Decimal]]:
     """(ticker, name, market, quantity)"""
     return conn.execute("SELECT ticker, name, market, quantity FROM holdings WHERE quantity > 0 ORDER BY ticker").fetchall()
+
+
+def held_kr_stocks(conn: psycopg.Connection) -> list[tuple[str, str]]:
+    """공시를 볼 국내 종목: 일반 계좌와 ISA에 들고 있는 것. (ticker, name)"""
+    return conn.execute(
+        """SELECT ticker, max(name) FROM (
+             SELECT ticker, name FROM holdings WHERE market = 'KR' AND quantity > 0
+             UNION ALL SELECT ticker, name FROM isa_holdings WHERE quantity > 0
+           ) h GROUP BY ticker ORDER BY ticker"""
+    ).fetchall()
+
+
+def save_disclosures(conn: psycopg.Connection, rows) -> None:
+    for d in rows:
+        k = d.kind
+        conn.execute(
+            """INSERT INTO stock_disclosures (rcept_no, ticker, name, title, filer, kind, important, day)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (rcept_no) DO UPDATE SET title = EXCLUDED.title, kind = EXCLUDED.kind, important = EXCLUDED.important""",
+            (d.rcept_no, d.ticker, d.name, d.title, d.filer, k.key, k.important, d.day),
+        )
+    conn.execute("DELETE FROM stock_disclosures WHERE day < now() - interval '400 days'")
+
+
+def fx_range(conn: psycopg.Connection):
+    """(가장 이른 날, 가장 늦은 날) 또는 (None, None)"""
+    return conn.execute("SELECT min(day), max(day) FROM fx_daily").fetchone()
+
+
+def first_us_buy(conn: psycopg.Connection):
+    return conn.execute("SELECT min(trade_date) FROM trade_fills WHERE market = 'US' AND side = 'buy'").fetchone()[0]
+
+
+def save_fx(conn: psycopg.Connection, rows) -> None:
+    for day, rate in rows:
+        conn.execute("INSERT INTO fx_daily (day, rate) VALUES (%s, %s) ON CONFLICT (day) DO UPDATE SET rate = EXCLUDED.rate", (day, rate))
 
 
 def save_dividends(conn: psycopg.Connection, ticker: str, rows) -> None:

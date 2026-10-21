@@ -4,7 +4,7 @@
 - 미국 FRED: 연준 기준금리 상단, 미국 소비자물가 (https://fred.stlouisfed.org, 무료 키)
 """
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -20,8 +20,8 @@ class Indicator:
     as_of: str  # 지표 기준 시점(예: 202609, 20261017, 2026-10-17)
 
 
-def _ecos_rows(http: httpx.Client, key: str, stat: str, cycle: str, start: str, end: str, item: str) -> list[dict]:
-    res = http.get(f"{ECOS_URL}/{key}/json/kr/1/100/{stat}/{cycle}/{start}/{end}/{item}")
+def _ecos_rows(http: httpx.Client, key: str, stat: str, cycle: str, start: str, end: str, item: str, count: int = 100) -> list[dict]:
+    res = http.get(f"{ECOS_URL}/{key}/json/kr/1/{count}/{stat}/{cycle}/{start}/{end}/{item}")
     res.raise_for_status()
     body = res.json()
     if "StatisticSearch" not in body:
@@ -64,6 +64,17 @@ def fetch_ecos(key: str, today: date, http: httpx.Client) -> list[Indicator]:
     rows = _ecos_rows(http, key, "901Y009", "M", f"{today.year - 2}01", month, "0")
     if (cpi := yoy(rows)) is not None:
         out.append(cpi)
+    return out
+
+
+def fetch_usdkrw_days(key: str, start: date, end: date, http: httpx.Client) -> list[tuple[date, Decimal]]:
+    """날마다 원/달러 매매기준율. 한 번에 1년씩 받아요(영업일만 있어 1년에 250줄쯤)."""
+    out = []
+    while start <= end:
+        stop = min(end, start + timedelta(days=365))
+        for r in _ecos_rows(http, key, "731Y001", "D", start.strftime("%Y%m%d"), stop.strftime("%Y%m%d"), "0000001", 400):
+            out.append((datetime.strptime(r["TIME"], "%Y%m%d").date(), Decimal(r["DATA_VALUE"].replace(",", ""))))
+        start = stop + timedelta(days=1)
     return out
 
 
