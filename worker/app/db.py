@@ -1439,3 +1439,51 @@ def finish_brief(conn: psycopg.Connection, ticker: str, one_line: str | None, go
            WHERE ticker = %s""",
         (one_line, Jsonb(good), Jsonb(bad), model, error, ticker),
     )
+
+
+def known_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
+    """텔레그램 질문에서 찾을 종목: 보유·ISA·관심·열린 일지 (ticker, name, market)."""
+    rows = conn.execute(
+        """SELECT DISTINCT ON (ticker) ticker, name, market FROM (
+             SELECT ticker, name, market, 0 AS o FROM holdings WHERE quantity > 0
+             UNION ALL SELECT ticker, name, 'KR', 1 FROM isa_holdings WHERE quantity > 0
+             UNION ALL SELECT ticker, name, market, 2 FROM watchlist
+             UNION ALL SELECT ticker, name, market, 3 FROM positions WHERE status = 'open') s
+           ORDER BY ticker, o"""
+    ).fetchall()
+    return [(t, n, m) for t, n, m in rows]
+
+
+def last_closes(conn: psycopg.Connection, ticker: str, n: int) -> list[float]:
+    rows = conn.execute(
+        "SELECT close FROM (SELECT day, close FROM price_history WHERE ticker = %s ORDER BY day DESC LIMIT %s) t ORDER BY day", (ticker, n)
+    ).fetchall()
+    return [float(r[0]) for r in rows]
+
+
+def recent_flows(conn: psycopg.Connection, ticker: str, n: int) -> list[tuple[str, float, float, float]]:
+    rows = conn.execute(
+        """SELECT to_char(day, 'MM-DD'), foreign_net, institution_net, individual_net FROM investor_flows
+           WHERE ticker = %s ORDER BY day DESC LIMIT %s""", (ticker, n)
+    ).fetchall()
+    return [(d, float(f), float(i), float(p)) for d, f, i, p in reversed(rows)]
+
+
+def recent_filings(conn: psycopg.Connection, ticker: str, days: int) -> list[tuple[str, str]]:
+    return conn.execute(
+        """SELECT to_char(day, 'MM-DD'), title FROM stock_disclosures
+           WHERE ticker = %s AND day >= CURRENT_DATE - %s AND kind NOT IN ('stake', 'other') ORDER BY day DESC LIMIT 5""",
+        (ticker, days),
+    ).fetchall()
+
+
+def index_moves(conn: psycopg.Connection) -> dict[str, str]:
+    """비교·복기용으로 쌓는 지수 종가(sector_daily 'IX')로 마지막 거래일 등락."""
+    out = {}
+    for code, label in (("KOSPI", "코스피"), ("SPX", "S&P 500(SPY)")):
+        rows = conn.execute(
+            "SELECT to_char(day, 'MM-DD'), close FROM sector_daily WHERE market = 'IX' AND code = %s ORDER BY day DESC LIMIT 2", (code,)
+        ).fetchall()
+        if len(rows) == 2 and float(rows[1][1]):
+            out[label] = f"{rows[0][0]} {(float(rows[0][1]) / float(rows[1][1]) - 1) * 100:+.1f}%"
+    return out

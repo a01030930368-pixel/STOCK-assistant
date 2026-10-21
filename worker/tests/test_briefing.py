@@ -260,3 +260,12 @@ def test_weekly_report_once(monkeypatch):
     [w] = [t for t in sent if "이번 주 성적표" in t]
     assert "매수 0번 · 매도 2번" in w and "판 것 손익(국내) +15원" in w and "다 판 종목 · SK하이닉스 +0.5%" in w
     assert "weekly:2026-10-19" in marked
+
+
+def test_term_at_bottom_and_rotation(monkeypatch):
+    from app import terms
+    text = briefing.morning_message(date(2026, 10, 22), [], [], [], term=terms.message(None, 1))
+    assert text.endswith("📚 <b>오늘의 용어 · PER</b>\n" + terms.TERMS[1].meaning)  # 예시를 못 만들면 풀이만
+    assert briefing.LINE in text
+    assert terms.next_index(None, lambda conn, key: len(terms.TERMS) + 2) == 2
+    assert terms.next_index(None, lambda conn, key: None) == 0

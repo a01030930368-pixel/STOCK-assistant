@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import psycopg
 
-from . import ai, books, briefing, db, prices, telegram
+from . import ai, books, briefing, db, prices, telegram, terms
 from .config import Config
 
 log = logging.getLogger("worker")
@@ -118,11 +118,20 @@ class BriefingJob:
         indexes = self._indexes()
         us = self._us(conn, now, indexes)
         fx, fx_prev = self._fx(conn, indexes) if us else (None, None)
-        text = briefing.morning_message(day, indexes, holdings, items, us, fx, fx_prev)
+        # 오늘의 용어는 못 만들어도 브리핑은 그대로 보내요.
+        try:
+            term_at = terms.next_index(conn, db.get_setting)
+            term = terms.message(conn, term_at)
+        except Exception as e:
+            log.warning("오늘의 용어 만들기 실패: %s", e)
+            term_at, term = None, None
+        text = briefing.morning_message(day, indexes, holdings, items, us, fx, fx_prev, term)
         if not telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, text, self.http, html=True):
             return
         log.info("아침 브리핑을 보냈습니다")
         db.mark_notice(conn, key)
+        if term_at is not None:
+            db.set_setting(conn, "terms_next", term_at + 1)
 
     def _fx(self, conn: psycopg.Connection, indexes: list[briefing.Quote]) -> tuple[float | None, float | None]:
         # 원/달러 지금 값과 전날 값. 야후가 막히면 키움 잔고의 환율(전날 값은 모름)로 대신해요.
