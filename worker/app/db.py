@@ -340,6 +340,20 @@ MIGRATIONS = [
       day   DATE PRIMARY KEY,
       rate  NUMERIC(12, 4) NOT NULL
     )""",
+    # 실적 발표 한눈에: 실적이 나올 때마다 숫자 표·최근 분기·예상 대비·AI 해설. id는 KR:접수번호 또는 US:티커:분기
+    """CREATE TABLE IF NOT EXISTS earnings_reports (
+      id           TEXT PRIMARY KEY,
+      ticker       TEXT NOT NULL,
+      name         TEXT NOT NULL,
+      market       TEXT NOT NULL,
+      period       TEXT NOT NULL,
+      reported_on  DATE NOT NULL,
+      url          TEXT NOT NULL,
+      data         JSONB NOT NULL,
+      ai           TEXT NOT NULL DEFAULT '',
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS earnings_reports_ticker ON earnings_reports (ticker, reported_on DESC)",
 ]
 
 
@@ -556,6 +570,83 @@ def save_statements(conn: psycopg.Connection, ticker: str, lines) -> None:
                ON CONFLICT (ticker, kind, period, item) DO UPDATE SET value = EXCLUDED.value, fetched_at = now()""",
             (ticker, x.kind, x.period, x.item, x.value),
         )
+
+
+def save_earnings_report(conn: psycopg.Connection, r, ai: str | None = None) -> None:
+    """실적 정리를 넣거나 숫자만 새로 바꿔요. ai가 None이면 예전 해설을 그대로 둬요."""
+    conn.execute(
+        """INSERT INTO earnings_reports (id, ticker, name, market, period, reported_on, url, data, ai)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, ''))
+           ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, reported_on = EXCLUDED.reported_on,
+             ai = COALESCE(%s, earnings_reports.ai)""",
+        (r.id, r.ticker, r.name, r.market, r.period, r.reported_on, r.url, Jsonb(r.data()), ai, ai),
+    )
+
+
+def earnings_report(conn: psycopg.Connection, rid: str):
+    """(Report, ai) 또는 None"""
+    from .earnings import Report
+
+    row = conn.execute(
+        "SELECT id, ticker, name, market, period, reported_on, url, data, ai FROM earnings_reports WHERE id = %s", (rid,)
+    ).fetchone()
+    if not row:
+        return None
+    d = row[7]
+    return Report(*row[:7], lines=d.get("lines") or {}, eps=d.get("eps"), revenue_estimate=d.get("revenue_estimate"),
+                  history=d.get("history") or [], surprises=d.get("surprises") or []), row[8]
+
+
+def unreported_preliminary(conn: psycopg.Connection, days: int = 100) -> list[tuple]:
+    """정리가 아직 없는 최근 잠정실적 공시(업데이트 전에 이미 본 것). Disclosure 인자 순서로 돌려줘요."""
+    return conn.execute(
+        """SELECT d.rcept_no, d.ticker, d.name, d.title, d.filer, d.day FROM stock_disclosures d
+           WHERE d.kind = 'earnings' AND d.title LIKE '%%영업(잠정)실적%%' AND d.day >= CURRENT_DATE - %s
+             AND NOT EXISTS (SELECT 1 FROM earnings_reports r WHERE r.id = 'KR:' || d.rcept_no)
+           ORDER BY d.day""",
+        (days,),
+    ).fetchall()
+
+
+def has_earnings_report(conn: psycopg.Connection, ticker: str) -> bool:
+    return conn.execute("SELECT 1 FROM earnings_reports WHERE ticker = %s LIMIT 1", (ticker,)).fetchone() is not None
+
+
+def statement_quarters(conn: psycopg.Connection, ticker: str) -> dict[str, dict[str, float]]:
+    """재무제표 분기(석 달) 매출·영업이익. {2025Q3: {revenue: …, operating_income: …}}"""
+    out: dict[str, dict[str, float]] = {}
+    for period, item, value in conn.execute(
+        """SELECT period, item, value FROM stock_statements
+           WHERE ticker = %s AND kind = 'Q' AND item IN ('revenue', 'operating_income')""", (ticker,)):
+        out.setdefault(period, {})[item] = float(value)
+    return out
+
+
+def recent_news(conn: psycopg.Connection, ticker: str, days: int = 3) -> list[tuple[str, str]]:
+    """실적 해설에 쓸 최근 뉴스 (제목, 요약). 한국어로 옮긴 게 있으면 그걸 써요."""
+    return conn.execute(
+        """SELECT COALESCE(title_ko, title), COALESCE(summary_ko, summary) FROM stock_news
+           WHERE ticker = %s AND published_at > now() - make_interval(days => %s) ORDER BY published_at DESC LIMIT 8""",
+        (ticker, days),
+    ).fetchall()
+
+
+def earnings_soon(conn: psycopg.Connection, ticker: str, start, end) -> bool:
+    """그 기간에 실적 발표 일정이 있나(미국 실적은 이때만 자주 확인해요)."""
+    return conn.execute(
+        "SELECT 1 FROM calendar_events WHERE kind = 'earnings' AND ticker = %s AND day BETWEEN %s AND %s LIMIT 1",
+        (ticker, start, end),
+    ).fetchone() is not None
+
+
+def us_stocks(conn: psycopg.Connection) -> list[tuple[str, str, bool]]:
+    """실적을 볼 미국 종목: 들고 있는 것과 미국 관심종목. (ticker, name, 들고 있나)"""
+    return conn.execute(
+        """SELECT ticker, max(name), bool_or(held) FROM (
+             SELECT ticker, name, true AS held FROM holdings WHERE market = 'US' AND quantity > 0
+             UNION ALL SELECT ticker, name, false FROM watchlist WHERE market = 'US'
+           ) h GROUP BY ticker ORDER BY ticker"""
+    ).fetchall()
 
 
 def current_prices(conn: psycopg.Connection) -> dict[str, Decimal]:

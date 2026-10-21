@@ -472,3 +472,18 @@ CREATE TABLE stock_statements (
   fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (ticker, kind, period, item)
 );
+
+-- 실적 발표 한눈에: 실적이 나올 때마다 숫자 표·최근 분기·예상 대비·AI 해설. id는 KR:접수번호 또는 US:티커:분기
+CREATE TABLE earnings_reports (
+  id           TEXT PRIMARY KEY,
+  ticker       TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  market       TEXT NOT NULL,
+  period       TEXT NOT NULL,
+  reported_on  DATE NOT NULL,
+  url          TEXT NOT NULL,
+  data         JSONB NOT NULL,
+  ai           TEXT NOT NULL DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX earnings_reports_ticker ON earnings_reports (ticker, reported_on DESC);
