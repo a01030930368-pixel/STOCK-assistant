@@ -516,3 +516,35 @@ CREATE TABLE sector_daily (
   close   NUMERIC(18, 4) NOT NULL,
   PRIMARY KEY (market, code, day)
 );
+
+-- 투자자별 수급(국내). 금액은 키움 단위 그대로(백만원)
+CREATE TABLE investor_flows (
+  ticker           TEXT NOT NULL,
+  day              DATE NOT NULL,
+  close            NUMERIC(18, 2) NOT NULL,
+  foreign_net      NUMERIC(20, 0) NOT NULL,
+  institution_net  NUMERIC(20, 0) NOT NULL,
+  individual_net   NUMERIC(20, 0) NOT NULL,
+  PRIMARY KEY (ticker, day)
+);
+
+-- 테마 동향(국내): 전체 테마와 내 종목이 든 테마
+CREATE TABLE theme_index (
+  code        TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  stocks      INTEGER NOT NULL,
+  change_pct  NUMERIC(8, 2) NOT NULL,
+  week_pct    NUMERIC(8, 2),
+  rising      INTEGER NOT NULL,
+  falling     INTEGER NOT NULL,
+  leader      TEXT NOT NULL DEFAULT '',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE stock_themes (
+  ticker      TEXT NOT NULL,
+  code        TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (ticker, code)
+);

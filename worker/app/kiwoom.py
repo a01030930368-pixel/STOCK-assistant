@@ -347,6 +347,18 @@ class KiwoomClient:
         from .sectors import parse_leaders
         return parse_leaders(self._post("/api/dostk/sect", "ka20002", {"mrkt_tp": "0", "inds_cd": code, "stex_tp": "1"}))
 
+    def investor_flows(self, ticker: str, day: str) -> list:
+        # ka10059 종목별투자자기관별요청. 금액(1)·순매수(0)·단주(1), day부터 과거로
+        from .flows import parse_flows
+        payload = {"dt": day, "stk_cd": ticker, "amt_qty_tp": "1", "trde_tp": "0", "unit_tp": "1"}
+        return parse_flows(self._post_pages("/api/dostk/stkinfo", "ka10059", payload, "stk_invsr_orgn", max_pages=2))
+
+    def themes(self, ticker: str = "") -> list:
+        # ka90001 테마그룹별요청. 종목코드가 있으면 그 종목이 든 테마만(qry_tp 2). 기간수익률은 5일, 등락률 상위순
+        from .flows import parse_themes
+        payload = {"qry_tp": "2" if ticker else "0", "stk_cd": ticker, "date_tp": "5", "thema_nm": "", "flu_pl_amt_tp": "3", "stex_tp": "1"}
+        return parse_themes(self._post_pages("/api/dostk/thme", "ka90001", payload, "thema_grp", max_pages=1 if ticker else 10))
+
     def us_cash(self) -> Cash:
         # ust21110 해외주식 예수금 조회
         return parse_us_cash(self._post("/api/us/acnt", "ust21110", {}))

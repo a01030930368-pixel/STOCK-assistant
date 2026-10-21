@@ -775,3 +775,30 @@ table.heat td.name { position: sticky; left: 0; background: var(--surface); z-in
   table.heat th, table.heat td { padding: 5px 6px; font-size: 0.8rem; }
   table.heat .c { min-width: 54px; }
 }
+
+/* 수급 */
+.flow { padding: 14px; }
+.flow-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.flow-head .segment.small { margin: 0 0 0 auto; }
+.flow-head .segment button { flex: none; }
+.flow-at { font-size: 0.76rem; }
+.flow-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+.flow-chip { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; border: 1px solid var(--line); border-radius: 9px; padding: 4px 10px; background: var(--surface-2); }
+.flow-chip .up { color: var(--up); } .flow-chip .down { color: var(--down); }
+.flow-svg { display: block; }
+.flow-zero { stroke: var(--line); }
+.flow-price { fill: none; stroke: #4a4740; stroke-width: 2; stroke-dasharray: 4 4; }
+.flow-label { font-size: 13px; font-weight: 600; }
+.flow-tick { fill: var(--muted); font-size: 11.5px; }
+.flow-empty { padding: 24px 4px; text-align: center; }
+.flow-themes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-2); font-size: 0.8rem; }
+.flow-theme { border: 1px solid var(--line); border-radius: 8px; padding: 3px 9px; color: var(--fg); }
+.flow-theme:hover { text-decoration: none; border-color: #4a3f28; }
+.flow-theme .up { color: var(--up); } .flow-theme .down { color: var(--down); }
+@media (max-width: 640px) {
+  .flow-head .segment.small { margin-left: 0; width: 100%; }
+  .flow-head .segment.small button { flex: 1; }
+}
+.tile-sub { font-size: 0.74rem; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.sector-table .more { display: block; margin: 8px auto 4px; }
+@media (max-width: 640px) { .theme-table .leaders { display: none; } }

@@ -11,6 +11,8 @@ import { wallClock } from "@/lib/candles";
 import { dartUrl, kindOf } from "@/lib/disclosures";
 import Statements from "@/app/_components/Statements";
 import EarningsReport from "@/app/_components/EarningsReport";
+import FlowChart, { type StockTheme } from "@/app/_components/FlowChart";
+import type { FlowRow } from "@/lib/flows";
 import type { Report } from "@/lib/earnings";
 import type { StatementRow } from "@/lib/statements";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
@@ -101,6 +103,13 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
   // PER·PBR 밴드용 주식 수(워커 업데이트 뒤에 생겨요)
   const [shareRow] = await safe<{ shares: string }>("SELECT shares FROM stock_shares WHERE ticker = $1", [ticker]);
   const shares = shareRow ? Number(shareRow.shares) : null;
+  // 국내 종목만: 투자자별 수급과 이 종목이 든 테마(워커 업데이트 뒤에 생겨요)
+  const flows = stock.market === "KR" ? (await safe<{ day: string; close: string; foreign_net: string; institution_net: string; individual_net: string }>(
+    "SELECT to_char(day, 'YYYY-MM-DD') AS day, close, foreign_net, institution_net, individual_net FROM investor_flows WHERE ticker = $1 ORDER BY day", [ticker],
+  )).map<FlowRow>((f) => ({ day: f.day, close: Number(f.close), foreign: Number(f.foreign_net), institution: Number(f.institution_net), individual: Number(f.individual_net) })) : [];
+  const stockThemes = stock.market === "KR" ? (await safe<{ code: string; name: string; change_pct: string | null }>(
+    "SELECT s.code, s.name, t.change_pct FROM stock_themes s LEFT JOIN theme_index t ON t.code = s.code WHERE s.ticker = $1 ORDER BY t.change_pct DESC NULLS LAST", [ticker],
+  )).map<StockTheme>((t) => ({ code: t.code, name: t.name, change_pct: t.change_pct === null ? null : Number(t.change_pct) })) : [];
   const financials = await safe<FinancialRow>("SELECT * FROM stock_financials WHERE ticker = $1 ORDER BY period DESC", [ticker]);
   const peers = await safe<Peer>("SELECT peer_ticker, peer_name, peer_market FROM stock_peers WHERE ticker = $1 ORDER BY peer_name", [ticker]);
   const peerLatest = await safe<FinancialRow>(
@@ -174,6 +183,13 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       <h2>차트 · 메모 · 가격 알림</h2>
       <ChartMemo ticker={ticker} name={stock.name} current={stock.cur === null ? null : Number(stock.cur)} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} marks={marks} doodles={doodles}
         statements={statements} shares={shares} />
+
+      {stock.market === "KR" && (
+        <>
+          <h2>수급 · 외국인 · 기관 · 개인</h2>
+          <FlowChart rows={flows} themes={stockThemes} at={flows.length ? flows[flows.length - 1].day.slice(5).replace("-", ".") : null} />
+        </>
+      )}
 
       <h2>{statements.length > 0 ? "재무제표" : "재무 요약"}</h2>
       {statements.length > 0 ? (
