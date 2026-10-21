@@ -662,12 +662,13 @@ def held_quantities(conn: psycopg.Connection) -> list[tuple[str, str, str, Decim
     return conn.execute("SELECT ticker, name, market, quantity FROM holdings WHERE quantity > 0 ORDER BY ticker").fetchall()
 
 
-def held_kr_stocks(conn: psycopg.Connection) -> list[tuple[str, str]]:
-    """공시를 볼 국내 종목: 일반 계좌와 ISA에 들고 있는 것. (ticker, name)"""
+def disclosure_stocks(conn: psycopg.Connection) -> list[tuple[str, str, bool]]:
+    """공시를 볼 국내 종목: 일반 계좌·ISA에 들고 있는 것과 국내 관심종목. (ticker, name, 들고 있나)"""
     return conn.execute(
-        """SELECT ticker, max(name) FROM (
-             SELECT ticker, name FROM holdings WHERE market = 'KR' AND quantity > 0
-             UNION ALL SELECT ticker, name FROM isa_holdings WHERE quantity > 0
+        """SELECT ticker, max(name), bool_or(held) FROM (
+             SELECT ticker, name, true AS held FROM holdings WHERE market = 'KR' AND quantity > 0
+             UNION ALL SELECT ticker, name, true FROM isa_holdings WHERE quantity > 0
+             UNION ALL SELECT ticker, name, false FROM watchlist WHERE market = 'KR'
            ) h GROUP BY ticker ORDER BY ticker"""
     ).fetchall()
 

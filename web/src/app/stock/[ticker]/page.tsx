@@ -214,7 +214,7 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
           <h2>공시</h2>
           {filings.length === 0 ? (
             <p className="muted">
-              {process.env.DART_API_KEY ? "아직 없어요. 들고 있는 종목이면 워커가 10분마다 DART에서 확인해요. ETF는 공시가 없어요." : "DART_API_KEY를 넣으면 워커가 들고 있는 종목의 공시를 10분마다 확인해요."}
+              {process.env.DART_API_KEY ? "아직 없어요. 들고 있거나 관심종목에 넣은 종목이면 워커가 10분마다 DART에서 확인해요. ETF는 공시가 없어요." : "DART_API_KEY를 넣으면 워커가 들고 있는 종목과 관심종목의 공시를 10분마다 확인해요."}
             </p>
           ) : (
             <div className="panel">

@@ -1,4 +1,4 @@
-"""보유 국내 종목(ISA 포함)의 새 공시를 10분마다 확인하고, 중요한 것만 텔레그램으로 바로 보냅니다."""
+"""보유 국내 종목(ISA 포함)과 국내 관심종목의 새 공시를 10분마다 확인하고, 중요한 것만 텔레그램으로 바로 보냅니다."""
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -36,7 +36,7 @@ class DisclosureJob:
         # 한 번이라도 채운 종목. 공시가 하나도 없던 종목도 넣어야 다음 공시를 알릴 수 있어요.
         seeded = set(db.get_setting(conn, "disclosure_seeded") or [])
         before = set(seeded)
-        for ticker, name in db.held_kr_stocks(conn):
+        for ticker, name, held in db.disclosure_stocks(conn):
             corp = codes.get(ticker)
             if not corp:  # ETF·ETN은 DART 회사가 아니라 공시가 없어요
                 continue
@@ -53,16 +53,16 @@ class DisclosureJob:
                     # 처음 채운 공시는 이미 지난 거라 알리지 않고, 보낸 것으로 적어 둬요.
                     db.mark_notice(conn, f"disclosure:{d.rcept_no}")
                 elif d.kind.important and (today - d.day).days <= FRESH_DAYS:
-                    self._alert(conn, d)
+                    self._alert(conn, d, held)
             seeded.add(ticker)
         if seeded != before:
             db.set_setting(conn, "disclosure_seeded", sorted(seeded))
 
-    def _alert(self, conn: psycopg.Connection, d: disclosures.Disclosure) -> None:
+    def _alert(self, conn: psycopg.Connection, d: disclosures.Disclosure, held: bool) -> None:
         if not (self.cfg.telegram_bot_token and self.cfg.telegram_chat_id):
             return
         key = f"disclosure:{d.rcept_no}"
         if db.notice_sent(conn, key):
             return
-        if telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, disclosures.message(d), self.http):
+        if telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, disclosures.message(d, held), self.http):
             db.mark_notice(conn, key)

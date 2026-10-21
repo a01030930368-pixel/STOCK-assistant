@@ -26,6 +26,11 @@ def test_message():
         "🔗 https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261021000123")
 
 
+def test_message_marks_watchlist_stocks():
+    d = Disclosure("9", "035420", "NAVER", "현금ㆍ현물배당결정", "", date(2026, 10, 21))
+    assert disclosures.message(d, held=False).startswith("💰 NAVER · 배당 공시 · ⭐ 관심종목\n\n📄 현금ㆍ현물배당결정")
+
+
 class Cfg:
     dart_api_key = "k"
     telegram_bot_token = "t"
@@ -39,7 +44,7 @@ def test_job_seeds_quietly_then_alerts_new_important_once(monkeypatch):
     monkeypatch.setattr("app.db.notice_sent", lambda conn, k: k in notices)
     monkeypatch.setattr("app.db.mark_notice", lambda conn, k: notices.add(k))
     monkeypatch.setattr("app.db.save_disclosures", lambda conn, rows: saved.extend(rows))
-    monkeypatch.setattr("app.db.held_kr_stocks", lambda conn: [("000660", "SK하이닉스"), ("069500", "KODEX 200")])
+    monkeypatch.setattr("app.db.disclosure_stocks", lambda conn: [("000660", "SK하이닉스", True), ("069500", "KODEX 200", True)])
     monkeypatch.setattr("app.telegram.deliver", lambda token, chat, text, http: sent.append(text) or True)
     listing = [Disclosure("1", "000660", "SK하이닉스", "단일판매ㆍ공급계약체결", "", date(2026, 10, 20))]
     calls = []

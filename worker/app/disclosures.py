@@ -1,4 +1,4 @@
-"""보유 종목(국내·ISA)의 DART 공시. 주가에 크게 닿을 수 있는 공시만 텔레그램으로 바로 알려요.
+"""보유 종목(국내·ISA)과 국내 관심종목의 DART 공시. 주가에 크게 닿을 수 있는 공시만 텔레그램으로 바로 알려요.
 
 DART 목록에는 접수 날짜만 있고 시각은 없어서, 처음 본 시각(seen_at)을 같이 적어 둡니다.
 """
@@ -79,9 +79,10 @@ def fetch(ticker: str, name: str, corp_code: str, key: str, since: date, today: 
     ]
 
 
-def message(d: Disclosure) -> str:
+def message(d: Disclosure, held: bool = True) -> str:
     k = d.kind
-    lines = [f"{k.icon} {d.name} · {k.label} 공시", "", f"📄 {d.title}"]
+    # 들고 있지 않은 관심종목은 제목 끝에 표시해요.
+    lines = [f"{k.icon} {d.name} · {k.label} 공시" + ("" if held else " · ⭐ 관심종목"), "", f"📄 {d.title}"]
     if k.explain:
         lines.append(k.explain)
     lines += ["", f"🔗 {d.url}"]
