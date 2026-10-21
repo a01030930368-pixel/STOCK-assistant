@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import psycopg
 
-from . import commands, db, telegram
+from . import ai, ask, commands, db, telegram
 from .config import Config
 
 log = logging.getLogger("worker")
@@ -46,10 +46,23 @@ def handle(conn: psycopg.Connection, update: dict, chat_id: str, today) -> str |
     return answer(conn, command, today)
 
 
+def question(update: dict, chat_id: str) -> str | None:
+    """명령이 아닌, 내가 보낸 보통 말이면 그 글(AI에게 물어볼 질문)."""
+    msg = update.get("message") or {}
+    if str((msg.get("chat") or {}).get("id")) != str(chat_id):
+        return None
+    text = (msg.get("text") or "").strip()
+    if not text or text.startswith("/") or commands.parse(text):
+        return None
+    return text[:500]
+
+
 class Bot:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.http = httpx.Client(timeout=WAIT + 10)
+        self.ai_http = httpx.Client(timeout=60)
+        self.key, self.model, self.ask = ai.text_asker(cfg)
         self.base = f"https://api.telegram.org/bot{cfg.telegram_bot_token}"
 
     def start(self) -> None:
@@ -95,3 +108,19 @@ class Bot:
                     reply = "⚠️ 지금은 답하기 어려워요.\n잠시 뒤 다시 보내 주세요."
                 if reply:
                     telegram.send(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, reply, self.http)
+                elif (q := question(update, self.cfg.telegram_chat_id)) is not None:
+                    self._answer(conn, q)
+
+    def _answer(self, conn: psycopg.Connection, q: str) -> None:
+        token, chat = self.cfg.telegram_bot_token, self.cfg.telegram_chat_id
+        if not self.ask:
+            telegram.send(token, chat, "🤖 AI 키가 없어서 대화는 못 해요.\n.env에 GEMINI_API_KEY를 넣으면 질문에 답해 드려요.\n\n명령 목록은 /도움", self.http)
+            return
+        try:
+            # 답을 쓰는 동안 "입력 중…"을 띄워요.
+            self.http.post(f"{self.base}/sendChatAction", json={"chat_id": chat, "action": "typing"})
+            text = ask.answer(conn, q, lambda system, prompt: self.ask(system, prompt, self.key, self.model, self.ai_http, 1024))
+        except Exception as e:
+            log.warning("텔레그램 질문 답하기 실패: %s", e)
+            text = "⚠️ 지금은 AI가 답하기 어려워요. 잠시 뒤 다시 물어봐 주세요."
+        telegram.deliver(token, chat, text, self.http, html=True)

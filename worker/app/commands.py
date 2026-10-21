@@ -135,4 +135,4 @@ def watch_text(rows: list[tuple[str, str, float | None, float | None, float | No
 
 def help_text() -> str:
     return "\n".join(["🧭 LODESTAR 명령", ""] + [f"/{cmd} 또는 /{desc.split(':')[0]}\n      {desc.split(': ')[1]}" for cmd, desc in MENU]
-                     + ["", "👀 조회만 할 수 있어요. 주문은 하지 않아요."])
+                     + ["", "💬 명령 없이 그냥 물어봐도 돼요.\n      예: 하이닉스 오늘 왜 빠졌어?", "", "👀 조회만 할 수 있어요. 주문은 하지 않아요."])

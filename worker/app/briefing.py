@@ -153,8 +153,10 @@ AI_NOTE = "<i>🤖 AI 한마디는 참고용이에요. 사고팔지는 직접 �
 
 
 def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], items: list[Item],
-                    us: list[UsStock] | None = None, fx: float | None = None, fx_prev: float | None = None) -> str:
-    """텔레그램 HTML 모양(굵게·고정폭 표)으로 만들어요. 이름·뉴스 같은 글은 모두 이스케이프해요."""
+                    us: list[UsStock] | None = None, fx: float | None = None, fx_prev: float | None = None,
+                    term: str | None = None) -> str:
+    """텔레그램 HTML 모양(굵게·고정폭 표)으로 만들어요. 이름·뉴스 같은 글은 모두 이스케이프해요.
+    term은 terms.message가 만든(이미 이스케이프한) 오늘의 용어예요."""
     e = html.escape
     lines = [f"☀️ <b>좋은 아침이에요</b> · {day_label(day)}"]
     if indexes:
@@ -194,6 +196,8 @@ def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], it
         lines += ["", title, "<pre>" + "\n".join(rows) + "</pre>"]
     lines += ["", "🗓️ <b>오늘 일정</b>"]
     lines += [e(x) for x in _items(items)] if items else ["큰 일정은 없어요 😌"]
+    if term:
+        lines += ["", LINE, term]
     if any(s.ai for s in us):
         lines += ["", AI_NOTE]
     return "\n".join(lines)
