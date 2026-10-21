@@ -10,6 +10,8 @@ import ChartMemo, { type Candle, type Doodle, type Level, type Mark, type Memo, 
 import { wallClock } from "@/lib/candles";
 import { dartUrl, kindOf } from "@/lib/disclosures";
 import Statements from "@/app/_components/Statements";
+import EarningsReport from "@/app/_components/EarningsReport";
+import type { Report } from "@/lib/earnings";
 import type { StatementRow } from "@/lib/statements";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
 
@@ -74,6 +76,12 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
   const earnings = await safe<Earnings>(
     `SELECT period, title, url, to_char(reported_on, 'YYYY-MM-DD') AS reported_day, eps_actual, eps_estimate
      FROM stock_earnings WHERE ticker = $1 ORDER BY reported_on DESC NULLS LAST, period DESC LIMIT 8`,
+    [ticker],
+  );
+  // 실적 정리(표·막대·해설)는 워커 업데이트 뒤에 생기고, 다음 실적 발표부터 채워져요.
+  const [report] = await safe<Report>(
+    `SELECT period, to_char(reported_on, 'YYYY-MM-DD') AS reported_on, url, market, data, ai
+     FROM earnings_reports WHERE ticker = $1 ORDER BY reported_on DESC, created_at DESC LIMIT 1`,
     [ticker],
   );
   // 공시 표는 워커 업데이트 뒤에 생겨요.
@@ -267,7 +275,9 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       )}
 
       <h2>최근 실적</h2>
-      {earnings.length === 0 && <p className="muted">아직 없습니다. {stock.market === "KR" ? "DART_API_KEY" : "FINNHUB_API_KEY"}를 넣으면 워커가 가져옵니다.</p>}
+      {report && <EarningsReport report={report} />}
+      {!report && earnings.length === 0 && <p className="muted">아직 없습니다. {stock.market === "KR" ? "DART_API_KEY" : "FINNHUB_API_KEY"}를 넣으면 워커가 가져옵니다.</p>}
+      {earnings.length > 0 && report && <h3 className="er-past">지난 실적 기록</h3>}
       {earnings.map((e) => (
         <div key={e.url + e.title} className="card">
           <a href={e.url} target="_blank" rel="noreferrer">{e.title}</a>

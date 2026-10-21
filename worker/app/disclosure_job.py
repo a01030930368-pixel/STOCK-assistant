@@ -18,8 +18,9 @@ FRESH_DAYS = 1  # 접수일이 어제·오늘인 공시만 알려요. 워커를 
 
 
 class DisclosureJob:
-    def __init__(self, cfg: Config, http: httpx.Client, codes):
+    def __init__(self, cfg: Config, http: httpx.Client, codes, earnings=None):
         self.cfg = cfg
+        self.earnings = earnings  # 잠정실적 공시를 표·막대·해설로 정리하는 EarningsJob
         self.http = http
         self.codes = codes  # 종목코드 -> DART 고유번호를 돌려주는 함수(종목 정보 수집이 하루 한 번 받아 둠)
         self.last: datetime | None = None
@@ -51,7 +52,9 @@ class DisclosureJob:
             db.save_disclosures(conn, found)
             for d in found:
                 if first:
-                    # 처음 채운 공시는 이미 지난 거라 알리지 않고, 보낸 것으로 적어 둬요.
+                    # 처음 채운 공시는 이미 지난 거라 알리지 않고, 보낸 것으로 적어 둬요. 잠정실적은 종목 페이지용으로 정리만 해 둬요.
+                    if self.earnings:
+                        self.earnings.kr(conn, d, held)
                     db.mark_notice(conn, f"disclosure:{d.rcept_no}")
                 elif d.kind.important and (today - d.day).days <= FRESH_DAYS:
                     self._alert(conn, d, held)
@@ -65,8 +68,11 @@ class DisclosureJob:
         key = f"disclosure:{d.rcept_no}"
         if db.notice_sent(conn, key):
             return
-        summary = self._summary(conn, d)
-        if telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, disclosures.message(d, held, summary), self.http):
+        # 잠정실적은 실적 정리(표·막대·해설)로 보내고, 표를 못 읽으면 보통 공시 알림으로 보내요.
+        text = self.earnings.kr(conn, d, held) if self.earnings else None
+        if text is None:
+            text = disclosures.message(d, held, self._summary(conn, d))
+        if telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, text, self.http):
             db.mark_notice(conn, key)
 
     def _summary(self, conn: psycopg.Connection, d: disclosures.Disclosure) -> str:
