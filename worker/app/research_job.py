@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import psycopg
 
-from . import calendar, db, dividends, prices, research, translate
+from . import calendar, db, dividends, prices, research, statements, translate
 from .config import Config
 
 log = logging.getLogger("worker")
@@ -158,6 +158,13 @@ class ResearchJob:
             elif market == "US" and c.finnhub_api_key:
                 self._try(f"{ticker} 실적", lambda: db.save_earnings(
                     conn, ticker, research.finnhub_earnings(ticker, c.finnhub_api_key, self.http)))
+            # 종목 페이지 재무제표(연간·분기)
+            if market == "KR" and (corp := self.dart_codes.get(ticker)):
+                self._try(f"{name} 재무제표", lambda: db.save_statements(
+                    conn, ticker, statements.dart_statements(corp, c.dart_api_key, today, self.http)))
+            elif market == "US" and (cik := self.sec_ciks.get(ticker.upper())):
+                self._try(f"{ticker} 재무제표", lambda: db.save_statements(
+                    conn, ticker, statements.sec_statements(cik, self.user_agent, self.http)))
         seen = set()
         for ticker, name, market in watched + db.peer_stocks(conn):
             if ticker in seen:

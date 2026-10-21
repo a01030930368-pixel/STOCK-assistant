@@ -606,3 +606,37 @@ button:disabled { opacity: 0.6; cursor: default; filter: none; }
   .fx-big { font-size: 1.35rem; }
 }
 .disc .why.ai-line { color: var(--sub); }
+
+/* 종목 재무제표 */
+.statements { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+.st-health ul { list-style: none; margin: 0; padding: 0; }
+.st-health li { display: grid; grid-template-columns: 14px 84px 1fr; gap: 8px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--line-2); font-size: 0.9rem; }
+.st-dot { display: inline-block; width: 10px; height: 10px; border-radius: 5px; background: var(--muted); }
+.st-dot.good { background: var(--div); } .st-dot.watch { background: var(--warn); } .st-dot.bad { background: var(--up); }
+.st-legend { font-size: 0.78rem; margin-top: 8px; display: flex; gap: 6px; align-items: center; }
+.st-legend .st-dot { margin-left: 8px; } .st-legend .st-dot:first-child { margin-left: 0; }
+.st-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.st-short { display: none; }
+.st-body { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 18px; }
+.st-table table td:first-child, .st-table table th:first-child { text-align: left; white-space: nowrap; }
+.st-table tr.strong td { font-weight: 600; }
+.st-table tr.sub td { color: var(--muted); font-size: 0.78rem; padding-top: 0; }
+.st-table tr.sub td.up { color: var(--up); } .st-table tr.sub td.down { color: var(--down); }
+.st-bars { margin-bottom: 14px; }
+.st-bar-row { display: flex; gap: 10px; align-items: flex-end; height: 140px; margin-top: 6px; }
+.st-bar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; }
+.st-bar span { font-size: 0.72rem; color: var(--sub); white-space: nowrap; }
+.st-bar i { display: block; width: 70%; max-width: 44px; border-radius: 4px 4px 0 0; }
+.st-bar i.gold { background: var(--accent); } .st-bar i.up { background: var(--up); } .st-bar i.neg { background: var(--down); }
+.st-bar em { font-style: normal; font-size: 0.72rem; color: var(--muted); }
+.st-note { font-size: 0.76rem; margin-top: 8px; }
+@media (max-width: 900px) {
+  .st-body { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .st-long { display: none; } .st-short { display: inline; }
+  .st-health li { grid-template-columns: 14px 70px 1fr; font-size: 0.84rem; }
+  .st-bar-row { height: 110px; gap: 6px; }
+  .st-table table { font-size: 0.78rem; }
+  .st-table th, .st-table td { padding-left: 4px; padding-right: 4px; }
+}
