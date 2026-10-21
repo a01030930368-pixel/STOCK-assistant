@@ -1351,3 +1351,14 @@ def save_stock_themes(conn: psycopg.Connection, ticker: str, themes: list) -> No
     conn.execute("DELETE FROM stock_themes WHERE ticker = %s", (ticker,))
     for t in themes:
         conn.execute("INSERT INTO stock_themes (ticker, code, name) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING", (ticker, t.code, t.name))
+
+
+def traded_unwatched(conn: psycopg.Connection) -> list[tuple[str, str]]:
+    """최근 1년 넘게 안 지난 체결이 있는데 지금은 일봉을 모으지 않는 종목(매매 복기용). (ticker, market)"""
+    return conn.execute(
+        """SELECT DISTINCT ticker, market FROM trade_fills WHERE trade_date >= current_date - 400
+           EXCEPT SELECT ticker, market FROM holdings
+           EXCEPT SELECT ticker, 'KR' FROM isa_holdings
+           EXCEPT SELECT ticker, market FROM watchlist
+           ORDER BY 1"""
+    ).fetchall()

@@ -174,6 +174,7 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
           <input type="hidden" name="name" value={stock.name} />
           <input type="hidden" name="market" value={stock.market} />
           <button type="submit" className={stock.watched ? "chip-btn on" : "chip-btn"}>{stock.watched ? "★ 관심종목" : "☆ 관심종목에 추가"}</button>
+          <Link href={`/compare?t=${stock.ticker}`} className="chip-btn">⇄ 비교</Link>
         </form>
       </div>
       <SummaryLine parts={summary} />
