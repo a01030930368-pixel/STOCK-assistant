@@ -1,5 +1,6 @@
 from decimal import Decimal as D
 
+from app import statements
 from app.statements import Line, from_dart, from_sec
 
 
@@ -57,3 +58,15 @@ def test_sec_frames_and_derived_q4():
     assert pick(lines, "Y", "2024", "assets") == D(600)
     assert pick(lines, "Y", "2024", "fcf") == D(25)
     assert Line("Q", "2024Q3", "assets", D(500)) in lines
+
+
+def test_shares_from_dart_and_sec():
+    from datetime import date
+    from decimal import Decimal
+    rows = [{"se": "보통주", "istc_totqy": "728,002,365", "tesstk_co": "8,000,000", "distb_stock_co": "720,002,365"},
+            {"se": "합계", "istc_totqy": "728,002,365", "distb_stock_co": "720,002,365"}]
+    assert statements.parse_dart_shares(rows) == Decimal("720002365")
+    assert statements.parse_dart_shares([]) is None
+    facts = {"facts": {"dei": {"EntityCommonStockSharesOutstanding": {"units": {"shares": [
+        {"end": "2026-04-30", "val": 24300000000}, {"end": "2026-08-20", "val": 24400000000}]}}}}}
+    assert statements.sec_shares(facts) == (Decimal("24400000000"), date(2026, 8, 20))

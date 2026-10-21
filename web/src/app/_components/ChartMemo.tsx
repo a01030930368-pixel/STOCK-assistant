@@ -5,6 +5,9 @@ import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTi
 import { addAlert, addChartMemo, addDoodle, addLevel, deleteChartMemo, deleteDoodle, deleteLevel, updateLevel } from "@/app/actions";
 import { COLORS, KIND_LABEL, kindFor, markColor, moveEdge, nearest, snap, strokeDistance, thin, zone, type Doodle, type DoodlePoint, type Mark } from "@/lib/drawings";
 import { Drawings, RESIST, SUPPORT, type Stroke } from "./chartDrawings";
+import BandChart from "./BandChart";
+import type { BandKind } from "@/lib/bands";
+import type { StatementRow } from "@/lib/statements";
 import { aggregate, aggregateMinutes, bollinger, bucketOf, MINUTES, rsi, sma, type Candle, type MinuteCandle, type Period } from "@/lib/candles";
 
 export type { Candle, MinuteCandle };
@@ -13,14 +16,17 @@ export type Trade = { day: string; side: "buy" | "sell"; price: number; quantity
 export type Level = { kind: "avg" | "stop" | "target" | "alert"; price: number };
 export type { Doodle, Mark };
 type Tool = "none" | "line" | "zone" | "move" | "pen" | "eraser";
-const TOOLS: { key: Tool; label: string; hint: string }[] = [
-  { key: "line", label: "― 선", hint: "차트에서 원하는 높이를 한 번 누르세요. 지금 가격보다 위면 저항, 아래면 지지예요." },
-  { key: "zone", label: "▭ 구간", hint: "구간의 위·아래를 차례로 한 번씩 누르세요." },
-  { key: "move", label: "↕ 옮기기", hint: "옮길 선이나 구간의 위·아래 끝을 잡고 위아래로 끄세요. 다 옮겼으면 ↕ 옮기기를 다시 눌러 끝내요." },
-  { key: "pen", label: "✎ 낙서", hint: "손가락이나 마우스로 그리세요. 낙서는 이 차트에서만 보여요. 다 그렸으면 ✎ 낙서를 다시 눌러 끝내요." },
-  { key: "eraser", label: "지우개", hint: "지울 낙서나 선을 누르세요." },
+const TOOLS: { key: Tool; name: string; icon: string; hint: string }[] = [
+  { key: "line", name: "선", icon: "／", hint: "차트에서 원하는 높이를 한 번 누르세요. 지금 가격보다 위면 저항, 아래면 지지예요." },
+  { key: "zone", name: "구간", icon: "▭", hint: "구간의 위·아래를 차례로 한 번씩 누르세요." },
+  { key: "move", name: "옮기기", icon: "↕", hint: "옮길 선이나 구간의 위·아래 끝을 잡고 위아래로 끄세요. 다 옮겼으면 ↕ 옮기기를 다시 눌러 끝내요." },
+  { key: "pen", name: "낙서", icon: "✎", hint: "손가락이나 마우스로 그리세요. 낙서는 이 차트에서만 보여요. 다 그렸으면 ✎ 낙서를 다시 눌러 끝내요." },
+  { key: "eraser", name: "지우개", icon: "⌫", hint: "지울 낙서나 선을 누르세요." },
 ];
 const PEN = "#e7cf9c";
+// 오른쪽 위 접는 메뉴: [켜고 끌 것, 이름, 덧붙임]
+const INDICATORS = [["ma", "이동평균", "5·20·60·120"], ["bb", "볼린저 밴드", "20, 2"], ["volume", "거래량", ""], ["rsi", "RSI", "14"]] as const;
+const SHOWS = [["trades", "산 날·판 날", ""], ["levels", "평단·손절·알림 선", ""], ["memos", "메모", ""], ["drawings", "내가 그린 선·낙서", ""]] as const;
 
 const UP = "#e8806f", DOWN = "#86a8e6", GOLD = "#c9a96b", MUTED = "#9b968b", LINE = "#1b1b1f", BAND = "#a7a08f";
 const MAS = [
@@ -58,10 +64,20 @@ const md = (day: string) => `${Number(day.slice(5, 7))}.${Number(day.slice(8, 10
 const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
 const compact = (v: number) => (v >= 1e12 ? `${(v / 1e12).toFixed(1)}조` : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v.toLocaleString("ko-KR"));
 
-export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles }: {
+export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles, statements = [], shares = null }: {
   ticker: string; name: string; market: string; candles: Candle[]; minutes: MinuteCandle[]; memos: Memo[]; trades: Trade[]; levels: Level[]; today: string;
-  current: number | null; marks: Mark[]; doodles: Doodle[];
+  current: number | null; marks: Mark[]; doodles: Doodle[]; statements?: StatementRow[]; shares?: number | null;
 }) {
+  const [mode, setMode] = useState<"price" | BandKind>("price");
+  const [menu, setMenu] = useState<null | "ind" | "show">(null);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  // 메뉴 밖을 누르면 접어요.
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: PointerEvent) => { if (!toolsRef.current?.contains(e.target as Node)) setMenu(null); };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [menu]);
   const [view, setView] = useState<View>("D");
   const intraday = !["D", "W", "M"].includes(view);
   const period: Period = intraday ? "D" : (view as Period);
@@ -247,7 +263,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     };
     // fmt·period는 bars·market과 함께 바뀌므로 의존성에서 뺍니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars, show, levels, trades, memosByBar, maValues, bands, closes, today, big, intraday]);
+  }, [bars, show, levels, trades, memosByBar, maValues, bands, closes, today, big, intraday, mode]);
 
   useEffect(() => {
     if (chartRef.current) applyRange(chartRef.current, bars, intraday ? "intraday" : range);
@@ -428,7 +444,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     };
     // 상태는 ref로 읽어서, 차트 상자가 바뀔 때만 다시 붙입니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars.length >= 2, big]);
+  }, [bars.length >= 2, big, mode]);
   // 낙서: 누른 자리(화면 좌표)를 봉 키·봉 안 위치·가격으로 바꿔 둡니다.
   function toPoint(x: number, y: number): DoodlePoint | null {
     const chart = chartRef.current, price = priceRef.current;
@@ -481,35 +497,61 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   return (
     <>
       <div className={big ? "chart-wrap big" : "chart-wrap"}>
-        <div className="chart-tools">
-          <div className="segment small views">
-            {VIEWS.map((v) => <button key={v.key} type="button" aria-selected={view === v.key} onClick={() => setView(v.key)}>{v.label}</button>)}
-          </div>
-          <div className={intraday ? "segment small hidden" : "segment small"}>
-            {RANGES.map((r) => <button key={r.key} type="button" aria-selected={range === r.key} onClick={() => setRange(r.key)}>{r.label}</button>)}
-          </div>
-          <div className="chart-toggles">
-            {([["ma", "이동평균"], ["bb", "볼린저"], ["volume", "거래량"], ["rsi", "RSI"], ["trades", "매매"], ["levels", "평단·손절·알림"], ["memos", "메모"]] as const).map(([k, label]) => (
-              <button key={k} type="button" className={show[k] ? "chip-btn on" : "chip-btn"} aria-pressed={show[k]} onClick={() => toggle(k)}>{label}</button>
-            ))}
-            <button type="button" className="chip-btn" onClick={() => setBig((b) => !b)}>{big ? "닫기 ✕" : "크게 보기"}</button>
-          </div>
-          <div className="chart-toggles draw-tools">
-            {TOOLS.map((t) => (
-              <button key={t.key} type="button" className={tool === t.key ? "chip-btn on" : "chip-btn"} aria-pressed={tool === t.key}
-                onClick={() => { setTool(tool === t.key ? "none" : t.key); setDrawShown(true); }}>{t.label}</button>
-            ))}
-            <button type="button" className={magnet ? "chip-btn on" : "chip-btn"} aria-pressed={magnet} title="캔들 꼬리·몸통에 붙이기"
-              onClick={() => setMagnet((v) => !v)}>🧲 자석</button>
-            <button type="button" className={drawShown ? "chip-btn" : "chip-btn on"} aria-pressed={!drawShown} onClick={() => setDrawShown((v) => !v)}>
-              {drawShown ? "그림 숨기기" : "그림 보이기"}
-            </button>
-            {near.above && <span className="near" style={{ color: RESIST, borderColor: RESIST }}>저항 {fmt(near.above.mark.low)}까지 {signed(near.above.pct)}</span>}
-            {near.below && <span className="near" style={{ color: SUPPORT, borderColor: SUPPORT }}>지지 {fmt(near.below.mark.high ?? near.below.mark.low)}까지 {signed(near.below.pct)}</span>}
+        <div className="chart-tools" ref={toolsRef}>
+          {mode === "price" && (
+            <>
+              <div className="segment small views">
+                {VIEWS.map((v) => <button key={v.key} type="button" aria-selected={view === v.key} onClick={() => setView(v.key)}>{v.label}</button>)}
+              </div>
+              <div className={intraday ? "segment small hidden" : "segment small"}>
+                {RANGES.map((r) => <button key={r.key} type="button" aria-selected={range === r.key} onClick={() => setRange(r.key)}>{r.label}</button>)}
+              </div>
+            </>
+          )}
+          <div className="chart-menus">
+            {mode === "price" && ([["ind", "지표", INDICATORS], ["show", "표시", SHOWS]] as const).map(([id, label, items]) => {
+              const on = items.filter(([k]) => (k === "drawings" ? drawShown : show[k])).length;
+              return (
+                <div key={id} className="menu">
+                  <button type="button" className={on ? "chip-btn on" : "chip-btn"} aria-expanded={menu === id} onClick={() => setMenu(menu === id ? null : id)}>
+                    {label}{on > 0 && <span className="menu-count">{on}</span>} ▾
+                  </button>
+                  {menu === id && (
+                    <div className="menu-pop" role="menu">
+                      {items.map(([k, text, note]) => {
+                        const checked = k === "drawings" ? drawShown : show[k];
+                        return (
+                          <label key={k} className="menu-item">
+                            <input type="checkbox" checked={checked} onChange={() => (k === "drawings" ? setDrawShown((v) => !v) : toggle(k))} />
+                            <span>{text}{note && <em>{note}</em>}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div className="segment small modes" role="tablist" aria-label="차트 종류">
+              {([["price", "가격"], ["per", "PER 밴드"], ["pbr", "PBR 밴드"]] as const).map(([k, label]) => (
+                <button key={k} type="button" role="tab" aria-selected={mode === k} onClick={() => { setMode(k); setMenu(null); setTool("none"); }}>{label}</button>
+              ))}
+            </div>
+            {mode === "price" && (
+              <button type="button" className="chip-btn icon" aria-label={big ? "크게 보기 닫기" : "크게 보기"} title={big ? "닫기" : "크게 보기"} onClick={() => setBig((b) => !b)}>{big ? "✕" : "⛶"}</button>
+            )}
           </div>
         </div>
+        {mode === "price" && (near.above || near.below) && (
+          <div className="chart-near">
+            {near.above && <span className="near" style={{ color: RESIST, borderColor: RESIST }}>🔔 저항 {fmt(near.above.mark.low)}까지 {signed(near.above.pct)}</span>}
+            {near.below && <span className="near" style={{ color: SUPPORT, borderColor: SUPPORT }}>🔔 지지 {fmt(near.below.mark.high ?? near.below.mark.low)}까지 {signed(near.below.pct)}</span>}
+          </div>
+        )}
 
-        {bars.length < 2 ? (
+        {mode !== "price" ? (
+          <BandChart kind={mode} candles={candles} statements={statements} shares={shares} market={market} current={current} fmt={fmt} />
+        ) :         bars.length < 2 ? (
           <p className="muted chart-empty">
             {intraday
               ? "아직 분봉이 없어요. 장이 열려 있는 동안 워커가 2분마다 1분봉을 받아 오고, 최근 8일치를 보관해요."
@@ -542,6 +584,17 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
               {barMemos.map((m) => <div key={m.id} className="tip-memo">{md(m.day)} {m.body}</div>)}
             </div>
             <div className="chart-stage">
+              <div className="draw-rail" role="toolbar" aria-label="그리기 도구">
+                {TOOLS.map((t) => (
+                  <button key={t.key} type="button" className={tool === t.key ? "on" : ""} aria-pressed={tool === t.key} aria-label={t.name} title={t.name}
+                    onClick={() => { setTool(tool === t.key ? "none" : t.key); setDrawShown(true); }}>{t.icon}</button>
+                ))}
+                <i />
+                <button type="button" className={magnet ? "on" : ""} aria-pressed={magnet} aria-label="자석" title="자석: 캔들 꼬리·몸통에 붙이기" onClick={() => setMagnet((v) => !v)}>🧲</button>
+                <button type="button" className={drawShown ? "" : "on"} aria-pressed={!drawShown} aria-label={drawShown ? "그림 숨기기" : "그림 보이기"} title={drawShown ? "그림 숨기기" : "그림 보이기"}
+                  onClick={() => setDrawShown((v) => !v)}>{drawShown ? "👁" : "🚫"}</button>
+              </div>
+              <div className="chart-area">
               <div ref={box} className={show.rsi ? "chart-canvas tall" : "chart-canvas"} />
               {tool === "pen" && (
                 <div className="pen-layer" onPointerDown={penDown} onPointerMove={penMove} onPointerUp={penUp} onPointerCancel={penUp} />
@@ -552,13 +605,14 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
                   {tool === "zone" && pending !== null ? `${fmt(pending)}을 골랐어요. 이제 구간의 다른 끝을 누르세요.` : TOOLS.find((t) => t.key === tool)!.hint}
                 </div>
               )}
+              </div>
             </div>
           </div>
         )}
-        <p className="chart-foot">
+        {mode === "price" && <p className="chart-foot">
           휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 지지·저항은 모든 차트에, 낙서는 그린 차트에만 보여요. 선·구간은 ↕ 옮기기를 켜고 잡아 끌면 옮겨지고, 🧲 자석이 켜져 있으면 캔들 꼬리·몸통에 붙어요. 차트:{" "}
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a> Lightweight Charts
-        </p>
+        </p>}
       </div>
 
       {marks.length > 0 && (

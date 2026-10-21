@@ -131,6 +131,29 @@ def dart_statements(corp_code: str, key: str, today: date, http: httpx.Client) -
     return []
 
 
+# 보통주 수(유통주식수 = 발행주식 − 자기주식). PER·PBR 밴드의 주당순이익·주당순자산에 써요.
+SHARE_REPORTS = (("11014", 0), ("11012", 0), ("11013", 0), ("11011", 1), ("11014", 1))
+SHARE_DAY = {"11013": "03-31", "11012": "06-30", "11014": "09-30", "11011": "12-31"}
+
+
+def dart_shares(corp_code: str, key: str, today: date, http: httpx.Client) -> tuple[Decimal, date] | None:
+    """가장 최근 보고서의 (보통주 유통주식수, 기준일)."""
+    for code, back in SHARE_REPORTS:
+        year = today.year - back
+        body = _dart_json(http, "stockTotqySttus.json", {"crtfc_key": key, "corp_code": corp_code, "bsns_year": str(year), "reprt_code": code})
+        if shares := parse_dart_shares(body.get("list") or []):
+            return shares, date.fromisoformat(f"{year}-{SHARE_DAY[code]}")
+    return None
+
+
+def parse_dart_shares(rows: list[dict]) -> Decimal | None:
+    row = next((r for r in rows if _norm(r.get("se")) == "보통주"), None) or next((r for r in rows if _norm(r.get("se")) == "합계"), None)
+    if not row:
+        return None
+    v = _amount(row.get("distb_stock_co")) or _amount(row.get("istc_totqy"))
+    return v if v and v > 0 else None
+
+
 # ---------------------------------------------------------------- 미국(SEC)
 
 SEC_ITEMS = {
@@ -192,7 +215,19 @@ def from_sec(facts: dict) -> list[Line]:
     return lines
 
 
-def sec_statements(cik: int, user_agent: str, http: httpx.Client) -> list[Line]:
+def sec_shares(facts: dict) -> tuple[Decimal, date] | None:
+    """표지에 적는 보통주 수(dei:EntityCommonStockSharesOutstanding) 중 가장 최근 값."""
+    rows = facts.get("facts", {}).get("dei", {}).get("EntityCommonStockSharesOutstanding", {}).get("units", {}).get("shares", [])
+    rows = [r for r in rows if r.get("end") and r.get("val")]
+    if not rows:
+        return None
+    last = max(rows, key=lambda r: r["end"])
+    return Decimal(str(last["val"])), date.fromisoformat(last["end"])
+
+
+def sec_statements(cik: int, user_agent: str, http: httpx.Client) -> tuple[list[Line], tuple[Decimal, date] | None]:
+    """(재무제표 줄, (주식 수, 기준일))"""
     res = http.get(SEC_FACTS.format(cik=cik), headers={"User-Agent": user_agent})
     res.raise_for_status()
-    return from_sec(res.json())
+    facts = res.json()
+    return from_sec(facts), sec_shares(facts)

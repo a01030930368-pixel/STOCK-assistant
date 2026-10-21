@@ -241,7 +241,7 @@ h2 .link-toggle { margin-left: 10px; vertical-align: middle; }
 h1 + .summary-line { font-size: 0.95rem; margin: -6px 0 18px; }
 
 /* 차트 메모 */
-.chart-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 8px 0; }
+.chart-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
 .chart-tools .segment { width: auto; }
 .chart-tools .segment button { flex: none; white-space: nowrap; padding: 5px 12px; }
 .chart-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -673,3 +673,60 @@ button:disabled { opacity: 0.6; cursor: default; filter: none; }
   .er-table th, .er-table td { padding-left: 4px; padding-right: 4px; }
 }
 .er-past { font-size: 0.9rem; margin: 16px 0 6px; color: var(--sub); }
+
+/* 차트 위쪽: 기간 한 줄 + 오른쪽 접는 메뉴 */
+.chart-menus { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.chart-tools .segment.modes button, .chart-tools .segment:not(.views) button { padding: 5px 9px; }
+.chart-tools .chip-btn { padding: 4px 10px; }
+.chart-tools .chip-btn.icon { padding: 4px 8px; }
+.menu { position: relative; }
+.menu-count { display: inline-block; min-width: 16px; margin-left: 5px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-size: 0.7rem; line-height: 16px; text-align: center; }
+.menu-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 220px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 6px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5); }
+.menu-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; font-size: 0.86rem; cursor: pointer; }
+.menu-item:hover { background: var(--surface-2); }
+.menu-item input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+.menu-item em { font-style: normal; color: var(--muted); font-size: 0.76rem; margin-left: 6px; }
+.chip-btn.icon { padding: 4px 9px; }
+.chart-near { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; margin: -2px 0 8px; }
+
+/* 차트 왼쪽 세로 그리기 막대 */
+.chart-stage { display: flex; }
+.chart-area { position: relative; flex: 1; min-width: 0; }
+.chart-wrap.big .chart-area { display: flex; flex-direction: column; min-height: 0; }
+.draw-rail { display: flex; flex-direction: column; gap: 3px; padding: 6px 4px; border-right: 1px solid var(--line-2); z-index: 4; }
+.draw-rail button { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; color: var(--sub); border: 1px solid transparent; font-size: 0.95rem; line-height: 1; }
+.draw-rail button:hover { background: var(--surface-2); filter: none; }
+.draw-rail button.on { background: var(--accent-soft); color: var(--accent); border-color: #4a3f28; }
+.draw-rail i { display: block; height: 1px; background: var(--line); margin: 3px 2px; }
+.chart-box .chart-legend { left: 56px; }
+
+/* PER·PBR 밴드 */
+.band { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.band-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; font-size: 0.8rem; }
+.band-head .segment { width: auto; flex: none; }
+.band-head .segment button { white-space: nowrap; flex: none; }
+.band-body { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 14px; }
+.band-canvas { height: 460px; }
+.band-side { display: flex; flex-direction: column; gap: 10px; }
+.band-note { margin: 0; font-size: 0.88rem; line-height: 1.7; }
+.band-small { margin: 0; font-size: 0.76rem; line-height: 1.6; }
+.band-empty { padding: 40px 16px; text-align: center; }
+@media (max-width: 900px) {
+  .band-body { grid-template-columns: 1fr; }
+  .band-canvas { height: 360px; }
+}
+@media (max-width: 640px) {
+  /* 폰: 1줄 가격·PER·PBR + 크게, 2줄 봉, 3줄 기간 + 지표·표시 */
+  .chart-menus { display: contents; }
+  .chart-tools .segment.modes { order: -2; flex: 1; }
+  .chart-tools .chip-btn.icon { order: -1; }
+  .chart-tools .segment.views { order: 0; }
+  .chart-tools .segment:not(.views):not(.modes) { order: 1; flex: 1; }
+  .chart-tools .segment:not(.views):not(.modes) button { flex: 1; padding: 5px 0; }
+  .chart-tools .menu { order: 2; }
+  .chart-tools .segment.modes button { flex: 1; }
+  .menu-pop { right: 0; }
+  .draw-rail { padding: 4px 2px; }
+  .draw-rail button { width: 30px; height: 30px; font-size: 0.85rem; }
+  .chart-box .chart-legend { left: auto; }
+}

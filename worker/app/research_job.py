@@ -162,9 +162,15 @@ class ResearchJob:
             if market == "KR" and (corp := self.dart_codes.get(ticker)):
                 self._try(f"{name} 재무제표", lambda: db.save_statements(
                     conn, ticker, statements.dart_statements(corp, c.dart_api_key, today, self.http)))
+                # PER·PBR 밴드용 주식 수
+                self._try(f"{name} 주식 수", lambda: db.save_shares(
+                    conn, ticker, statements.dart_shares(corp, c.dart_api_key, today, self.http)))
             elif market == "US" and (cik := self.sec_ciks.get(ticker.upper())):
-                self._try(f"{ticker} 재무제표", lambda: db.save_statements(
-                    conn, ticker, statements.sec_statements(cik, self.user_agent, self.http)))
+                def us_statements(cik=cik, ticker=ticker):
+                    lines, shares = statements.sec_statements(cik, self.user_agent, self.http)
+                    db.save_statements(conn, ticker, lines)
+                    db.save_shares(conn, ticker, shares)
+                self._try(f"{ticker} 재무제표", us_statements)
         seen = set()
         for ticker, name, market in watched + db.peer_stocks(conn):
             if ticker in seen:

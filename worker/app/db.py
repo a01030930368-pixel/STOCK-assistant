@@ -354,6 +354,13 @@ MIGRATIONS = [
       created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS earnings_reports_ticker ON earnings_reports (ticker, reported_on DESC)",
+    # PER·PBR 밴드용 보통주 수(국내 유통주식수, 미국 표지 주식 수)
+    """CREATE TABLE IF NOT EXISTS stock_shares (
+      ticker      TEXT PRIMARY KEY,
+      shares      NUMERIC(20, 0) NOT NULL,
+      as_of       DATE NOT NULL,
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
 
 
@@ -570,6 +577,17 @@ def save_statements(conn: psycopg.Connection, ticker: str, lines) -> None:
                ON CONFLICT (ticker, kind, period, item) DO UPDATE SET value = EXCLUDED.value, fetched_at = now()""",
             (ticker, x.kind, x.period, x.item, x.value),
         )
+
+
+def save_shares(conn: psycopg.Connection, ticker: str, found) -> None:
+    """found = (주식 수, 기준일) 또는 None(그대로 둬요)"""
+    if not found:
+        return
+    conn.execute(
+        """INSERT INTO stock_shares (ticker, shares, as_of) VALUES (%s, %s, %s)
+           ON CONFLICT (ticker) DO UPDATE SET shares = EXCLUDED.shares, as_of = EXCLUDED.as_of, fetched_at = now()""",
+        (ticker, found[0], found[1]),
+    )
 
 
 def save_earnings_report(conn: psycopg.Connection, r, ai: str | None = None) -> None:

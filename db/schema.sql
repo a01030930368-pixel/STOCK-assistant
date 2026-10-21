@@ -487,3 +487,11 @@ CREATE TABLE earnings_reports (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX earnings_reports_ticker ON earnings_reports (ticker, reported_on DESC);
+
+-- PER·PBR 밴드용 보통주 수(국내 유통주식수, 미국 표지 주식 수)
+CREATE TABLE stock_shares (
+  ticker      TEXT PRIMARY KEY,
+  shares      NUMERIC(20, 0) NOT NULL,
+  as_of       DATE NOT NULL,
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

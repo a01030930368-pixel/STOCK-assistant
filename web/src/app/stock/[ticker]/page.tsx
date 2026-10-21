@@ -98,6 +98,9 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
   ));
   const statements = statementRows.map<StatementRow>((r) => ({ kind: r.kind, period: r.period, item: r.item, value: Number(r.value) }));
   const statementsAt = statementRows[0]?.fetched_at;
+  // PER·PBR 밴드용 주식 수(워커 업데이트 뒤에 생겨요)
+  const [shareRow] = await safe<{ shares: string }>("SELECT shares FROM stock_shares WHERE ticker = $1", [ticker]);
+  const shares = shareRow ? Number(shareRow.shares) : null;
   const financials = await safe<FinancialRow>("SELECT * FROM stock_financials WHERE ticker = $1 ORDER BY period DESC", [ticker]);
   const peers = await safe<Peer>("SELECT peer_ticker, peer_name, peer_market FROM stock_peers WHERE ticker = $1 ORDER BY peer_name", [ticker]);
   const peerLatest = await safe<FinancialRow>(
@@ -169,7 +172,8 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}
 
       <h2>차트 · 메모 · 가격 알림</h2>
-      <ChartMemo ticker={ticker} name={stock.name} current={stock.cur === null ? null : Number(stock.cur)} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} marks={marks} doodles={doodles} />
+      <ChartMemo ticker={ticker} name={stock.name} current={stock.cur === null ? null : Number(stock.cur)} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} marks={marks} doodles={doodles}
+        statements={statements} shares={shares} />
 
       <h2>{statements.length > 0 ? "재무제표" : "재무 요약"}</h2>
       {statements.length > 0 ? (
