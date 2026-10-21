@@ -1,4 +1,5 @@
 """실수 노트 일정. 한 주에 한 번, 또는 화면에서 '다시 읽기'를 누르면 최근 6개월 기록을 AI가 다시 읽습니다."""
+import dataclasses
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -33,9 +34,19 @@ class MistakesJob:
 
     def items(self, conn: psycopg.Connection, now: datetime) -> list[mistakes.Item]:
         since = now.astimezone(timezone.utc).date() - timedelta(days=SPAN_DAYS)
-        out = [mistakes.sell_item(r) for r in db.mistake_sells(conn, since)]
         trades, held, _ = db.review_inputs(conn)
         closed = {b.key: b for b in books.closed_books(trades, held)}
+        out = []
+        for r in db.mistake_sells(conn, since):
+            item = mistakes.sell_item(r)
+            if len(r) >= 14:
+                # 이 매도가 들어 있는 일기장 권을 찾아 같은 매매로 묶어요.
+                market, ticker = r[12], r[13]
+                book = next((b for b in closed.values() if b.market == market and b.ticker == ticker
+                             and (b.start is None or b.start <= item.day) and item.day <= b.end), None)
+                if book:
+                    item = dataclasses.replace(item, trade=book.key)
+            out.append(item)
         for n, (key, *row) in enumerate(db.mistake_reviews(conn), 1):
             b = closed.get(key)
             end = b.end if b else datetime.strptime(key.split(":")[2][:10], "%Y-%m-%d").date()

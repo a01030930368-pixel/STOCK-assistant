@@ -14,7 +14,7 @@ REASON = {"stop": "손절", "target": "익절", "other": "다른 사유"}
 SYSTEM = """너는 개인 투자자의 매매 기록을 읽고, 이 사람이 자주 반복하는 실수를 찾아 주는 코치다.
 규칙:
 - 아래 기록(매도 일지 s번호, 사후강평 r번호)에 실제로 보이는 것만 쓴다. 추측하지 않는다.
-- 실수는 최대 3개, 자주 보이는 순서로. 각 실수는 그 실수가 보이는 기록 번호를 ids에 모두 넣는다. 한 번만 보인 것은 넣지 않는다.
+- 실수는 최대 3개, 자주 보이는 순서로. 각 실수는 그 실수가 보이는 기록 번호를 ids에 모두 넣는다. 서로 다른 매매 2번 이상에서 보인 것만 넣는다("같은 매매"로 표시된 기록은 한 번으로 센다).
 - title은 "손절을 미뤘어요"처럼 사용자가 한 행동을 12자 안팎의 해요체로.
 - why는 그 실수가 어떻게 보이는지 한 문장. 숫자는 기록에 있는 것만 쓴다.
 - good은 잘하고 있는 점 한 문장. 없으면 빈 문자열.
@@ -35,6 +35,7 @@ class Item:
     ret: float | None
     text: str  # AI에게 보내는 한 줄
     words: str = field(default="", compare=False)  # 사용자가 직접 쓴 글(자주 쓴 말 세기용)
+    trade: str = field(default="", compare=False)  # 같은 매매면 같은 값(일기장 키). 매도 일지와 사후강평이 한 매매를 두 번 세지 않게요
 
 
 def _pct(v: float | None) -> str:
@@ -42,8 +43,8 @@ def _pct(v: float | None) -> str:
 
 
 def sell_item(row) -> Item:
-    """row: (id, 이름, 매도일, 수익률, 보유일, 사유, 사유 설명, 배운 것, 원칙 지킴, 판 가격, 손절가, 익절가)"""
-    sid, name, day, ret, held, reason, detail, lesson, followed, price, stop, target = row
+    """row: (id, 이름, 매도일, 수익률, 보유일, 사유, 사유 설명, 배운 것, 원칙 지킴, 판 가격, 손절가, 익절가[, 시장, 종목코드])"""
+    sid, name, day, ret, held, reason, detail, lesson, followed, price, stop, target = row[:12]
     ret = None if ret is None else float(ret)
     parts = [f"매도 · {name} · {day.isoformat()} · 수익률 {_pct(ret)} · 보유 {held}일 · 사유 {REASON.get(reason, reason)}",
              f"원칙 지킴 {'예' if followed else '아니오'}"]
@@ -55,7 +56,7 @@ def sell_item(row) -> Item:
     if detail:
         parts.append(f"판 이유: {detail}")
     parts.append(f"배운 것: {lesson}")
-    return Item(f"s{sid}", "sell", str(sid), name, day, ret, " · ".join(parts), f"{detail}\n{lesson}")
+    return Item(f"s{sid}", "sell", str(sid), name, day, ret, " · ".join(parts), f"{detail}\n{lesson}", f"s{sid}")
 
 
 def review_item(n: int, key: str, name: str, end: date, ret: float | None, row) -> Item:
@@ -69,11 +70,16 @@ def review_item(n: int, key: str, name: str, end: date, ret: float | None, row) 
     for label, v in (("산 이유 돌아보기", thesis), ("계획대로 했나", plan), ("판 타이밍", timing), ("교훈", lesson)):
         if v:
             parts.append(f"{label}: {v}")
-    return Item(f"r{n}", "book", key, name, end, ret, " · ".join(parts), "\n".join(v for v in (thesis, plan, timing, lesson) if v))
+    return Item(f"r{n}", "book", key, name, end, ret, " · ".join(parts), "\n".join(v for v in (thesis, plan, timing, lesson) if v), key)
 
 
 def build_prompt(items: list[Item]) -> str:
-    return "\n".join([f"최근 기록 {len(items)}개:"] + [f"[{i.id}] {i.text}" for i in items])
+    """같은 매매의 매도 일지와 사후강평에는 서로 번호를 붙여, AI가 한 매매를 두 번 보고 '반복'이라 하지 않게 해요."""
+    lines = [f"최근 기록 {len(items)}개 (같은 매매 표시가 있으면 한 번의 매매예요):"]
+    for i in items:
+        same = [o.id for o in items if o is not i and i.trade and o.trade == i.trade]
+        lines.append(f"[{i.id}] {i.text}" + (f" · 같은 매매 {', '.join(same)}" if same else ""))
+    return "\n".join(lines)
 
 
 def parse(text: str) -> dict:
@@ -92,7 +98,14 @@ def assemble(raw: dict, items: list[Item]) -> dict:
     by_id = {i.id: i for i in items}
     out = []
     for m in raw.get("mistakes") or []:
-        hits = [by_id[x] for x in dict.fromkeys(str(x).strip() for x in m.get("ids") or []) if x in by_id]
+        found = [by_id[x] for x in dict.fromkeys(str(x).strip() for x in m.get("ids") or []) if x in by_id]
+        # 한 매매에 매도 일지와 사후강평이 둘 다 있으면 한 번으로 세요. 수익률은 매매 전체를 본 사후강평 쪽을 써요.
+        trades: dict[str, Item] = {}
+        for h in sorted(found, key=lambda h: (h.kind != "book", h.ret is None)):
+            trades.setdefault(h.trade or h.id, h)
+        hits = list(trades.values())
+        # 이름은 매도 일지 쪽이 더 깔끔해요(사후강평은 체결 내역의 영문 대문자 이름일 때가 있어요).
+        names = {h.trade or h.id: h.name for h in sorted(found, key=lambda h: h.kind == "sell")}
         title = _clip(m.get("title"), 40)
         if len(hits) < 2 or not title:
             continue
@@ -103,7 +116,7 @@ def assemble(raw: dict, items: list[Item]) -> dict:
         out.append({
             "title": title, "why": _clip(m.get("why"), 160), "count": len(hits),
             "avg": round(sum(rets) / len(rets), 1) if rets else None,
-            "examples": [{"kind": h.kind, "ref": h.ref, "name": h.name, "ret": h.ret} for h in worst],
+            "examples": [{"kind": h.kind, "ref": h.ref, "name": names[h.trade or h.id], "ret": h.ret} for h in worst],
         })
     out.sort(key=lambda m: -m["count"])
     words = "\n".join(i.words for i in items)

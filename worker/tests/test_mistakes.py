@@ -69,3 +69,31 @@ def test_job_waits_for_enough_records(monkeypatch):
     job.ask = lambda *a: (_ for _ in ()).throw(AssertionError("AI를 부르면 안 돼요"))
     job.run(object(), datetime(2026, 10, 21, tzinfo=timezone.utc))
     assert settings["mistakes"]["few"] == 0
+
+
+def test_sell_and_review_of_same_trade_count_once():
+    s1 = mistakes.sell_item((1, "스트레티지", date(2026, 9, 1), Decimal("29.4"), 10, "other", "운에 기대", "도박이었다", False,
+                             Decimal(90), None, None, "US", "MSTR"))
+    s1 = mistakes.Item(**{**s1.__dict__, "trade": "US:MSTR:2026-09-01"})
+    r1 = mistakes.review_item(1, "US:MSTR:2026-09-01", "STRATEGY INC", date(2026, 9, 1), 29.4, (2, False, "", "", "", "도박"))
+    s2 = sell(2, -5.0)
+    assert "[s1]" in mistakes.build_prompt([s1, r1, s2]) and "같은 매매 r1" in mistakes.build_prompt([s1, r1, s2])
+    raw = {"mistakes": [{"title": "도박처럼 매매했어요", "why": "", "ids": ["s1", "r1"]},
+                        {"title": "운에 기댔어요", "why": "", "ids": ["s1", "r1", "s2"]}]}
+    r = mistakes.assemble(raw, [s1, r1, s2])
+    assert [m["title"] for m in r["mistakes"]] == ["운에 기댔어요"]  # 한 매매뿐인 실수는 빠져요
+    m = r["mistakes"][0]
+    assert m["count"] == 2 and [e["name"] for e in m["examples"]] == ["종목2", "스트레티지"]
+    assert m["examples"][1]["kind"] == "book"
+
+
+def test_job_links_sell_to_its_book(monkeypatch):
+    from app import books
+    monkeypatch.setattr("app.db.mistake_sells", lambda conn, since: [
+        (1, "스트레티지", date(2026, 9, 1), Decimal("29.4"), 10, "other", "", "도박", False, Decimal(90), None, None, "US", "MSTR")])
+    monkeypatch.setattr("app.db.mistake_reviews", lambda conn: [("US:MSTR:2026-09-01", 2, False, "", "", "", "도박")])
+    monkeypatch.setattr("app.db.review_inputs", lambda conn: ([], {}, set()))
+    book = books.ClosedBook("US:MSTR:2026-09-01", "US", "MSTR", "STRATEGY INC", date(2026, 8, 1), date(2026, 9, 1), 29.4, None)
+    monkeypatch.setattr("app.books.closed_books", lambda trades, held: [book])
+    items = MistakesJob(Cfg(), None).items(object(), datetime(2026, 10, 21, tzinfo=timezone.utc))
+    assert {i.trade for i in items} == {"US:MSTR:2026-09-01"}

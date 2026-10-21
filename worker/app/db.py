@@ -1176,14 +1176,15 @@ def review_inputs(conn: psycopg.Connection):
 
 
 def mistake_sells(conn: psycopg.Connection, since) -> list[tuple]:
-    """실수 노트에 쓸 매도 일지: (id, 이름, 매도일, 수익률, 보유일, 사유, 사유 설명, 배운 것, 원칙 지킴, 판 가격, 손절가, 익절가)"""
+    """실수 노트에 쓸 매도 일지: (id, 이름, 매도일, 수익률, 보유일, 사유, 사유 설명, 배운 것, 원칙 지킴, 판 가격, 손절가, 익절가, 시장, 종목코드)"""
     return conn.execute(
         """SELECT s.id, p.name, s.trade_date, s.return_pct, s.holding_days, s.reason_type, s.reason_detail, s.lesson,
                   s.followed_rules, s.price,
                   (SELECT b.stop_price FROM buy_entries b WHERE b.position_id = s.position_id AND b.trade_date <= s.trade_date
                     ORDER BY b.trade_date DESC, b.id DESC LIMIT 1),
                   (SELECT b.target_price FROM buy_entries b WHERE b.position_id = s.position_id AND b.trade_date <= s.trade_date
-                    ORDER BY b.trade_date DESC, b.id DESC LIMIT 1)
+                    ORDER BY b.trade_date DESC, b.id DESC LIMIT 1),
+                  p.market, p.ticker
            FROM sell_entries s JOIN positions p ON p.id = s.position_id
            WHERE s.trade_date >= %s ORDER BY s.trade_date, s.id""",
         (since,),
