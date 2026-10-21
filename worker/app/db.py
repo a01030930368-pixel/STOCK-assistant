@@ -361,6 +361,25 @@ MIGRATIONS = [
       as_of       DATE NOT NULL,
       fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
+    # 섹터 동향: 지금 지수·등락률·비중(지도 크기)·오늘 많이 움직인 종목, 그리고 지난 종가
+    """CREATE TABLE IF NOT EXISTS sector_index (
+      market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+      code        TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      price       NUMERIC(18, 4) NOT NULL,
+      change_pct  NUMERIC(8, 2) NOT NULL,
+      weight      NUMERIC(10, 4),
+      leaders     JSONB NOT NULL DEFAULT '[]',
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (market, code)
+    )""",
+    """CREATE TABLE IF NOT EXISTS sector_daily (
+      market  TEXT NOT NULL,
+      code    TEXT NOT NULL,
+      day     DATE NOT NULL,
+      close   NUMERIC(18, 4) NOT NULL,
+      PRIMARY KEY (market, code, day)
+    )""",
 ]
 
 
@@ -1236,3 +1255,28 @@ def command_watch(conn: psycopg.Connection) -> list[tuple]:
     ).fetchall()
     f = lambda v: float(v) if v is not None else None
     return [(n, m, f(c), f(ch), f(t)) for n, m, c, ch, t in rows]
+
+
+def save_sectors(conn: psycopg.Connection, market: str, rows: list, keep_leaders: bool = True) -> None:
+    """지금 섹터 값을 넣어요. 이번에 없는 섹터는 지워요. leaders가 비어 있으면 예전 것을 그대로 둬요."""
+    for r in rows:
+        conn.execute(
+            """INSERT INTO sector_index (market, code, name, price, change_pct, weight, leaders, updated_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, now())
+               ON CONFLICT (market, code) DO UPDATE SET name = EXCLUDED.name, price = EXCLUDED.price,
+                 change_pct = EXCLUDED.change_pct, weight = COALESCE(EXCLUDED.weight, sector_index.weight),
+                 leaders = CASE WHEN %s AND EXCLUDED.leaders = '[]'::jsonb THEN sector_index.leaders ELSE EXCLUDED.leaders END,
+                 updated_at = now()""",
+            (market, r.code, r.name, r.price, r.change_pct, r.weight, Jsonb(r.leaders), keep_leaders),
+        )
+    if rows:
+        conn.execute("DELETE FROM sector_index WHERE market = %s AND NOT (code = ANY(%s))", (market, [r.code for r in rows]))
+
+
+def save_sector_daily(conn: psycopg.Connection, market: str, code: str, closes: list) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO sector_daily (market, code, day, close) VALUES (%s, %s, %s, %s)
+               ON CONFLICT (market, code, day) DO UPDATE SET close = EXCLUDED.close""",
+            [(market, code, d, c) for d, c in closes],
+        )

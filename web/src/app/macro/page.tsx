@@ -3,6 +3,7 @@ import { asOf, fixedPct, today } from "@/lib/format";
 import { rateGap } from "@/lib/macro";
 import MacroCard, { SNAPSHOT_COLUMNS, type Snapshot } from "./MacroCard";
 import MacroForm from "./MacroForm";
+import MacroTabs from "./MacroTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,10 @@ export default async function MacroPage() {
 
   return (
     <>
-      <h1>매크로 환경</h1>
+      <div className="board-head">
+        <h1>매크로 환경</h1>
+        <MacroTabs on="indicators" />
+      </div>
       <h2>최신 지표</h2>
       {indicators.length === 0 ? (
         <p className="card muted">자동으로 가져온 지표가 아직 없습니다. .env에 ECOS_API_KEY와 FRED_API_KEY를 넣으면 워커가 6시간마다 가져옵니다. 키가 없어도 아래에 직접 적을 수 있습니다.</p>
