@@ -9,6 +9,8 @@ import StockNews from "@/app/_components/StockNews";
 import ChartMemo, { type Candle, type Doodle, type Level, type Mark, type Memo, type MinuteCandle, type Trade } from "@/app/_components/ChartMemo";
 import { wallClock } from "@/lib/candles";
 import { dartUrl, kindOf } from "@/lib/disclosures";
+import Statements from "@/app/_components/Statements";
+import type { StatementRow } from "@/lib/statements";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
 
 export const dynamic = "force-dynamic";
@@ -81,6 +83,13 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
     // 요약 칸은 워커 업데이트 뒤에 생겨요.
     ? await query<Filing>(filingSql("summary"), [ticker]).catch(() => safe<Filing>(filingSql("NULL"), [ticker]))
     : [];
+  // 재무제표(연간·분기) 표는 워커 업데이트 뒤에 생기고, 처음 채워지기까지 최대 12시간 걸려요.
+  const statementRows = (await safe<{ kind: StatementRow["kind"]; period: string; item: string; value: string; fetched_at: Date }>(
+    "SELECT kind, period, item, value, fetched_at FROM stock_statements WHERE ticker = $1",
+    [ticker],
+  ));
+  const statements = statementRows.map<StatementRow>((r) => ({ kind: r.kind, period: r.period, item: r.item, value: Number(r.value) }));
+  const statementsAt = statementRows[0]?.fetched_at;
   const financials = await safe<FinancialRow>("SELECT * FROM stock_financials WHERE ticker = $1 ORDER BY period DESC", [ticker]);
   const peers = await safe<Peer>("SELECT peer_ticker, peer_name, peer_market FROM stock_peers WHERE ticker = $1 ORDER BY peer_name", [ticker]);
   const peerLatest = await safe<FinancialRow>(
@@ -154,8 +163,24 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
       <h2>차트 · 메모 · 가격 알림</h2>
       <ChartMemo ticker={ticker} name={stock.name} current={stock.cur === null ? null : Number(stock.cur)} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} marks={marks} doodles={doodles} />
 
-      <h2>재무 요약</h2>
-      {financials.length === 0 ? (
+      <h2>{statements.length > 0 ? "재무제표" : "재무 요약"}</h2>
+      {statements.length > 0 ? (
+        <>
+          <Statements
+            rows={statements}
+            market={stock.market}
+            source={`${stock.market === "US" ? "SEC EDGAR · 달력 기준 연도·분기" : "DART 사업·반기·분기보고서 · 연결 기준(없으면 별도)"}${statementsAt ? ` · ${kst(statementsAt)} 받음` : ""}`}
+          />
+          {latestMargin !== null && peerMargin !== null && (
+            <div className="card">
+              최근 영업이익률 <strong>{latestMargin}%</strong> · 비교 기업 중앙값 <strong>{peerMargin}%</strong>{" "}
+              <span className={latestMargin >= peerMargin ? "up" : "down"}>
+                ({latestMargin >= peerMargin ? "+" : ""}{Math.round((latestMargin - peerMargin) * 10) / 10}%p)
+              </span>
+            </div>
+          )}
+        </>
+      ) : financials.length === 0 ? (
         <p className="muted">아직 재무 정보가 없습니다. {stock.market === "KR" ? "DART_API_KEY" : "SEC_CONTACT_EMAIL"}를 넣으면 워커가 가져옵니다.</p>
       ) : (
         <>

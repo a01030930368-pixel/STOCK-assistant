@@ -325,6 +325,16 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS stock_disclosures_ticker ON stock_disclosures (ticker, day DESC)",
     # 중요한 공시를 AI가 본문을 읽고 숫자를 넣어 정리한 한 줄
     "ALTER TABLE stock_disclosures ADD COLUMN IF NOT EXISTS summary TEXT",
+    # 종목 페이지 재무제표(손익·재무상태·현금흐름). kind: Y 연간, Q 분기(석 달), C 올해 누적
+    """CREATE TABLE IF NOT EXISTS stock_statements (
+      ticker      TEXT NOT NULL,
+      kind        TEXT NOT NULL CHECK (kind IN ('Y', 'Q', 'C')),
+      period      TEXT NOT NULL,
+      item        TEXT NOT NULL,
+      value       NUMERIC(24, 2) NOT NULL,
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (ticker, kind, period, item)
+    )""",
     # 날마다 원/달러 기준 환율(한국은행). 미국 주식을 산 날 환율을 찾는 데 써요.
     """CREATE TABLE IF NOT EXISTS fx_daily (
       day   DATE PRIMARY KEY,
@@ -532,6 +542,19 @@ def save_financials(conn: psycopg.Connection, items: list[Financials]) -> None:
                  liabilities = EXCLUDED.liabilities, equity = EXCLUDED.equity,
                  operating_cash_flow = EXCLUDED.operating_cash_flow, fetched_at = now()""",
             (f.ticker, f.period, f.revenue, f.operating_income, f.liabilities, f.equity, f.operating_cash_flow),
+        )
+
+
+def save_statements(conn: psycopg.Connection, ticker: str, lines) -> None:
+    """받아 온 재무제표로 그 종목 것을 통째로 바꿔요. 아무것도 못 받았으면 예전 것을 그대로 둬요."""
+    if not lines:
+        return
+    conn.execute("DELETE FROM stock_statements WHERE ticker = %s", (ticker,))
+    for x in lines:
+        conn.execute(
+            """INSERT INTO stock_statements (ticker, kind, period, item, value) VALUES (%s, %s, %s, %s, %s)
+               ON CONFLICT (ticker, kind, period, item) DO UPDATE SET value = EXCLUDED.value, fetched_at = now()""",
+            (ticker, x.kind, x.period, x.item, x.value),
         )
 
 

@@ -461,3 +461,14 @@ CREATE TABLE fx_daily (
   day   DATE PRIMARY KEY,
   rate  NUMERIC(12, 4) NOT NULL
 );
+
+-- 종목 페이지 재무제표(손익·재무상태·현금흐름). kind: Y 연간, Q 분기(석 달), C 올해 누적
+CREATE TABLE stock_statements (
+  ticker      TEXT NOT NULL,
+  kind        TEXT NOT NULL CHECK (kind IN ('Y', 'Q', 'C')),
+  period      TEXT NOT NULL,
+  item        TEXT NOT NULL,
+  value       NUMERIC(24, 2) NOT NULL,
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (ticker, kind, period, item)
+);
