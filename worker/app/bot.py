@@ -92,6 +92,6 @@ class Bot:
                     reply = handle(conn, update, self.cfg.telegram_chat_id, today)
                 except Exception as e:
                     log.warning("텔레그램 명령 처리 실패: %s", e)
-                    reply = "지금은 답하기 어려워요. 잠시 뒤 다시 보내 주세요."
+                    reply = "⚠️ 지금은 답하기 어려워요.\n잠시 뒤 다시 보내 주세요."
                 if reply:
                     telegram.send(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, reply, self.http)

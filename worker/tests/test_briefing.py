@@ -28,7 +28,8 @@ def test_evening_message_puts_rate_decisions_first():
         Item("earnings", "아이온큐 실적 발표", "장 마감 후"),
         Item("policy", "FOMC 금리 결정", "미국 동부 14:00 · 한국 시간 다음 날 03:00"),
     ])
-    assert text.splitlines()[0] == "[LODESTAR] 내일 일정 · 10.28 (수)"
+    assert text.splitlines()[0] == "🗓️ 내일 일정 · 10.28 (수)"
+    assert "🏦 FOMC 금리 결정\n      미국 동부 14:00" in text
     assert text.index("FOMC") < text.index("아이온큐")
     assert briefing.evening_message(date(2026, 10, 28), []) is None
 
@@ -63,10 +64,10 @@ def test_morning_message_sections():
         [briefing.Holding("삼성전자", "KR", 68400, 1.2, 5.0), briefing.Holding("아이온큐", "US", 31.11, None, -17.66)],
         [],
     )
-    assert "· 나스닥 21,400.50 (-0.2%)" in text
-    assert "· 삼성전자 68,400원 · +1.2% · +5.0%" in text
-    assert "· 아이온큐 $31.11 · - · -17.7%" in text
-    assert text.endswith("오늘 일정\n· 큰 일정은 없어요")
+    assert "🔵 나스닥  21,400.50 (-0.2%)" in text
+    assert "🔴 삼성전자  68,400원\n      +1.2% · +5.0%" in text
+    assert "⚪ 아이온큐  $31.11\n      - · -17.7%" in text
+    assert text.endswith("🗓️ 오늘 일정\n큰 일정은 없어요 😌")
 
 
 def test_morning_sends_even_when_an_index_fails(monkeypatch):
@@ -91,8 +92,9 @@ def test_morning_sends_even_when_an_index_fails(monkeypatch):
 def test_earnings_eve_message():
     e = briefing.EarningsEve("아이온큐", "US", "장 마감 후 · 예상 EPS -0.25", 5.0, 12.4, 38.5, 55.0, 18.2)
     text = briefing.earnings_eve_message(date(2026, 10, 28), e)
-    assert text.splitlines()[:2] == ["[LODESTAR] 내일 실적 발표 · 아이온큐", "10.28 (수) · 장 마감 후 · 예상 EPS -0.25"]
-    assert "예상보다 +18% 좋았어요" in text and "평단 대비 +5.0% · 내 돈의 12%" in text and "손절 $38.50 · 익절 $55.00" in text
+    assert text.splitlines()[:2] == ["📣 내일 실적 발표 · 아이온큐", "🗓️ 10.28 (수) · 장 마감 후 · 예상 EPS -0.25"]
+    assert "👍 지난번 실적은 예상보다 +18% 좋았어요" in text and "🔴 지금 평단 대비 +5.0% · 내 돈의 12%" in text
+    assert "🛑 손절 $38.50 · 🎯 익절 $55.00" in text
     bare = briefing.earnings_eve_message(date(2026, 10, 28), briefing.EarningsEve("X", "KR", "", -3.0, None, None, None, None))
     assert "손절·익절 알림이 없어요" in bare and "지난번" not in bare
 
@@ -153,7 +155,7 @@ def test_review_reminder_once_after_full_sell(monkeypatch):
     job.run(None, datetime(2026, 10, 20, 11, 35, tzinfo=timezone.utc))
     reviews = [t for t in sent if "다 팔았어요" in t]
     assert len(reviews) == 1  # 오늘(10-20) 판 X는 내일 알려요
-    assert reviews[0].splitlines()[:2] == ["[LODESTAR] 다 팔았어요 · SK하이닉스", "10.01 → 10.14 · 13일 · 수익률 +20.0% (+200원)"]
+    assert reviews[0].splitlines()[:3] == ["📕 다 팔았어요 · SK하이닉스", "🗓️ 10.01 → 10.14 · 13일", "🔴 수익률 +20.0% (+200원)"]
     monkeypatch.setattr("app.briefing_job.db.review_inputs", lambda conn: (trades, {}, {"KR:X:2026-10-20"}))
     job.run(None, datetime(2026, 10, 21, 11, 5, tzinfo=timezone.utc))
     assert len([t for t in sent if "다 팔았어요" in t]) == 1  # 강평을 이미 쓴 권은 안 알려요
@@ -170,14 +172,13 @@ def test_weekly_message_sections():
                       {"KR": 320_000, "US": -12.5}, [("SK하이닉스", 35.2)], 2, [(date(2026, 10, 28), "policy", "FOMC 금리 결정")])
     text = briefing.weekly_message(w)
     lines = text.splitlines()
-    assert lines[0] == "[LODESTAR] 이번 주 성적표 · 10.19 (월) ~ 10.25 (일)"
-    assert lines[1] == "내 돈 1억 2,345만원 · 지난주보다 +1.2% (+145만원)"
-    assert "· 오른 종목: SK하이닉스 +6.1%" in lines and "· 내린 종목: 아이온큐 -3.2%" in lines
-    assert "이번 주 매매 · 매수 3번 · 매도 2번" in lines and "· 판 것 손익(국내) +32만원" in lines and "· 판 것 손익(미국) -$12.50" in lines
-    assert "· 다 판 종목: SK하이닉스 +35.2%" in lines and "사후강평 안 쓴 일기장 2권 · 매매일지 → 일기장에서 써 보세요" in lines
-    assert lines[-1] == "· 10.28 (수) FOMC 금리 결정"
+    assert lines[:5] == ["📊 이번 주 성적표", "🗓️ 10.19 (월) ~ 10.25 (일)", "", "💰 내 돈 1억 2,345만원", "🔴 지난주보다 +1.2% (+145만원)"]
+    assert "🔴 SK하이닉스 +6.1%" in lines and "🔵 아이온큐 -3.2%" in lines
+    assert "🔁 이번 주 매매 · 매수 3번 · 매도 2번" in lines and "🔴 판 것 손익(국내) +32만원" in lines and "🔵 판 것 손익(미국) -$12.50" in lines
+    assert "📕 다 판 종목 · SK하이닉스 +35.2%" in lines and "✍️ 사후강평 안 쓴 일기장 2권" in lines
+    assert lines[-3:] == ["🏦 10.28 (수) FOMC 금리 결정", "", "한 주 수고 많으셨어요 🙌"]
     empty = briefing.weekly_message(briefing.Week(date(2026, 10, 19), 5_000_000, None, [], 0, 0, {}, [], 0, []))
-    assert "지난주 기록이 없어서 다음 주부터 비교해 드려요" in empty and "이번 주 매매 · 없었어요" in empty and empty.endswith("큰 일정은 없어요")
+    assert "지난주 기록이 없어서 다음 주부터 비교해 드려요" in empty and "이번 주 매매 · 없었어요" in empty and "다음 주 일정 · 큰 일정은 없어요" in empty
 
 
 def test_weekly_report_once(monkeypatch):
@@ -194,5 +195,5 @@ def test_weekly_report_once(monkeypatch):
     job.run(None, datetime(2026, 10, 25, 11, 5, tzinfo=timezone.utc))
     job.run(None, datetime(2026, 10, 25, 11, 40, tzinfo=timezone.utc))
     [w] = [t for t in sent if "이번 주 성적표" in t]
-    assert "매수 0번 · 매도 2번" in w and "· 판 것 손익(국내) +15원" in w and "· 다 판 종목: SK하이닉스 +0.5%" in w
+    assert "매수 0번 · 매도 2번" in w and "판 것 손익(국내) +15원" in w and "다 판 종목 · SK하이닉스 +0.5%" in w
     assert "weekly:2026-10-19" in marked

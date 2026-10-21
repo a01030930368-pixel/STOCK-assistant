@@ -57,5 +57,8 @@ def due(levels: list[Level], prices: dict[str, Decimal], now: datetime) -> list[
 def message(level: Level, current: Decimal) -> str:
     where = format_price(level.low) if level.high is None else f"{format_price(level.low)}~{format_price(level.high)} 구간"
     name = f"{level.name}({level.ticker})" if level.name else level.ticker
-    memo = f" · {level.memo}" if level.memo else ""
-    return f"[LODESTAR] {name} 가격이 차트에 그린 {KIND[level.kind]} {where}에 닿았어요{memo}. 현재가 {format_price(current)}"
+    lines = [f"📏 {KIND[level.kind]}선 닿음 · {name}", "", f"차트에 그린 {KIND[level.kind]} {where}에 가격이 닿았어요.",
+             f"💲 현재가 {format_price(current)}"]
+    if level.memo:
+        lines += ["", f"📝 {level.memo}"]
+    return "\n".join(lines)

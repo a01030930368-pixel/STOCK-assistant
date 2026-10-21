@@ -54,73 +54,85 @@ class Account:
     cash: float | None
 
 
+FLAG = {"KR": "🇰🇷 국내", "US": "🇺🇸 해외", "ISA": "🏦 ISA"}
+
+
+def dot(v: float | None) -> str:
+    return "⚪" if not v else "🔴" if v > 0 else "🔵"
+
+
 def balance_text(accounts: list[Account], usd_krw: float) -> str:
     if not accounts:
-        return "아직 잔고를 불러오지 않았어요. 워커가 키움에 처음 연결되면 보여 드릴게요."
-    lines = ["[잔고]"]
+        return "⏳ 아직 잔고를 불러오지 않았어요.\n워커가 키움에 처음 연결되면 보여 드릴게요."
     total = 0.0
+    body = []
     for a in accounts:
         rate = usd_krw if a.market == "US" else 1.0
         total += (a.total_eval + (a.cash or 0)) * rate
-        label = {"KR": "국내", "US": "해외"}.get(a.market, a.market)
         cur = "US" if a.market == "US" else "KR"  # ISA는 원화 계좌예요
-        lines.append(f"· {label} 주식 {money(cur, a.total_eval)} ({pct(a.total_pnl_pct)}, {money(cur, a.total_pnl)})")
+        body += ["", FLAG.get(a.market, a.market), f"   주식 {money(cur, a.total_eval)}",
+                 f"   {dot(a.total_pnl_pct)} {pct(a.total_pnl_pct)} ({money(cur, a.total_pnl)})"]
         if a.cash is not None:
-            lines.append(f"  예수금 {money(cur, a.cash)}")
-    lines.insert(1, f"총자산 {won(total)}" + (" (달러는 원화로 환산)" if usd_krw and any(a.market == "US" for a in accounts) else ""))
-    return "\n".join(lines)
+            body.append(f"   💵 예수금 {money(cur, a.cash)}")
+    head = ["💰 잔고", f"총자산 {won(total)}"]
+    if usd_krw and any(a.market == "US" for a in accounts):
+        head.append("(달러는 원화로 환산)")
+    return "\n".join(head + body)
 
 
 def holdings_text(rows: list[tuple[str, str, float, float]]) -> str:
     """rows: (이름, 시장, 현재가, 평단 대비 %)"""
     if not rows:
-        return "보유 종목이 없어요."
-    lines = ["[보유 종목] 현재가 · 평단 대비"]
-    lines += [f"· {name} {money(m, price)} · {pct(p)}" for name, m, price, p in rows]
+        return "📭 보유 종목이 없어요."
+    lines = ["💼 보유 종목", "현재가 · 평단 대비", ""]
+    lines += [f"{dot(p)} {name}\n      {money(m, price)} · {pct(p)}" for name, m, price, p in rows]
     return "\n".join(lines)
 
 
 KIND = {"stop": "손절", "target": "익절", "custom": "알림"}
+KIND_ICON = {"stop": "🛑", "target": "🎯", "custom": "🔔"}
 
 
 def alerts_text(rows: list[tuple[str, str, str, str, float, float | None]]) -> str:
     """rows: (이름, 시장, 종류, 방향, 가격, 현재가)"""
     if not rows:
-        return "켜져 있는 가격 알림이 없어요."
-    lines = ["[가격 알림] 현재가에서 남은 거리"]
+        return "🔕 켜져 있는 가격 알림이 없어요."
+    lines = ["🔔 가격 알림", "현재가에서 남은 거리", ""]
     for name, m, kind, direction, price, cur in rows:
-        way = "아래로" if direction == "below" else "위로"
+        way = "⬇️ 아래로" if direction == "below" else "⬆️ 위로"
         gap = f" · {(price / cur - 1) * 100:+.1f}%" if cur else ""
-        lines.append(f"· {name} {KIND.get(kind, '알림')} {money(m, price)} {way}{gap}")
+        lines.append(f"{KIND_ICON.get(kind, '🔔')} {name} {KIND.get(kind, '알림')}\n      {money(m, price)} {way}{gap}")
     return "\n".join(lines)
 
 
 def calendar_text(rows: list[tuple[date, str]]) -> str:
     """rows: (날짜, 제목)"""
     if not rows:
-        return "앞으로 7일 동안 큰 일정이 없어요."
-    lines = ["[앞으로 7일 일정]"]
+        return "😌 앞으로 7일 동안 큰 일정이 없어요."
+    lines = ["🗓️ 앞으로 7일 일정"]
     last = None
     for day, title in rows:
         if day != last:
-            lines.append(day_label(day))
+            lines += ["", f"📍 {day_label(day)}"]
             last = day
-        lines.append(f"· {title}")
+        lines.append(f"   · {title}")
     return "\n".join(lines)
 
 
 def watch_text(rows: list[tuple[str, str, float | None, float | None, float | None]]) -> str:
     """rows: (이름, 시장, 현재가, 등락 %, 가장 가까운 목표가)"""
     if not rows:
-        return "관심종목이 없어요. 앱의 관심종목 탭에서 넣을 수 있어요."
-    lines = ["[관심종목] 현재가 · 목표가까지"]
+        return "⭐ 관심종목이 없어요.\n앱의 관심종목 탭에서 넣을 수 있어요."
+    lines = ["⭐ 관심종목", "현재가 · 목표가까지", ""]
     for name, m, cur, change, target in rows:
         price = money(m, cur) if cur else "현재가 확인 중"
-        tail = f" · 목표 {money(m, target)} ({(target / cur - 1) * 100:+.1f}%)" if target and cur else ""
-        lines.append(f"· {name} {price}" + (f" ({pct(change)})" if change is not None else "") + tail)
+        line = f"{dot(change)} {name}\n      {price}" + (f" ({pct(change)})" if change is not None else "")
+        if target and cur:
+            line += f"\n      🎯 목표 {money(m, target)} ({(target / cur - 1) * 100:+.1f}%)"
+        lines.append(line)
     return "\n".join(lines)
 
 
 def help_text() -> str:
-    return "\n".join(["[LODESTAR 명령]"] + [f"/{cmd} 또는 /{desc.split(':')[0]} · {desc.split(': ')[1]}" for cmd, desc in MENU]
-                     + ["", "조회만 할 수 있어요. 주문은 하지 않아요."])
+    return "\n".join(["🧭 LODESTAR 명령", ""] + [f"/{cmd} 또는 /{desc.split(':')[0]}\n      {desc.split(': ')[1]}" for cmd, desc in MENU]
+                     + ["", "👀 조회만 할 수 있어요. 주문은 하지 않아요."])

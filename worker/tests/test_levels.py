@@ -34,4 +34,4 @@ def test_due_records_price_and_respects_cooldown():
 
 def test_message():
     assert message(lv(218000, 222000), D(219000)) == (
-        "[LODESTAR] SK하이닉스(000660) 가격이 차트에 그린 저항 218,000~222,000 구간에 닿았어요 · 매물대. 현재가 219,000")
+        "📏 저항선 닿음 · SK하이닉스(000660)\n\n차트에 그린 저항 218,000~222,000 구간에 가격이 닿았어요.\n💲 현재가 219,000\n\n📝 매물대")
