@@ -14,6 +14,7 @@ from .research_job import ResearchJob
 from .screener_job import ScreenerJob
 from .intraday_job import IntradayJob
 from .ai_job import AiJob
+from .mistakes_job import MistakesJob
 from .briefing_job import BriefingJob
 from .watch_job import WatchJob
 from .bot import Bot
@@ -188,6 +189,7 @@ def main() -> None:
     screener = ScreenerJob(kiwoom)
     minutes = IntradayJob(http, kiwoom)
     comments = AiJob(cfg, http)
+    notebook = MistakesJob(cfg, http)
     notices = BriefingJob(cfg, http)
     watching = WatchJob(cfg, http, kiwoom)
     trades = FillsJob(kiwoom)
@@ -208,7 +210,7 @@ def main() -> None:
     jobs = [
         ("종목 정보 수집", research.run), ("관심종목 갱신", watching.run), ("체결 내역 갱신", trades.run),
         ("ISA 체결 갱신", isa_trades.run), ("매매 당시 기록", buy_context.run),
-        ("검색기 갱신", screener.run), ("분봉 갱신", minutes.run), ("AI 한마디", comments.run), ("일정 알림", notices.run),
+        ("검색기 갱신", screener.run), ("분봉 갱신", minutes.run), ("AI 한마디", comments.run), ("실수 노트", notebook.run), ("일정 알림", notices.run),
     ]
     while True:
         now = datetime.now(timezone.utc)

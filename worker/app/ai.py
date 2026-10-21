@@ -75,18 +75,21 @@ def parse(text: str) -> Comment:
     return Comment(tone, body[:400])
 
 
-def ask(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
+def claude_text(system: str, prompt: str, key: str, model: str, http: httpx.Client, max_tokens: int = 400) -> str:
     res = http.post(
         API,
         headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-        json={"model": model, "max_tokens": 400, "system": SYSTEM, "messages": [{"role": "user", "content": prompt}]},
+        json={"model": model, "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": prompt}]},
         timeout=60,
     )
     if res.status_code >= 400:
         # 키가 응답에 섞여 나올 일은 없지만, 오류 본문은 앞부분만 남깁니다.
         raise RuntimeError(f"Claude API 오류 {res.status_code}: {res.text[:120]}")
-    text = "".join(b.get("text", "") for b in res.json().get("content", []) if b.get("type") == "text")
-    return parse(text)
+    return "".join(b.get("text", "") for b in res.json().get("content", []) if b.get("type") == "text")
+
+
+def ask(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
+    return parse(claude_text(SYSTEM, prompt, key, model, http))
 
 
 # 고른 모델이 붐비거나(503) 한도에 걸리면(429) 다음 무료 모델로 넘어갑니다.
@@ -94,7 +97,7 @@ GEMINI_FALLBACKS = ("gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-
 RETRY_STATUS = {404, 429, 500, 503}
 
 
-def ask_gemini(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
+def gemini_text(system: str, prompt: str, key: str, model: str, http: httpx.Client, max_tokens: int = 2048) -> str:
     errors = []
     for m in dict.fromkeys((model, *GEMINI_FALLBACKS)):
         # 키는 주소가 아니라 헤더로 보내서 오류 메시지·로그에 남지 않게 합니다.
@@ -102,9 +105,9 @@ def ask_gemini(prompt: str, key: str, model: str, http: httpx.Client) -> Comment
             f"{GEMINI_API}{m}:generateContent",
             headers={"x-goog-api-key": key, "content-type": "application/json"},
             json={
-                "systemInstruction": {"parts": [{"text": SYSTEM}]},
+                "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": 2048, "responseMimeType": "application/json"},
+                "generationConfig": {"maxOutputTokens": max_tokens, "responseMimeType": "application/json"},
             },
             timeout=60,
         )
@@ -115,5 +118,20 @@ def ask_gemini(prompt: str, key: str, model: str, http: httpx.Client) -> Comment
             raise RuntimeError(f"Gemini API 오류 {res.status_code}: {res.text[:160]}")
         cands = res.json().get("candidates") or []
         parts = ((cands[0].get("content") or {}).get("parts") or []) if cands else []
-        return parse("".join(p.get("text", "") for p in parts if not p.get("thought")))
+        return "".join(p.get("text", "") for p in parts if not p.get("thought"))
     raise RuntimeError("Gemini가 붐벼 다음에 다시 시도합니다: " + ", ".join(errors))
+
+
+def ask_gemini(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
+    return parse(gemini_text(SYSTEM, prompt, key, model, http))
+
+
+def text_asker(cfg):
+    """(키, 모델, 함수(system, prompt, max_tokens) -> 글). 무료인 Gemini 키를 먼저 쓰고, 키가 없으면 (None, None, None)."""
+    if cfg.gemini_api_key:
+        key, model, fn = cfg.gemini_api_key, cfg.ai_model or DEFAULT_GEMINI_MODEL, gemini_text
+    elif cfg.anthropic_api_key:
+        key, model, fn = cfg.anthropic_api_key, cfg.ai_model or DEFAULT_MODEL, claude_text
+    else:
+        return None, None, None
+    return key, model, fn

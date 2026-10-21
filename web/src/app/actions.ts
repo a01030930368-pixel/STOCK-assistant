@@ -600,3 +600,13 @@ export async function addDoodle(input: { ticker: string; view: string; color: st
 export async function deleteDoodle(id: number): Promise<void> {
   await query("DELETE FROM chart_doodles WHERE id = $1", [id]);
 }
+
+// 실수 노트를 지금 다시 읽어 달라고 워커에게 남깁니다. 워커가 다음 차례(1분 안팎)에 읽어요.
+export async function askMistakes() {
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ('mistakes_request', to_jsonb($1::text))
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [new Date().toISOString()],
+  );
+  revalidatePath("/journal/mistakes");
+}
