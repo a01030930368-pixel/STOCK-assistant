@@ -548,3 +548,29 @@ CREATE TABLE stock_themes (
   fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (ticker, code)
 );
+
+-- 매수 전 한 장 요약: 화면이 계산한 6칸(cells)을 넣으면 워커가 AI 한 줄 결론·좋은 점·걱정되는 점을 채워요.
+CREATE TABLE stock_briefs (
+  ticker      TEXT PRIMARY KEY,
+  market      TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  cells       JSONB NOT NULL,
+  one_line    TEXT,
+  good        JSONB,
+  bad         JSONB,
+  pending     BOOLEAN NOT NULL DEFAULT true,
+  error       TEXT,
+  model       TEXT,
+  made_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  done_at     TIMESTAMPTZ
+);
+
+-- 미국 프리·애프터마켓 시세(보유 종목). base는 정규장 종가예요.
+CREATE TABLE us_ext_quotes (
+  ticker      TEXT PRIMARY KEY,
+  session     TEXT NOT NULL CHECK (session IN ('pre', 'post')),
+  price       NUMERIC(18, 4) NOT NULL,
+  base        NUMERIC(18, 4) NOT NULL,
+  quoted_at   TIMESTAMPTZ NOT NULL,
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

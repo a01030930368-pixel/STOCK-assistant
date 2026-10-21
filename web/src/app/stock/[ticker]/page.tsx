@@ -15,6 +15,7 @@ import FlowChart, { type StockTheme } from "@/app/_components/FlowChart";
 import type { FlowRow } from "@/lib/flows";
 import type { Report } from "@/lib/earnings";
 import type { StatementRow } from "@/lib/statements";
+import BriefPanel, { type Brief } from "./BriefPanel";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
 
 export const dynamic = "force-dynamic";
@@ -34,8 +35,9 @@ const kst = (d: Date) => d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", mon
 const seenTime = (d: Date) => d.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false });
 const seenSameDay = (f: { day: string; seen_at: Date }) => f.seen_at.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }) === f.day;
 
-export default async function StockPage({ params }: { params: Promise<{ ticker: string }> }) {
+export default async function StockPage({ params, searchParams }: { params: Promise<{ ticker: string }>; searchParams: Promise<{ brief?: string }> }) {
   const ticker = decodeURIComponent((await params).ticker).toUpperCase();
+  const showBrief = (await searchParams).brief === "1";
   const [found] = await query<Stock>(
     `SELECT s.ticker, s.name, s.market, p.id AS position_id,
        EXISTS (SELECT 1 FROM watchlist w WHERE w.ticker = s.ticker) AS watched,
@@ -162,6 +164,11 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
     [ticker],
   );
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: tz });
+  // 한 장 요약 표는 워커 업데이트 뒤에 생겨요.
+  const [brief] = showBrief ? await safe<Brief>(
+    "SELECT cells, one_line, good, bad, pending, error, made_at FROM stock_briefs WHERE ticker = $1", [ticker],
+  ) : [];
+  const here = `/stock/${encodeURIComponent(ticker)}`;
   const peerMargin = median(peerLatest.map(operatingMargin));
   const latestMargin = financials[0] ? operatingMargin(financials[0]) : null;
 
@@ -175,8 +182,11 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
           <input type="hidden" name="market" value={stock.market} />
           <button type="submit" className={stock.watched ? "chip-btn on" : "chip-btn"}>{stock.watched ? "★ 관심종목" : "☆ 관심종목에 추가"}</button>
           <Link href={`/compare?t=${stock.ticker}`} className="chip-btn">⇄ 비교</Link>
+          <Link href={showBrief ? here : `${here}?brief=1`} scroll={false} className={showBrief ? "chip-btn on" : "chip-btn gold"}>📄 한 장 요약</Link>
         </form>
       </div>
+      {showBrief && <BriefPanel ticker={ticker} name={stock.name} market={stock.market} brief={brief ?? null} closeHref={here}
+        ai={Boolean(process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY)} />}
       <SummaryLine parts={summary} />
       {comment && <div className="panel ai-panel"><AiNote c={comment} title={<span className="label">AI 한마디</span>} /></div>}
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}

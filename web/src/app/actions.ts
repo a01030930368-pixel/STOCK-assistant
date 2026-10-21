@@ -8,6 +8,8 @@ import { rulesFromForm } from "@/lib/screener";
 import { averageBefore, averagePrice, holdingDays, marketOf as tickerMarket, remainingQuantity, returnPct, sameQuantity, validateBuy, type BuyInput, type Fill } from "@/lib/journal";
 import type { Book } from "@/lib/books";
 import { loadBook } from "@/lib/booksData";
+import { buildCells } from "@/lib/brief";
+import { loadBriefInput } from "@/lib/briefData";
 import { KIND_LABEL, validColor, validDoodle, type DoodlePoint, type LevelKind } from "@/lib/drawings";
 
 // values: 오류가 났을 때 입력한 값을 폼에 되돌려 주기 위해 사용합니다.
@@ -623,4 +625,23 @@ export async function askHistory(items: [string, "KR" | "US"][]) {
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     [JSON.stringify({ tickers: merged.slice(0, 8), at: new Date().toISOString() })],
   );
+}
+
+// 종목 페이지 "📄 한 장 요약": 6칸은 지금 바로 계산해 넣고, 워커가 몇 초 안에 AI 문장(한 줄 결론·좋은 점·걱정되는 점)을 채워요.
+export async function makeBrief(ticker: string, name: string, market: string) {
+  const t = ticker.toUpperCase();
+  if (!/^[0-9A-Z.\-]{1,12}$/.test(t) || (market !== "KR" && market !== "US")) return { error: "종목 정보가 이상해요." };
+  const cells = buildCells(await loadBriefInput(t, market));
+  try {
+    await query(
+      `INSERT INTO stock_briefs (ticker, market, name, cells, pending, made_at) VALUES ($1, $2, $3, $4::jsonb, true, now())
+       ON CONFLICT (ticker) DO UPDATE SET market = EXCLUDED.market, name = EXCLUDED.name, cells = EXCLUDED.cells,
+         one_line = NULL, good = NULL, bad = NULL, error = NULL, pending = true, made_at = now(), done_at = NULL`,
+      [t, market, name.slice(0, 60), JSON.stringify(cells)],
+    );
+  } catch {
+    return { error: "워커를 업데이트하면 쓸 수 있어요. PC에서 update.bat을 한 번 실행해 주세요." };
+  }
+  revalidatePath(`/stock/${encodeURIComponent(t)}`);
+  return { error: null };
 }

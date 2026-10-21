@@ -12,6 +12,7 @@ import EventLine, { type CalendarEvent } from "./_components/EventLine";
 import IsaCard, { type IsaStatus } from "./_components/IsaCard";
 import { settingsOf } from "@/lib/isa";
 import FxSplit from "./_components/FxSplit";
+import { extPct, extWon, liveQuotes, SESSION_LABEL, type ExtQuote } from "@/lib/extended";
 import { splitAll, type FxDay, type FxFill } from "@/lib/fxsplit";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +40,10 @@ function account(s: Summary | undefined, cash: Cash | undefined): Account | null
   return { eval: Number(s.total_eval), buy: Number(s.total_buy), pnl: Number(s.total_pnl), cash: left };
 }
 
-function HoldingRows({ rows, summaries, isa = false }: { rows: Holding[]; summaries: Map<string, Part[]>; isa?: boolean }) {
+function HoldingRows({ rows, summaries, isa = false, ext, rate = 0 }: {
+  rows: Holding[]; summaries: Map<string, Part[]>; isa?: boolean;
+  ext?: Map<string, ExtQuote>; rate?: number; // 미국 프리·애프터마켓 가격(그 시간에만)
+}) {
   return (
     <div className="list">
       {rows.map((h) => {
@@ -64,6 +68,18 @@ function HoldingRows({ rows, summaries, isa = false }: { rows: Holding[]; summar
               <span className="num">{price(h.eval_amount)}</span>
               <span className="sub num">{price(h.cur_price)} / 평단 {price(h.avg_price)}</span>
               <span className={`badge ${signClass(h.pnl_pct)}`}>{signed(Number(h.pnl_pct), fixedPct(h.pnl_pct))}</span>
+              {(() => {
+                const q = ext?.get(h.ticker);
+                if (!q) return null;
+                const p = extPct(q), w = extWon(q, Number(h.quantity), rate);
+                return (
+                  <span className="ext-line num" title={`정규장 종가 ${usd(q.base)} 대비`}>
+                    <span className={`ext-tag ${q.session}`}>{SESSION_LABEL[q.session]}</span> {usd(q.price)}{" "}
+                    <span className={signClass(p)}>{signed(p, fixedPct(p, 1))}</span>
+                    {w !== null && Math.round(w) !== 0 && <span className="muted"> · {w > 0 ? "+" : "−"}{krw(Math.abs(Math.round(w)))}</span>}
+                  </span>
+                );
+              })()}
             </div>
           </div>
         );
@@ -201,6 +217,11 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
     const split = splitAll(usHeld.map((h) => ({ ticker: h.ticker, name: h.name, quantity: Number(h.quantity), avg: Number(h.avg_price), cur: Number(h.cur_price) })), fills, fxDays, rate);
     fxSplit = { ...split, empty: fxDays.length === 0 ? "날마다 환율을 아직 못 받았어요. 워커가 한국은행(ECOS_API_KEY)에서 받아 오면 채워져요." : !rate ? "지금 환율을 아직 못 받았어요." : null };
   }
+  // 미국 장외 시세(워커 업데이트 뒤에 생겨요)
+  const ext = liveQuotes((await query<{ ticker: string; session: "pre" | "post"; price: string; base: string; fetched_at: Date }>(
+    "SELECT ticker, session, price, base, fetched_at FROM us_ext_quotes",
+  ).catch(() => [])).map<ExtQuote>((q) => ({ ...q, price: Number(q.price), base: Number(q.base) })), new Date());
+  const extOn = scope !== "KR" && scope !== "ISA" && ext.size > 0 ? [...ext.values()][0] : null;
   const groups: [string, Holding[]][] = scope === "all"
     ? [["국내", shown.filter((h) => h.market === "KR")], ["해외", shown.filter((h) => h.market === "US")], ["ISA", isaHoldings]]
     : [["", shown]];
@@ -262,7 +283,10 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
         <section>
           {fxSplit && <FxSplit rows={fxSplit.rows} price={fxSplit.price} fx={fxSplit.fx} buyRate={fxSplit.buyRate} now={rate} unknown={fxSplit.unknown} empty={fxSplit.empty} />}
           <div className="panel flush holdings">
-            <div className="panel-title">보유 종목 <span className="muted">{count}종목</span></div>
+            <div className="panel-title">
+              보유 종목 <span className="muted">{count}종목</span>
+              {extOn && <span className="muted ext-note">🌙 지금 {SESSION_LABEL[extOn.session]}마켓 · {kst(extOn.fetched_at).split(" ").slice(-1)[0]} 기준</span>}
+            </div>
             {count === 0 ? (
               <div className="list-empty">
                 {scope === "ISA"
@@ -273,7 +297,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
               groups.map(([label, rows]) => rows.length > 0 && (
                 <div key={label}>
                   {label && <div className="group-label">{label}</div>}
-                  <HoldingRows rows={rows} summaries={summaries} isa={scope === "ISA" || label === "ISA"} />
+                  <HoldingRows rows={rows} summaries={summaries} isa={scope === "ISA" || label === "ISA"} ext={ext} rate={rate} />
                 </div>
               ))
             )}
