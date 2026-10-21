@@ -119,7 +119,9 @@ export function valueCell(i: Pick<BriefInput, "candles" | "statements" | "shares
       if (band && band.current !== null && band.current > 0 && band.position !== null) {
         const name = kind === "per" ? "PER" : "PBR";
         const where = band.position >= 80 ? "비싼 쪽" : band.position <= 30 ? "싼 쪽" : "중간쯤";
-        const lossy = kind === "pbr" ? " (적자라 PER 대신 PBR로 봤어요)" : "";
+        // PBR로 넘어온 이유: 최근 4분기 순이익이 0 이하면 적자, 아니면 순이익 자료가 모자라서
+        const eps = kind === "pbr" ? perShare(i.statements, i.shares, "per").at(-1)?.value ?? null : null;
+        const lossy = kind === "per" ? "" : eps !== null && eps <= 0 ? " (적자라 PER 대신 PBR로 봤어요)" : " (순이익 자료가 모자라 PER 대신 PBR로 봤어요)";
         return {
           key: "value", title, signal: band.position <= 40 ? "g" : band.position <= 75 ? "y" : "r",
           text: `${name} ${times(band.current)}, 지난 5년 중 낮은 순 ${band.position}% 자리라 ${where}이에요.${lossy}`,

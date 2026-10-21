@@ -25,9 +25,9 @@ class FakeConn:
 
 def test_writer_falls_back_when_ai_fails(monkeypatch):
     done = []
-    rows = [("000660", "SK하이닉스", "KR", CELLS)]
+    rows = [("000660", "SK하이닉스", "KR", CELLS, None)]
     monkeypatch.setattr("app.brief.db.pending_brief", lambda conn: rows.pop() if rows else None)
-    monkeypatch.setattr("app.brief.db.finish_brief", lambda conn, *a: done.append(a))
+    monkeypatch.setattr("app.brief.db.finish_brief", lambda conn, *a, **k: done.append(a))
 
     class Cfg:
         gemini_api_key = "k"; anthropic_api_key = None; ai_model = None

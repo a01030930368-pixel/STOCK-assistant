@@ -35,6 +35,19 @@ export function curve(trades: Trade[], bars: Bar[], bench: Bar[]): Curve | null 
   return out;
 }
 
+// 다 판 권은 판 날(그 날 일봉이 없으면 그 앞)까지만 세요. 그래야 내 결과·계속 보유·지수가 같은 기간이 돼요. 보유 중이면 마지막 날.
+export function endIndex(c: Curve, end: string | null): number {
+  if (!end) return c.days.length - 1;
+  let i = -1;
+  for (let k = 0; k < c.days.length && c.days[k] <= end; k++) i = k;
+  return i;
+}
+
+export function valueAt(a: (number | null)[], i: number): number | null {
+  for (let k = Math.min(i, a.length - 1); k >= 0; k--) if (a[k] !== null) return a[k];
+  return null;
+}
+
 export type After = { pct: number; days: number }; // days: 실제로 지난 거래일 수
 // 판 뒤: 판 값 대비 n거래일 뒤 종가. 아직 n일이 안 지났으면 지금까지
 export function afterSell(bars: Bar[], day: string, price: number, n = AFTER_DAYS): After | null {

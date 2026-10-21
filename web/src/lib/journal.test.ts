@@ -62,6 +62,7 @@ describe("marketOf", () => {
     expect(marketOf("spym", "KR")).toBe("US");
     expect(marketOf("BRK.B", "KR")).toBe("US");
     expect(marketOf("005930", "US")).toBe("KR");
+    expect(marketOf("Q500001", "US")).toBe("KR"); // 국내 ETN
     expect(marketOf("0001A0", "US")).toBe("KR");
     expect(marketOf("Q530036", "KR")).toBe("KR");
   });

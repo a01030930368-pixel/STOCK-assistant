@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cellColor, dailyChanges, monthCells, monthSummary, shiftMonth, shortWon } from "./daily";
+import { cellColor, dailyChanges, monthCells, monthSummary, shiftMonth, shortWon, validDay, validMonth } from "./daily";
 
 const rows = [
   { day: "2026-09-30", total: 10_000_000 },
@@ -36,5 +36,10 @@ describe("daily calendar", () => {
     expect(cellColor(5)).toBe("rgba(232, 128, 111, 0.76)");
     expect(cellColor(-1.25)).toBe("rgba(134, 168, 230, 0.45)");
     expect([shortWon(250_000), shortWon(-12_345_678), shortWon(8_500)]).toEqual(["+25만", "−1,235만", "+8,500"]);
+  });
+  it("ignores broken addresses", () => {
+    expect(validDay("2026-10-21")).toBe("2026-10-21");
+    expect([validDay("abc"), validDay("2026-02-31"), validDay("2026-13-01"), validDay(undefined)]).toEqual([null, null, null, null]);
+    expect([validMonth("2026-10"), validMonth("2026-00"), validMonth("2026-1"), validMonth("x")]).toEqual(["2026-10", null, null, null]);
   });
 });

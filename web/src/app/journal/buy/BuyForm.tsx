@@ -2,6 +2,7 @@
 
 import { useActionState, useRef, useState } from "react";
 import { createBuy, type FormState } from "@/app/actions";
+import { guessMarket } from "@/lib/journal";
 
 type Props = {
   ticker: string; name: string; market: string; today: string; quantity?: string; price?: string; fillKey?: string;
@@ -10,8 +11,6 @@ type Props = {
 };
 export type Known = { ticker: string; name: string; market: "KR" | "US" };
 
-// 영문만이면 미국, 숫자로 시작하면 국내(서버도 같은 규칙으로 한 번 더 맞춰요)
-const guessMarket = (t: string) => (/^[A-Z]+([.-][A-Z]+)?$/.test(t) ? "US" : /^\d/.test(t) ? "KR" : null);
 
 export default function BuyForm({ ticker, name, market, today, quantity = "", price = "", fillKey = "", bookKey = "", entryId, initial = {}, known = [] }: Props) {
   const nameRef = useRef<HTMLInputElement>(null);
@@ -22,9 +21,10 @@ export default function BuyForm({ ticker, name, market, today, quantity = "", pr
     const hit = known.find((k) => k.ticker === t);
     const m = hit?.market ?? guessMarket(t);
     if (hit && nameRef.current && !nameRef.current.value.trim()) nameRef.current.value = hit.name;
-    if (m && marketRef.current && marketRef.current.value !== m) {
+    // 한 글자만 친 'Q'처럼 아직 모르는 동안은 바꾸지 않아요. 서버도 같은 규칙(guessMarket)으로 한 번 더 맞춰요.
+    if (m && t.length >= 2 && marketRef.current && marketRef.current.value !== m) {
       marketRef.current.value = m;
-      setMarketNote(m === "US" ? "영문 티커라 미국으로 바꿨어요" : "숫자 티커라 국내로 바꿨어요");
+      setMarketNote(m === "US" ? "영문 티커라 미국으로 바꿨어요" : "숫자가 든 티커라 국내로 바꿨어요");
     }
   };
   const [state, action, pending] = useActionState<FormState, FormData>(createBuy, { errors: [] });

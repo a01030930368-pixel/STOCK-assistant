@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { afterBuy, afterSell, curve, verdict } from "./replay";
+import { afterBuy, afterSell, curve, endIndex, valueAt, verdict } from "./replay";
 
 const bars = [
   { day: "2026-09-01", close: 100 }, { day: "2026-09-02", close: 110 }, { day: "2026-09-03", close: 120, high: 125, low: 118 },
@@ -16,6 +16,11 @@ describe("replay", () => {
     expect(c.mine.map(Math.round)).toEqual([0, 10, 20, 20, 20]);
     expect(c.held.map(Math.round)).toEqual([0, 10, 20, -10, 30]);
     expect(c.bench.map((v) => (v === null ? null : Math.round(v)))).toEqual([0, 0, 0, 0, 5]);
+    // 다 판 권은 판 날 기준으로 셋 다 비교해요(그 뒤 지수 +5%, 계속 보유 +30%는 안 세요)
+    const i = endIndex(c, "2026-09-03");
+    expect([valueAt(c.mine, i), valueAt(c.held, i), valueAt(c.bench, i)].map((v) => Math.round(v!))).toEqual([20, 20, 0]);
+    expect(endIndex(c, null)).toBe(4);
+    expect(endIndex(c, "2026-09-05")).toBe(3);  // 판 날 일봉이 없으면 그 앞날
   });
 
   it("handles partial sells and adds", () => {

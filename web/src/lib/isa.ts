@@ -30,3 +30,34 @@ export function taxFree(pnl: number, type: IsaType) {
 }
 
 export const yearPct = (bought: number) => Math.min(100, (Math.max(0, bought) / YEAR_LIMIT) * 100);
+
+export type IsaFill = { day: string; ticker: string; side: "buy" | "sell"; quantity: number; price: number; fee: number | null };
+
+// 이미 판 것의 손익(이동평균 단가, 수수료·세금 뺌). ISA 세금은 계좌 전체 손익을 합쳐서 매기니 평가손익에 더해 봐요.
+// 기록보다 먼저 산 주식을 판 몫은 단가를 몰라서 빼요.
+export function realized(fills: IsaFill[]): { pnl: number; unknown: number; byDay: Map<string, number> } {
+  const book = new Map<string, { qty: number; cost: number }>();
+  const byDay = new Map<string, number>();
+  let pnl = 0, unknown = 0;
+  const sorted = [...fills].sort((a, b) => a.day.localeCompare(b.day) || (a.side === b.side ? 0 : a.side === "buy" ? -1 : 1));
+  for (const f of sorted) {
+    const p = book.get(f.ticker) ?? { qty: 0, cost: 0 };
+    if (f.side === "buy") {
+      p.qty += f.quantity;
+      p.cost += f.quantity * f.price + (f.fee ?? 0);
+    } else {
+      const known = Math.min(f.quantity, p.qty);
+      if (known < f.quantity) unknown += f.quantity - known;
+      if (known > 0) {
+        const avg = p.cost / p.qty;
+        const gain = known * f.price - known * avg - (f.fee ?? 0) * (known / f.quantity);
+        pnl += gain;
+        byDay.set(f.day, (byDay.get(f.day) ?? 0) + gain);
+        p.cost -= known * avg;
+        p.qty -= known;
+      }
+    }
+    book.set(f.ticker, p);
+  }
+  return { pnl, unknown, byDay };
+}

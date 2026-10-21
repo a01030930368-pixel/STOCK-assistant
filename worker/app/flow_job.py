@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 
 from . import db
-from .market import kr_market_open
+from .market import kr_after_close, kr_market_open
 
 log = logging.getLogger("worker")
 KST = ZoneInfo("Asia/Seoul")
@@ -23,7 +23,8 @@ MEMBER_EVERY = timedelta(days=1)
 class FlowJob:
     def __init__(self, kiwoom=None):
         self.kiwoom = kiwoom
-        self.flow_done: dict[str, str] = {}  # 종목 → 받은 날:장중/마감
+        self.flow_done: dict[str, str] = {}  # 종목 → 받은 날:장중/마감/장 전
+        self.flow_retry: dict[str, datetime] = {}  # 실패한 종목은 15분 뒤에 다시
         self.theme_at: datetime | None = None
         self.was_open = False
         self.member_at: dict[str, datetime] = {}
@@ -44,18 +45,24 @@ class FlowJob:
 
     def _flows(self, conn: psycopg.Connection, now: datetime, open_now: bool, targets) -> None:
         kst = now.astimezone(KST)
-        stamp = f"{kst.date()}:{'open' if open_now else 'closed'}"
+        # 장중·장 전(주말 포함)에는 처음 보는 종목만, 장 마감 뒤에는 그날 마감 값을 아직 못 받은 종목만 받아요.
+        phase = "open" if open_now else "closed" if kr_after_close(now) else "wait"
+        stamp = f"{kst.date()}:{phase}"
         error = None
         for ticker, name in targets:
             last = self.flow_done.get(ticker)
-            # 장중에는 처음 보는 종목만, 마감 뒤에는 그날 아직 마감 값을 안 받은 종목만
-            if last and (open_now or last == stamp):
+            if last and (phase != "closed" or last == stamp):
+                continue
+            if ticker in self.flow_retry and now < self.flow_retry[ticker]:
                 continue
             try:
                 db.save_flows(conn, ticker, self.kiwoom.investor_flows(ticker, kst.strftime("%Y%m%d")))
             except Exception as e:
                 log.warning("%s 수급 받기 실패: %s", name, e)
                 error = str(e)[:200]
+                self.flow_retry[ticker] = now + timedelta(minutes=15)
+                continue
+            self.flow_retry.pop(ticker, None)
             self.flow_done[ticker] = stamp
         if targets:
             db.set_setting(conn, "flow_status", {"at": now.isoformat(), "ok": error is None, **({"error": error} if error else {})})

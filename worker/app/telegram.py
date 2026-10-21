@@ -17,10 +17,55 @@ def send(bot_token: str, chat_id: str, text: str, http: httpx.Client | None = No
     res.raise_for_status()
 
 
+# 텔레그램 한 메시지 한도는 4096자. 꾸밈 태그 여유를 두고 나눕니다.
+LIMIT = 3900
+
+
+def split(text: str, limit: int = LIMIT) -> list[str]:
+    """긴 글을 빈 줄(문단) 기준으로 나눠요. 한 문단이 너무 길면 줄 단위로, 그래도 길면 글자 수로 자릅니다."""
+    if len(text) <= limit:
+        return [text]
+    parts: list[str] = []
+    cur = ""
+    for block in text.split("\n\n"):
+        pieces = [block] if len(block) <= limit else _lines(block, limit)
+        for piece in pieces:
+            joined = f"{cur}\n\n{piece}" if cur else piece
+            if len(joined) <= limit:
+                cur = joined
+            else:
+                parts.append(cur)
+                cur = piece
+    if cur:
+        parts.append(cur)
+    return parts
+
+
+def _lines(block: str, limit: int) -> list[str]:
+    out, cur = [], ""
+    for line in block.split("\n"):
+        while len(line) > limit:
+            out.append(line[:limit])
+            line = line[limit:]
+        joined = f"{cur}\n{line}" if cur else line
+        if len(joined) <= limit:
+            cur = joined
+        else:
+            out.append(cur)
+            cur = line
+    if cur:
+        out.append(cur)
+    return out
+
+
 def deliver(bot_token: str, chat_id: str, text: str, http: httpx.Client | None = None, html: bool = False) -> bool:
     """보냈으면(또는 보냈을 가능성이 크면) True. 실패해도 예외를 던지지 않아 다음 알림은 계속 갑니다.
 
-    요청은 갔는데 답만 늦은 경우(ReadTimeout)는 텔레그램이 이미 받았을 수 있어, 다시 보내면 두 번 가므로 보낸 것으로 칩니다."""
+    요청은 갔는데 답만 늦은 경우(ReadTimeout)는 텔레그램이 이미 받았을 수 있어, 다시 보내면 두 번 가므로 보낸 것으로 칩니다.
+    한도보다 긴 글은 나눠 보내요."""
+    parts = split(text)
+    if len(parts) > 1:
+        return all(deliver(bot_token, chat_id, part, http, html) for part in parts)
     try:
         if html:
             send(bot_token, chat_id, text, http, html=True)

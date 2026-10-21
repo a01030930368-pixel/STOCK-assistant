@@ -66,7 +66,7 @@ class HistoryJob:
             ticker, market = str(item[0]).upper(), "KR" if item[1] == "KR" else "US"
             if (err := self._fetch(conn, ticker, market, kst)):
                 errors.append(err)
-        db.set_setting(conn, "history_request", None)
+        db.clear_setting_if(conn, "history_request", asked)
         db.set_setting(conn, "history_status", {"at": now.isoformat(), "ok": not errors, **({"error": "; ".join(errors)[:300]} if errors else {})})
 
     def _benchmarks(self, conn: psycopg.Connection, kst: datetime) -> None:

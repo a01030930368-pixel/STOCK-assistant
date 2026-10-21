@@ -31,16 +31,18 @@ class Line:
 
 # (찾을 표, 표준 계정 ID, 계정명). 표준 ID가 없는 회사도 있어 계정명으로 한 번 더 찾아요.
 # 자본변동표에도 '당기순이익'이 있어서 표를 꼭 정해서 찾습니다.
+# 순이익·자본은 미국(SEC)처럼 지배주주 몫을 먼저 써요. 그래야 지주회사 PER·PBR이 싸게 안 나와요.
+# 표준 ID는 앞에 적은 것부터 찾아요.
 DART_ITEMS = {
     "revenue": (("IS", "CIS"), ("ifrs-full_Revenue",), ("매출액", "영업수익", "수익(매출액)", "매출")),
     "cost_of_sales": (("IS", "CIS"), ("ifrs-full_CostOfSales",), ("매출원가", "영업비용")),
     "gross_profit": (("IS", "CIS"), ("ifrs-full_GrossProfit",), ("매출총이익", "매출총이익(손실)")),
     "operating_income": (("IS", "CIS"), ("dart_OperatingIncomeLoss",), ("영업이익", "영업이익(손실)")),
-    "net_income": (("IS", "CIS"), ("ifrs-full_ProfitLoss",), ("당기순이익", "당기순이익(손실)", "분기순이익", "분기순이익(손실)", "반기순이익", "반기순이익(손실)")),
+    "net_income": (("IS", "CIS"), ("ifrs-full_ProfitLossAttributableToOwnersOfParent", "ifrs-full_ProfitLoss"), ("당기순이익", "당기순이익(손실)", "분기순이익", "분기순이익(손실)", "반기순이익", "반기순이익(손실)")),
     "assets": (("BS",), ("ifrs-full_Assets",), ("자산총계",)),
     "cash": (("BS",), ("ifrs-full_CashAndCashEquivalents",), ("현금및현금성자산",)),
     "liabilities": (("BS",), ("ifrs-full_Liabilities",), ("부채총계",)),
-    "equity": (("BS",), ("ifrs-full_Equity",), ("자본총계",)),
+    "equity": (("BS",), ("ifrs-full_EquityAttributableToOwnersOfParent", "ifrs-full_Equity"), ("자본총계",)),
     "cfo": (("CF",), ("ifrs-full_CashFlowsFromUsedInOperatingActivities",), ("영업활동현금흐름", "영업활동으로인한현금흐름")),
     "cfi": (("CF",), ("ifrs-full_CashFlowsFromUsedInInvestingActivities",), ("투자활동현금흐름", "투자활동으로인한현금흐름")),
     "cff": (("CF",), ("ifrs-full_CashFlowsFromUsedInFinancingActivities",), ("재무활동현금흐름", "재무활동으로인한현금흐름")),
@@ -58,12 +60,8 @@ def dart_values(rows: list[dict], column: str, add_column: str | None = None) ->
     """보고서 한 건에서 항목별 값. 손익은 add_column(누적)이 있으면 그걸 써요."""
     out = {}
     for item, (divs, ids, names) in DART_ITEMS.items():
-        hit = None
-        for div in divs:
-            pool = [r for r in rows if r.get("sj_div") == div]
-            hit = next((r for r in pool if r.get("account_id") in ids), None) or next((r for r in pool if _norm(r.get("account_nm")) in names), None)
-            if hit:
-                break
+        pool = [r for div in divs for r in rows if r.get("sj_div") == div]
+        hit = next((r for i in ids for r in pool if r.get("account_id") == i), None) or next((r for r in pool if _norm(r.get("account_nm")) in names), None)
         if not hit:
             continue
         raw = hit.get(add_column) if add_column and divs[0] == "IS" and hit.get(add_column) not in (None, "", "-") else hit.get(column)

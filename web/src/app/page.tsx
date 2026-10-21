@@ -10,7 +10,7 @@ import type { Part } from "@/lib/summary";
 import AiNote, { type AiComment } from "@/app/_components/AiNote";
 import EventLine, { type CalendarEvent } from "./_components/EventLine";
 import IsaCard, { type IsaStatus } from "./_components/IsaCard";
-import { settingsOf } from "@/lib/isa";
+import { realized, settingsOf } from "@/lib/isa";
 import FxSplit from "./_components/FxSplit";
 import { extPct, extWon, liveQuotes, SESSION_LABEL, type ExtQuote } from "@/lib/extended";
 import { splitAll, type FxDay, type FxFill } from "@/lib/fxsplit";
@@ -139,10 +139,15 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
   const isaHoldings = await query<Holding>(
     "SELECT *, 'KR' AS market, NULL::int AS position_id FROM isa_holdings ORDER BY eval_amount DESC",
   ).catch(() => []);
+  // 올해 넣은 돈 어림: 산 금액 − 판 금액(팔고 다시 사면 두 번 세지 않게)
   const [isaYear] = await query<{ bought: string }>(
-    `SELECT COALESCE(sum(quantity * price), 0) AS bought FROM isa_fills
-     WHERE side = 'buy' AND trade_date >= date_trunc('year', CURRENT_DATE)`,
+    `SELECT GREATEST(COALESCE(sum(CASE WHEN side = 'buy' THEN 1 ELSE -1 END * quantity * price), 0), 0) AS bought FROM isa_fills
+     WHERE trade_date >= date_trunc('year', CURRENT_DATE)`,
   ).catch(() => []);
+  const isaFills = await query<{ day: string; ticker: string; side: "buy" | "sell"; quantity: string; price: string; fee: string | null }>(
+    "SELECT to_char(trade_date, 'YYYY-MM-DD') AS day, ticker, side, quantity, price, fee FROM isa_fills ORDER BY trade_date",
+  ).catch(() => []);
+  const isaRealized = realized(isaFills.map((f) => ({ ...f, quantity: Number(f.quantity), price: Number(f.price), fee: f.fee === null ? null : Number(f.fee) })));
   const isaSettings = await query<{ key: string; value: unknown }>(
     "SELECT key, value FROM app_settings WHERE key IN ('isa', 'isa_status', 'isa_balance_status')",
   ).catch(() => []);
@@ -273,6 +278,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
               summary={isaSummary}
               cash={isaCash}
               bought={Number(isaYear?.bought ?? 0)}
+              realized={isaRealized}
               settings={settingsOf(isaSetting("isa"))}
               status={(isaSetting("isa_balance_status") ?? null) as IsaStatus | null}
               today={new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" })}

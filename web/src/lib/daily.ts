@@ -16,6 +16,17 @@ export function dailyChanges(rows: AssetRow[]): Map<string, DayChange> {
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
+
+// 주소로 들어온 날짜·달이 진짜 있는 날인지 봐요(잘못 치면 오류 화면 대신 이번 달로).
+export function validDay(v: string | undefined): string | null {
+  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+  const [y, m, d] = v.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return y >= 2000 && y < 2100 && t.getUTCMonth() === m - 1 && t.getUTCDate() === d ? v : null;
+}
+export function validMonth(v: string | undefined): string | null {
+  return v && /^\d{4}-(0[1-9]|1[0-2])$/.test(v) && validDay(`${v}-01`) ? v : null;
+}
 export const monthOf = (day: string) => day.slice(0, 7);
 export function shiftMonth(month: string, by: number): string {
   const [y, m] = month.split("-").map(Number);

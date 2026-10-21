@@ -45,7 +45,11 @@ export default async function MistakesPage() {
   const [note, asked, status] = await Promise.all([
     setting<Note>("mistakes"), setting<string>("mistakes_request"), setting<{ at: string; error: string | null }>("mistakes_status"),
   ]);
-  const reading = !!asked && (!note?.at || asked > note.at) && !(status?.error && status.at >= asked);
+  const hasAi = Boolean(process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY);
+  const waiting = !!asked && (!note?.at || asked > note.at) && !(status?.error && status.at >= asked);
+  // 10분이 넘도록 답이 없으면 워커가 꺼져 있는 거예요. 버튼을 다시 풀어 줘요.
+  const stale = waiting && Date.now() - new Date(asked!).getTime() > 10 * 60_000;
+  const reading = waiting && !stale;
   const list = note?.mistakes ?? [];
 
   return (
@@ -57,15 +61,19 @@ export default async function MistakesPage() {
           {note?.at && note.few === undefined && (
             <span className="muted">사후강평 {note.reviews}개 · 매도 일지 {note.sells}개 · 최근 6개월 · {when(note.at)} 읽음</span>
           )}
-          <button type="submit" className="soft" disabled={reading}>{reading ? "읽는 중…" : "다시 읽기"}</button>
+          <button type="submit" className="soft" disabled={reading || !hasAi} title={hasAi ? undefined : ".env에 GEMINI_API_KEY가 있어야 해요"}>
+            {reading ? "읽는 중…" : "다시 읽기"}
+          </button>
         </form>
       </div>
 
       {reading && <div className="callout ok">AI가 기록을 읽고 있어요. 1~2분 뒤 새로 고치면 보여요.</div>}
-      {status?.error && !reading && <div className="callout">지난번에 못 읽었어요: {status.error}</div>}
+      {!hasAi && <div className="callout"><span>AI 키가 없어서 읽을 수 없어요. <code>notepad .env</code> 로 열어 <code>GEMINI_API_KEY=</code> 뒤에 키를 넣고 update.bat 을 다시 실행해 주세요.</span></div>}
+      {stale && <div className="callout">10분이 지나도 답이 없어요. 워커가 꺼져 있을 수 있어요. 다시 읽기를 한 번 더 눌러 보세요.</div>}
+      {status?.error && !waiting && <div className="callout">지난번에 못 읽었어요: {status.error}</div>}
 
       {!note ? (
-        <div className="callout ok">아직 읽은 적이 없어요. 다시 읽기를 누르면 AI가 최근 6개월 매도 일지와 사후강평을 읽어요. .env에 GEMINI_API_KEY가 있어야 해요.</div>
+        <div className="callout ok">아직 읽은 적이 없어요. 다시 읽기를 누르면 AI가 최근 6개월 매도 일지와 사후강평을 읽어요.</div>
       ) : note.few !== undefined ? (
         <div className="callout ok">최근 6개월 기록이 {note.few}개라 아직 읽기엔 적어요. 매도 일지나 사후강평이 3개 이상 쌓이면 읽어 드릴게요.</div>
       ) : (

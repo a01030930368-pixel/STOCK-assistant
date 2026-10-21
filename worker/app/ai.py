@@ -3,10 +3,13 @@
 GEMINI_API_KEY(구글 무료 키)가 있으면 Gemini를, 없고 ANTHROPIC_API_KEY(유료)가 있으면 Claude를 씁니다. 둘 다 없으면 아무것도 하지 않습니다. 매수·매도 지시가 아니라, 내가 세운 계획과 지금 상황을 비교해 주는 메모입니다.
 """
 import json
+import logging
 import re
 from dataclasses import dataclass
 
 import httpx
+
+log = logging.getLogger("worker")
 
 API = "https://api.anthropic.com/v1/messages"
 GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -97,8 +100,16 @@ GEMINI_FALLBACKS = ("gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-
 RETRY_STATUS = {404, 429, 500, 503}
 
 
+# Gemini는 생각(thinking)에 쓴 글자도 답 길이 한도에 셉니다. 짧은 답을 바라도 한도는 넉넉히 둬야 답이 비거나 잘리지 않아요.
+GEMINI_MIN_TOKENS = 4096
+
+
 def gemini_text(system: str, prompt: str, key: str, model: str, http: httpx.Client, max_tokens: int = 2048) -> str:
     errors = []
+    config: dict = {"maxOutputTokens": max(max_tokens, GEMINI_MIN_TOKENS)}
+    # JSON으로 답하라는 지시가 있는 곳에서만 JSON 형식을 강제합니다. "티커|문장" 같은 글로 답할 곳까지 막으면 답이 깨져요.
+    if "JSON" in system:
+        config["responseMimeType"] = "application/json"
     for m in dict.fromkeys((model, *GEMINI_FALLBACKS)):
         # 키는 주소가 아니라 헤더로 보내서 오류 메시지·로그에 남지 않게 합니다.
         res = http.post(
@@ -107,7 +118,7 @@ def gemini_text(system: str, prompt: str, key: str, model: str, http: httpx.Clie
             json={
                 "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": max_tokens, "responseMimeType": "application/json"},
+                "generationConfig": config,
             },
             timeout=60,
         )
@@ -118,7 +129,10 @@ def gemini_text(system: str, prompt: str, key: str, model: str, http: httpx.Clie
             raise RuntimeError(f"Gemini API 오류 {res.status_code}: {res.text[:160]}")
         cands = res.json().get("candidates") or []
         parts = ((cands[0].get("content") or {}).get("parts") or []) if cands else []
-        return "".join(p.get("text", "") for p in parts if not p.get("thought"))
+        text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+        if cands and cands[0].get("finishReason") == "MAX_TOKENS":
+            log.warning("Gemini 답이 길이 한도에서 잘렸어요 (%s)", m)
+        return text
     raise RuntimeError("Gemini가 붐벼 다음에 다시 시도합니다: " + ", ".join(errors))
 
 

@@ -45,9 +45,13 @@ class MistakesJob:
         return sorted(out, key=lambda i: i.day)
 
     def run(self, conn: psycopg.Connection, now: datetime | None = None) -> None:
-        if not self.key:
-            return
         now = now or datetime.now(timezone.utc)
+        if not self.key:
+            # 키가 없는데 화면에서 다시 읽기를 눌렀으면 '읽는 중'에 멈추지 않게 이유를 남기고 요청을 내려놔요.
+            if db.get_setting(conn, "mistakes_request"):
+                db.set_setting(conn, "mistakes_status", {"at": now.isoformat(), "error": "AI 키가 없어요 (.env의 GEMINI_API_KEY)"})
+                db.set_setting(conn, "mistakes_request", None)
+            return
         if not self.due(conn, now):
             return
         items = self.items(conn, now)

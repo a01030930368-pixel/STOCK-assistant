@@ -28,6 +28,7 @@ class EarningsJob:
         self.tried: dict[str, datetime] = {}
         self.backfilled: set[str] = set()  # 한 번 읽어 본 옛 잠정실적(표를 못 읽어도 다시 받지 않아요)
         self.key, self.model, self.ask = ai.text_asker(cfg)
+        self.explained: set = set()
 
     # ------------------------------------------------------------ 국내(공시 알림에서 불러요)
 
@@ -95,7 +96,9 @@ class EarningsJob:
             saved = db.earnings_report(conn, r.id)
             text = saved[1] if saved and saved[1] else None
             fresh = (today - r.reported_on).days <= FRESH_DAYS
-            if text is None and fresh:
+            # 해설은 보고서마다 한 번만 시도해요. 비어 돌아와도 30분마다 다시 부르면 무료 AI 한도만 써요.
+            if text is None and fresh and r.id not in self.explained:
+                self.explained.add(r.id)
                 text = self._explain(conn, r)
             db.save_earnings_report(conn, r, text)
             if fresh:

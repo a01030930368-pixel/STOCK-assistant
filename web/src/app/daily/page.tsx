@@ -3,7 +3,8 @@ import { query } from "@/lib/db";
 import { today } from "@/lib/format";
 import { usdKrw } from "@/lib/fx";
 import { loadBooks } from "@/lib/booksData";
-import { cellColor, dailyChanges, monthCells, monthOf, monthSummary, shiftMonth, shortWon, type AssetRow } from "@/lib/daily";
+import { cellColor, dailyChanges, monthCells, monthOf, monthSummary, shiftMonth, shortWon, validDay, validMonth, type AssetRow } from "@/lib/daily";
+import { realized as isaRealized } from "@/lib/isa";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,8 @@ const safe = <T,>(sql: string, params: unknown[] = []) => query<T>(sql, params).
 export default async function DailyPage({ searchParams }: { searchParams: Promise<Params> }) {
   const params = await searchParams;
   const now = today();
-  const month = /^\d{4}-\d{2}$/.test(params.m ?? "") ? params.m! : monthOf(params.d ?? now);
+  const picked = validDay(params.d);
+  const month = validMonth(params.m) ?? monthOf(picked ?? now);
   const rows = (await safe<{ day: string; total: string }>("SELECT to_char(day, 'YYYY-MM-DD') AS day, total FROM asset_history ORDER BY day"))
     .map((r): AssetRow => ({ day: r.day, total: Number(r.total) }));
   const changes = dailyChanges(rows);
@@ -39,10 +41,15 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
     }
     if (b.end) closedOn.set(b.end, [...(closedOn.get(b.end) ?? []), { name: b.name, key: b.key, ret: b.returnPct }]);
   }
+  // ISA 매도도 판 것 손익에 넣어요(ISA 체결 기록의 평균 단가로).
+  const isaFills = await safe<{ day: string; ticker: string; side: "buy" | "sell"; quantity: string; price: string; fee: string | null }>(
+    "SELECT to_char(trade_date, 'YYYY-MM-DD') AS day, ticker, side, quantity, price, fee FROM isa_fills ORDER BY trade_date");
+  const isa = isaRealized(isaFills.map((f) => ({ ...f, quantity: Number(f.quantity), price: Number(f.price), fee: f.fee === null ? null : Number(f.fee) })));
+  for (const [d, v] of isa.byDay) realized.set(d, (realized.get(d) ?? 0) + v);
 
   const cells = monthCells(month);
   const recorded = cells.filter((d): d is string => !!d && (changes.has(d) || realized.has(d)));
-  const day = params.d && monthOf(params.d) === month ? params.d : recorded.at(-1) ?? (monthOf(now) === month ? now : `${month}-01`);
+  const day = picked && monthOf(picked) === month ? picked : recorded.at(-1) ?? (monthOf(now) === month ? now : `${month}-01`);
   const ch = changes.get(day);
 
   const [movers, fills, events] = await Promise.all([
@@ -107,6 +114,7 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
           <p className="muted daily-note">
             내 돈 전체(국내·해외·ISA, 원화 환산)가 전날 기록보다 얼마나 변했는지예요. 빨강은 오름, 파랑은 내림이에요. 입금·출금도 변화에 들어가요.
             {first ? ` 날마다 기록은 ${Number(first.slice(5, 7))}월 ${Number(first.slice(8))}일부터 쌓이고 있어요.` : ""} 그 전 날짜는 판 것 손익만 보여요.
+            판 것 손익은 국내·해외·ISA를 합쳤고, 미국 주식은 판 날이 아니라 오늘 환율로 원화로 바꿨어요.
           </p>
         </section>
 

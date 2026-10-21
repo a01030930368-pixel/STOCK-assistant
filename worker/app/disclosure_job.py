@@ -37,7 +37,6 @@ class DisclosureJob:
         today = now.astimezone(KST).date()
         # 한 번이라도 채운 종목. 공시가 하나도 없던 종목도 넣어야 다음 공시를 알릴 수 있어요.
         seeded = set(db.get_setting(conn, "disclosure_seeded") or [])
-        before = set(seeded)
         for ticker, name, held in db.disclosure_stocks(conn):
             corp = codes.get(ticker)
             if not corp:  # ETF·ETN은 DART 회사가 아니라 공시가 없어요
@@ -49,18 +48,23 @@ class DisclosureJob:
             except Exception as e:
                 log.warning("%s 공시 확인 실패: %s", name, e)
                 continue
-            db.save_disclosures(conn, found)
-            for d in found:
-                if first:
-                    # 처음 채운 공시는 이미 지난 거라 알리지 않고, 보낸 것으로 적어 둬요. 잠정실적은 종목 페이지용으로 정리만 해 둬요.
-                    if self.earnings:
-                        self.earnings.kr(conn, d, held)
-                    db.mark_notice(conn, f"disclosure:{d.rcept_no}")
-                elif d.kind.important and (today - d.day).days <= FRESH_DAYS:
-                    self._alert(conn, d, held)
-            seeded.add(ticker)
-        if seeded != before:
-            db.set_setting(conn, "disclosure_seeded", sorted(seeded))
+            try:
+                db.save_disclosures(conn, found)
+                for d in found:
+                    if first:
+                        # 처음 채운 공시는 이미 지난 거라 알리지 않고, 보낸 것으로 적어 둬요. 잠정실적은 종목 페이지용으로 정리만 해 둬요.
+                        if self.earnings:
+                            self.earnings.kr(conn, d, held)
+                        db.mark_notice(conn, f"disclosure:{d.rcept_no}")
+                    elif d.kind.important and (today - d.day).days <= FRESH_DAYS:
+                        self._alert(conn, d, held)
+            except Exception as e:
+                log.warning("%s 공시 정리 실패, 다음에 다시 봐요: %s", name, e)
+                continue
+            if first:
+                # 종목마다 바로 적어 둬요. 중간에 멈춰도 다음 회차에 이 종목을 '처음'으로 보고 새 공시를 조용히 넘기지 않게요.
+                seeded.add(ticker)
+                db.set_setting(conn, "disclosure_seeded", sorted(seeded))
 
     def _alert(self, conn: psycopg.Connection, d: disclosures.Disclosure, held: bool) -> None:
         if not (self.cfg.telegram_bot_token and self.cfg.telegram_chat_id):

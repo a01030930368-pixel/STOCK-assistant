@@ -1,5 +1,13 @@
+# 기록(log) 파일이 PC에서 끝없이 커지지 않게 서비스마다 10MB × 3개까지만 남겨요.
+x-logging: &logging
+  logging:
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   db:
+    <<: *logging
     image: postgres:17
     restart: unless-stopped
     env_file: .env
@@ -15,6 +23,7 @@ services:
       retries: 10
 
   web:
+    <<: *logging
     build: ./web
     restart: unless-stopped
     env_file: .env
@@ -28,6 +37,7 @@ services:
 
   # 하루 한 번 DB 전체를 backups 폴더에 저장하고 14일치를 남깁니다. 되살리는 법은 README의 "백업" 참고.
   backup:
+    <<: *logging
     image: postgres:17
     restart: unless-stopped
     environment:
@@ -59,6 +69,7 @@ services:
         condition: service_healthy
 
   worker:
+    <<: *logging
     build: ./worker
     restart: unless-stopped
     env_file: .env

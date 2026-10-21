@@ -2,7 +2,7 @@ import Link from "next/link";
 import { query } from "@/lib/db";
 import { loadBooks } from "@/lib/booksData";
 import { skipped, type Book } from "@/lib/books";
-import { afterBuy, afterSell, AFTER_DAYS, curve, verdict, VERDICT, type Bar } from "@/lib/replay";
+import { afterBuy, afterSell, AFTER_DAYS, curve, endIndex, valueAt, verdict, VERDICT, type Bar } from "@/lib/replay";
 import { daysBefore } from "@/lib/compare";
 import { today } from "@/lib/format";
 import ReturnChart, { type Mark } from "@/app/_components/ReturnChart";
@@ -16,7 +16,6 @@ const safe = <T,>(sql: string, params: unknown[] = []) => query<T>(sql, params).
 const pct = (v: number | null) => (v === null ? "-" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)}%`);
 const tone = (v: number | null) => (v === null ? "" : v > 0 ? "up" : v < 0 ? "down" : "");
 const md = (day: string) => `${Number(day.slice(5, 7))}.${Number(day.slice(8))}`;
-const lastOf = (a: (number | null)[]) => [...a].reverse().find((v): v is number => v !== null) ?? null;
 const COLOR = { held: "#8d887c", mine: "#c9a96b", bench: "#7fb8d6" };
 
 function money(v: number, market: string) {
@@ -61,7 +60,8 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
   const stale = !lastBar || lastBar < daysBefore(day, 7);
   const idx = (d: string) => (c ? c.days.findIndex((x) => x >= d) : -1);
   const marks: Mark[] = c ? book.pages.map((p) => ({ i: idx(p.day), kind: p.side, series: 1 })).filter((m) => m.i >= 0) : [];
-  const mine = c ? lastOf(c.mine) : null, held = c ? lastOf(c.held) : null, ix = c ? lastOf(c.bench) : null;
+  const at = c ? endIndex(c, book.end) : -1;
+  const mine = c ? valueAt(c.mine, at) : null, held = c ? valueAt(c.held, at) : null, ix = c ? valueAt(c.bench, at) : null;
 
   return (
     <>
@@ -91,7 +91,7 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
               { label: "내 결과", color: COLOR.mine, values: c.mine },
               { label: benchName, color: COLOR.bench, values: c.bench, dashed: true },
             ]} />
-            <p className="chart-foot">내 결과는 남은 주식 평가액과 판 돈(수수료·세금 뺀 값)을 넣은 돈과 비교했어요. 계속 보유는 산 주식을 하나도 안 팔았을 때예요.</p>
+            <p className="chart-foot">내 결과는 남은 주식 평가액과 판 돈(수수료·세금 뺀 값)을 넣은 돈과 비교했어요. 계속 보유는 산 주식을 하나도 안 팔았을 때예요.{book.end ? " 위 숫자 세 개는 모두 다 판 날 기준이고, 선은 그 뒤 주가도 이어서 보여 줘요." : ""}</p>
           </div>
         </>
       ) : (

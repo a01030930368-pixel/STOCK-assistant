@@ -18,6 +18,9 @@ class BriefingJob:
         self.cfg = cfg
         self.http = http
         self.key, self.model, self.ask = ai.text_asker(cfg)
+        # 아침 브리핑은 그날 한 번만 만들고, 못 보낸 조각부터 10분 뒤에 다시 보내요(매분 다시 만들지 않게).
+        self._morning_parts: tuple[object, list[str], int, object] | None = None
+        self._morning_retry: datetime | None = None
 
     def run(self, conn: psycopg.Connection, now: datetime | None = None) -> None:
         now = now or datetime.now(timezone.utc)
@@ -113,22 +116,32 @@ class BriefingJob:
         key = f"morning:{day.isoformat()}"
         if db.notice_sent(conn, key):
             return
-        holdings = [briefing.Holding(*r) for r in db.briefing_holdings(conn)]
-        items = [briefing.Item(*r) for r in db.events_on(conn, day)]
-        indexes = self._indexes()
-        us = self._us(conn, now, indexes)
-        fx, fx_prev = self._fx(conn, indexes) if us else (None, None)
-        # 오늘의 용어는 못 만들어도 브리핑은 그대로 보내요.
-        try:
-            term_at = terms.next_index(conn, db.get_setting)
-            term = terms.message(conn, term_at)
-        except Exception as e:
-            log.warning("오늘의 용어 만들기 실패: %s", e)
-            term_at, term = None, None
-        text = briefing.morning_message(day, indexes, holdings, items, us, fx, fx_prev, term)
-        if not telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, text, self.http, html=True):
+        if self._morning_retry and now < self._morning_retry:
             return
-        log.info("아침 브리핑을 보냈습니다")
+        if not self._morning_parts or self._morning_parts[0] != day:
+            holdings = [briefing.Holding(*r) for r in db.briefing_holdings(conn)]
+            items = [briefing.Item(*r) for r in db.events_on(conn, day)]
+            indexes = self._indexes()
+            us = self._us(conn, now, indexes)
+            fx, fx_prev = self._fx(conn, indexes) if us else (None, None)
+            # 오늘의 용어는 못 만들어도 브리핑은 그대로 보내요.
+            try:
+                term_at = terms.next_index(conn, db.get_setting)
+                term = terms.message(conn, term_at)
+            except Exception as e:
+                log.warning("오늘의 용어 만들기 실패: %s", e)
+                term_at, term = None, None
+            text = briefing.morning_message(day, indexes, holdings, items, us, fx, fx_prev, term)
+            self._morning_parts = (day, telegram.split(text), 0, term_at)
+        _, parts, sent, term_at = self._morning_parts
+        while sent < len(parts):
+            if not telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, parts[sent], self.http, html=True):
+                self._morning_parts = (day, parts, sent, term_at)
+                self._morning_retry = now + timedelta(minutes=10)
+                return
+            sent += 1
+        self._morning_parts, self._morning_retry = None, None
+        log.info("아침 브리핑을 보냈습니다 (메시지 %d개)", len(parts))
         db.mark_notice(conn, key)
         if term_at is not None:
             db.set_setting(conn, "terms_next", term_at + 1)
