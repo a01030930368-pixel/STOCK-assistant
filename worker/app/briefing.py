@@ -1,10 +1,12 @@
 """텔레그램 알림 두 가지.
 
 - 저녁 일정 알림: 매일 저녁 8시(한국 시간)에 다음 날 일정(금리 결정·경제지표·만기·휴장·내 종목 실적)을 보냅니다.
-- 아침 브리핑: 평일 아침 8시에 밤사이 미국장, 내 종목, 오늘 일정을 한 번에 보냅니다.
+- 아침 브리핑: 평일 아침 8시에 밤사이 미국장, 내 미국 종목(원화 손익·뉴스·AI 한마디), 국내 종목, 오늘 일정을 한 번에 보냅니다.
 - 실적 전날 알림: 저녁 8시에, 내일 실적을 발표하는 보유 종목마다 따로 한 통씩 보냅니다.
 - 주간 성적표: 일요일 저녁 8시에 이번 주 내 돈 변화, 보유 종목 등락, 매매, 강평 안 쓴 일기장, 다음 주 일정을 보냅니다.
 """
+import html
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -14,7 +16,7 @@ WEEK = "월화수목금토일"
 EVENING = time(20, 0)
 MORNING, MORNING_UNTIL = time(8, 0), time(11, 0)  # 워커가 늦게 켜져도 오전 11시까지는 보냅니다.
 # 밤사이 미국장으로 보여 줄 지수(야후 기호, 이름)
-INDEXES = [("^GSPC", "S&P 500"), ("^IXIC", "나스닥"), ("^SOX", "필라델피아 반도체"), ("KRW=X", "원/달러")]
+INDEXES = [("^GSPC", "S&P 500"), ("^IXIC", "나스닥"), ("^SOX", "반도체(SOX)"), ("KRW=X", "원/달러")]
 # 같은 날 여러 일정이 있으면 시장 전체에 영향이 큰 것부터 보여 줍니다.
 ORDER = {"policy": 0, "economic": 1, "earnings": 2, "dividend": 3, "holiday": 4}
 # 텔레그램에서 한눈에 알아보게 일정 종류마다 이모지를 붙여요.
@@ -88,17 +90,144 @@ def _price(market: str, v: float) -> str:
     return f"{v:,.0f}원" if market == "KR" else f"${v:,.2f}"
 
 
-def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], items: list[Item]) -> str:
-    lines = [f"☀️ 좋은 아침이에요 · {day_label(day)}"]
+@dataclass(frozen=True)
+class UsStock:
+    """아침 브리핑의 미국 종목 카드 한 장. 값은 달러, 손익은 원화로 바꿔 보여 줘요."""
+    ticker: str
+    name: str
+    quantity: float
+    last: float
+    prev: float | None  # 그 전 거래일 종가
+    avg: float  # 평단
+    news: str | None = None  # 밤사이 그 종목 뉴스 제목(한국어) 하나
+    ai: str | None = None  # AI 한마디(참고용)
+
+    @property
+    def change_pct(self) -> float | None:
+        return (self.last / self.prev - 1) * 100 if self.prev else None
+
+
+@dataclass(frozen=True)
+class UsTotal:
+    won: float  # 밤사이 원화 손익(주가 + 환율)
+    pct: float
+    value: float  # 지금 평가액(원)
+    fx_effect: float  # 그중 환율 때문에 생긴 몫(원)
+
+
+def us_total(stocks: list[UsStock], fx: float | None, fx_prev: float | None) -> UsTotal | None:
+    """원화 손익 = 주가 효과(전날 환율로) + 환율 효과(지금 값에). 환율을 모르면 None."""
+    if not fx or not stocks:
+        return None
+    fx_prev = fx_prev or fx
+    priced = [s for s in stocks if s.prev]
+    price_part = sum(s.quantity * (s.last - s.prev) * fx_prev for s in priced)
+    fx_part = sum(s.quantity * s.last * (fx - fx_prev) for s in priced)
+    value = sum(s.quantity * s.last * fx for s in stocks)
+    before = sum(s.quantity * s.prev * fx_prev for s in priced)
+    won = price_part + fx_part
+    return UsTotal(won, won / before * 100 if before else 0.0, value, fx_part)
+
+
+def stock_won(s: UsStock, fx: float | None, fx_prev: float | None) -> float | None:
+    if not fx or not s.prev:
+        return None
+    return s.quantity * (s.last * fx - s.prev * (fx_prev or fx))
+
+
+def width(text: str) -> int:
+    """고정폭 글씨에서 한글·이모지는 두 칸이에요."""
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" or ord(ch) > 0x1F000 else 1 for ch in text)
+
+
+def pad(text: str, n: int) -> str:
+    return text + " " * max(1, n - width(text))
+
+
+def _signed_won(v: float) -> str:
+    return ("+" if v > 0 else "") + _won_short(v)
+
+
+LINE = "━━━━━━━━━━━━━━"
+AI_NOTE = "<i>🤖 AI 한마디는 참고용이에요. 사고팔지는 직접 판단해 주세요.</i>"
+
+
+def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], items: list[Item],
+                    us: list[UsStock] | None = None, fx: float | None = None, fx_prev: float | None = None) -> str:
+    """텔레그램 HTML 모양(굵게·고정폭 표)으로 만들어요. 이름·뉴스 같은 글은 모두 이스케이프해요."""
+    e = html.escape
+    lines = [f"☀️ <b>좋은 아침이에요</b> · {day_label(day)}"]
     if indexes:
-        lines += ["", "🌙 밤사이 미국장"]
-        lines += [f"{dot(q.change_pct)} {q.name}  {q.last:,.2f} ({_pct(q.change_pct)})" for q in indexes]
-    if holdings:
-        lines += ["", "💼 내 종목", "      전일 대비 · 평단 대비"]
-        lines += [f"{dot(h.day_change_pct)} {h.name}  {_price(h.market, h.price)}\n      {_pct(h.day_change_pct)} · {_pct(h.pnl_pct)}" for h in holdings]
-    lines += ["", "🗓️ 오늘 일정"]
-    lines += _items(items) if items else ["큰 일정은 없어요 😌"]
+        rows, col = [], max(width(q.name) for q in indexes) + 1
+        for q in indexes:
+            tail = f"  {q.last:,.0f}원" if q.name == "원/달러" else ""
+            rows.append(f"{e(pad(q.name, col))}{dot(q.change_pct)} {_pct(q.change_pct):>6}{tail}")
+        lines += ["", "🌙 <b>밤사이 미국장</b>", "<pre>" + "\n".join(rows) + "</pre>"]
+    us = us or []
+    if us:
+        total = us_total(us, fx, fx_prev)
+        if total:
+            lines += ["", "💵 <b>밤사이 내 미국 주식</b>", f"<b>{dot(total.won)} {_signed_won(total.won)}</b>  ({_pct(total.pct)})"]
+            sub = f"평가액 {_won_short(total.value)}"
+            if abs(total.fx_effect) >= 10_000:
+                sub += f" · 환율 효과 {_signed_won(total.fx_effect)}"
+            lines.append(f"<i>{sub}</i>")
+        lines += ["", "🇺🇸 <b>내 미국 종목</b>"]
+        for s in sorted(us, key=lambda x: -abs(x.change_pct or 0)):
+            facts = [f"${s.last:,.2f}"]
+            if s.avg > 0:
+                facts.append(f"평단 {_pct((s.last / s.avg - 1) * 100)}")
+            if (w := stock_won(s, fx, fx_prev)) is not None:
+                facts.append(_signed_won(w))
+            lines += [LINE, f"{dot(s.change_pct)} <b>{e(s.name)}</b>   <b>{_pct(s.change_pct)}</b>", f"<i>{' · '.join(facts)}</i>"]
+            if s.news:
+                lines.append(f"📰 {e(s.news)}")
+            if s.ai:
+                lines.append(f"🤖 {e(s.ai)}")
+        lines.append(LINE)
+    # 미국 카드가 없으면(가격을 못 받았을 때) 미국 종목도 아래 표에 같이 넣어요.
+    rest = [h for h in holdings if h.market == "KR" or not us]
+    if rest:
+        title = "💼 <b>국내 종목</b>" if us else "💼 <b>내 종목</b>"
+        col = max(width(h.name) for h in rest) + 1
+        rows = [f"{e(pad(h.name, col))}{dot(h.day_change_pct)} {_pct(h.day_change_pct):>6}  평단 {_pct(h.pnl_pct)}" for h in rest]
+        lines += ["", title, "<pre>" + "\n".join(rows) + "</pre>"]
+    lines += ["", "🗓️ <b>오늘 일정</b>"]
+    lines += [e(x) for x in _items(items)] if items else ["큰 일정은 없어요 😌"]
+    if any(s.ai for s in us):
+        lines += ["", AI_NOTE]
     return "\n".join(lines)
+
+
+# AI 한마디: 종목마다 한 줄씩 받아요. 투자 권유가 아니라 "오늘 볼 점"이에요.
+US_AI_SYSTEM = (
+    "너는 개인 투자자의 아침 브리핑을 돕는 조수야. 미국 종목마다 밤사이 움직임과 뉴스를 보고 '오늘 볼 점'이나 앞으로의 가능성을 "
+    "한국어 한 문장(45자 안팎)으로 써. 사라·팔아라 같은 권유, 목표가, 확정적인 예측은 쓰지 마. '~할 수 있어요', '~가능성이 있어요'처럼 말해. "
+    "출력은 종목마다 한 줄씩 '티커|문장' 모양으로만 써."
+)
+
+
+def us_ai_prompt(stocks: list[UsStock], indexes: list[Quote], news: dict[str, list[str]]) -> str:
+    idx = ", ".join(f"{q.name} {_pct(q.change_pct)}" for q in indexes) or "모름"
+    out = [f"밤사이 지수: {idx}", ""]
+    for s in stocks:
+        heads = "; ".join(news.get(s.ticker, [])[:3]) or "뉴스 없음"
+        avg = _pct((s.last / s.avg - 1) * 100) if s.avg > 0 else "-"
+        out.append(f"{s.ticker} ({s.name}): 밤사이 {_pct(s.change_pct)}, 평단 대비 {avg}. 뉴스: {heads}")
+    return "\n".join(out)
+
+
+def parse_us_ai(text: str, tickers: list[str]) -> dict[str, str]:
+    out = {}
+    for line in text.splitlines():
+        if "|" not in line:
+            continue
+        t, _, msg = line.partition("|")
+        t = t.strip().strip("*- ").upper()
+        msg = msg.strip().strip('"')
+        if t in tickers and msg:
+            out[t] = msg[:90]
+    return out
 
 
 @dataclass(frozen=True)

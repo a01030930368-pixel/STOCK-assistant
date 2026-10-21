@@ -1362,3 +1362,25 @@ def traded_unwatched(conn: psycopg.Connection) -> list[tuple[str, str]]:
            EXCEPT SELECT ticker, market FROM watchlist
            ORDER BY 1"""
     ).fetchall()
+
+
+def briefing_us(conn: psycopg.Connection) -> list[tuple[str, str, float, float, float]]:
+    """아침 브리핑 미국 종목 카드: (티커, 이름, 수량, 평단, 지금가). 평가금액이 큰 순서"""
+    rows = conn.execute(
+        "SELECT ticker, name, quantity, avg_price, cur_price FROM holdings WHERE market = 'US' AND quantity > 0 ORDER BY eval_amount DESC"
+    ).fetchall()
+    return [(t, n, float(q), float(a), float(c)) for t, n, q, a, c in rows]
+
+
+def news_since(conn: psycopg.Connection, ticker: str, since) -> list[str]:
+    """그 종목 뉴스 제목(한국어가 있으면 한국어), 최근 것부터"""
+    rows = conn.execute(
+        "SELECT COALESCE(NULLIF(title_ko, ''), title) FROM stock_news WHERE ticker = %s AND published_at >= %s ORDER BY published_at DESC LIMIT 5",
+        (ticker, since),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def us_exchange_rate(conn: psycopg.Connection) -> float | None:
+    row = conn.execute("SELECT exch_rate FROM us_account_summary WHERE id = 1").fetchone()
+    return float(row[0]) if row and row[0] else None

@@ -60,14 +60,52 @@ def test_morning_due_on_weekday_mornings_only():
 def test_morning_message_sections():
     text = briefing.morning_message(
         date(2026, 10, 20),
-        [briefing.Quote("나스닥", 21400.5, -0.21)],
+        [briefing.Quote("나스닥", 21400.5, -0.21), briefing.Quote("원/달러", 1338.2, -0.3)],
         [briefing.Holding("삼성전자", "KR", 68400, 1.2, 5.0), briefing.Holding("아이온큐", "US", 31.11, None, -17.66)],
         [],
     )
-    assert "🔵 나스닥  21,400.50 (-0.2%)" in text
-    assert "🔴 삼성전자  68,400원\n      +1.2% · +5.0%" in text
-    assert "⚪ 아이온큐  $31.11\n      - · -17.7%" in text
-    assert text.endswith("🗓️ 오늘 일정\n큰 일정은 없어요 😌")
+    assert text.startswith("☀️ <b>좋은 아침이에요</b> · 10.20 (화)")
+    assert "<pre>나스닥  🔵  -0.2%\n원/달러 🔵  -0.3%  1,338원</pre>" in text
+    # 미국 카드가 없으면 미국 종목도 표에 같이
+    assert "💼 <b>내 종목</b>" in text and "아이온큐 ⚪      -  평단 -17.7%" in text
+    assert "삼성전자 🔴  +1.2%  평단 +5.0%" in text
+    # 이름은 이스케이프 전에 맞춰서 S&P 500도 줄이 안 밀려요
+    t2 = briefing.morning_message(date(2026, 10, 20), [briefing.Quote("S&P 500", 1, 0.1), briefing.Quote("나스닥", 1, 0.1)], [], [])
+    assert "<pre>S&amp;P 500 🔴" in t2 and "\n나스닥  🔴" in t2
+    assert text.endswith("🗓️ <b>오늘 일정</b>\n큰 일정은 없어요 😌")
+    assert "AI 한마디는 참고용" not in text
+
+
+def test_morning_message_us_cards():
+    us = [
+        briefing.UsStock("SOUN", "사운드하운드", 100, 9.88, 10.12, 9.98, "3분기 실적 발표일 <11.6> 확정", None),
+        briefing.UsStock("IONQ", "아이온큐", 10, 31.42, 29.61, 29.59, None, "관심이 이어질 수 있어요 & 흔들림도"),
+    ]
+    text = briefing.morning_message(date(2026, 10, 22), [], [briefing.Holding("삼성전자", "KR", 68400, -0.4, 3.0),
+                                    briefing.Holding("아이온큐", "US", 31.42, None, 6.2)], [], us, 1338.2, 1342.2)
+    assert "💵 <b>밤사이 내 미국 주식</b>" in text
+    # 많이 움직인 아이온큐가 먼저, 뉴스·AI는 이스케이프
+    assert text.index("아이온큐</b>") < text.index("사운드하운드</b>")
+    assert "🔴 <b>아이온큐</b>   <b>+6.1%</b>\n<i>$31.42 · 평단 +6.2% · +2만원</i>\n🤖 관심이 이어질 수 있어요 &amp; 흔들림도" in text
+    assert "📰 3분기 실적 발표일 &lt;11.6&gt; 확정" in text
+    assert "💼 <b>국내 종목</b>" in text and "아이온큐    ⚪" not in text
+    assert text.endswith(briefing.AI_NOTE)
+
+
+def test_us_total_splits_price_and_fx():
+    s = [briefing.UsStock("A", "A", 10, 110, 100, 90)]
+    t = briefing.us_total(s, 1300, 1400)
+    assert t.won == 10 * (110 * 1300 - 100 * 1400)
+    assert t.fx_effect == 10 * 110 * (1300 - 1400) and t.value == 10 * 110 * 1300
+    assert round(t.pct, 2) == round(t.won / (10 * 100 * 1400) * 100, 2)
+    assert briefing.us_total(s, None, None) is None
+    assert briefing.stock_won(briefing.UsStock("B", "B", 1, 5, None, 5), 1300, 1300) is None
+
+
+def test_width_and_ai_parse():
+    assert briefing.width("SK하이닉스") == 2 + 4 * 2 and briefing.pad("나스닥", 8) == "나스닥  "
+    got = briefing.parse_us_ai("IONQ|좋아요\n- NVDA | 기대가 커요\n잡담\nXXX|무시", ["IONQ", "NVDA"])
+    assert got == {"IONQ": "좋아요", "NVDA": "기대가 커요"}
 
 
 def test_morning_sends_even_when_an_index_fails(monkeypatch):
@@ -76,7 +114,8 @@ def test_morning_sends_even_when_an_index_fails(monkeypatch):
     monkeypatch.setattr("app.briefing_job.db.mark_notice", lambda conn, key: marked.add(key))
     monkeypatch.setattr("app.briefing_job.db.events_on", lambda conn, day: [])
     monkeypatch.setattr("app.briefing_job.db.briefing_holdings", lambda conn: [])
-    monkeypatch.setattr("app.briefing_job.telegram.send", lambda token, chat, text, http: sent.append(text))
+    monkeypatch.setattr("app.briefing_job.db.briefing_us", lambda conn: [("IONQ", "아이온큐", 10.0, 29.6, 31.4)])
+    monkeypatch.setattr("app.briefing_job.telegram.send", lambda token, chat, text, http, html=False: sent.append((text, html)))
 
     def daily(symbol, http, span):
         raise RuntimeError("blocked")
@@ -86,7 +125,31 @@ def test_morning_sends_even_when_an_index_fails(monkeypatch):
     now = datetime(2026, 10, 19, 23, 5, tzinfo=timezone.utc)
     job.run(None, now)
     job.run(None, now)
-    assert len(sent) == 1 and "morning:2026-10-20" in marked and "밤사이 미국장" not in sent[0]
+    assert len(sent) == 1 and "morning:2026-10-20" in marked and "밤사이 미국장" not in sent[0][0] and sent[0][1]
+
+
+def test_morning_us_cards_with_ai(monkeypatch):
+    sent = []
+    monkeypatch.setattr("app.briefing_job.db.notice_sent", lambda conn, key: False)
+    monkeypatch.setattr("app.briefing_job.db.mark_notice", lambda conn, key: None)
+    monkeypatch.setattr("app.briefing_job.db.events_on", lambda conn, day: [])
+    monkeypatch.setattr("app.briefing_job.db.briefing_holdings", lambda conn: [])
+    monkeypatch.setattr("app.briefing_job.db.briefing_us", lambda conn: [("IONQ", "아이온큐", 10.0, 29.6, 31.4)])
+    monkeypatch.setattr("app.briefing_job.db.news_since", lambda conn, t, since: ["IBM과 협력"])
+    monkeypatch.setattr("app.briefing_job.db.us_exchange_rate", lambda conn: 1340.0)
+    monkeypatch.setattr("app.briefing_job.telegram.send", lambda token, chat, text, http, html=False: sent.append(text))
+
+    class Bar:
+        def __init__(self, c):
+            self.close = c
+
+    monkeypatch.setattr("app.briefing_job.prices.yahoo_daily", lambda s, http, span: [Bar(29.6), Bar(31.4)] if s == "IONQ" else [])
+    job = BriefingJob(cfg(), None)
+    asked = []
+    job.ask = lambda system, prompt, key, model, http, n: asked.append(prompt) or "IONQ|관심이 이어질 수 있어요"
+    job.run(None, datetime(2026, 10, 19, 23, 5, tzinfo=timezone.utc))
+    assert "IONQ (아이온큐): 밤사이 +6.1%" in asked[0] and "IBM과 협력" in asked[0]
+    assert "📰 IBM과 협력\n🤖 관심이 이어질 수 있어요" in sent[0] and "평가액 42만원" in sent[0]
 
 
 def test_earnings_eve_message():
