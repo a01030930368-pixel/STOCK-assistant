@@ -11,6 +11,8 @@ import AiNote, { type AiComment } from "@/app/_components/AiNote";
 import EventLine, { type CalendarEvent } from "./_components/EventLine";
 import IsaCard, { type IsaStatus } from "./_components/IsaCard";
 import { settingsOf } from "@/lib/isa";
+import FxSplit from "./_components/FxSplit";
+import { splitAll, type FxDay, type FxFill } from "@/lib/fxsplit";
 
 export const dynamic = "force-dynamic";
 
@@ -184,6 +186,21 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
     .map((a) => ({ ...a, dist: distancePct({ kind: a.kind, direction: a.direction, price: Number(a.price), cur: Number(a.cur_price) }) }))
     .sort((a, b) => a.dist - b.dist)
     .slice(0, 5);
+  // 해외 탭: 원화 수익을 주가 몫과 환율 몫으로
+  const usHeld = holdings.filter((h) => h.market === "US" && Number(h.quantity) > 0);
+  let fxSplit: (ReturnType<typeof splitAll> & { empty: string | null }) | null = null;
+  if (scope === "US" && usHeld.length > 0) {
+    const fills = (await query<{ ticker: string; day: string; side: "buy" | "sell"; quantity: string }>(
+      `SELECT ticker, to_char(trade_date, 'YYYY-MM-DD') AS day, side, quantity FROM trade_fills
+       WHERE market = 'US' AND ticker = ANY($1) ORDER BY trade_date`,
+      [usHeld.map((h) => h.ticker)],
+    ).catch(() => [])).map<FxFill>((f) => ({ ...f, quantity: Number(f.quantity) }));
+    const fxDays = (await query<{ day: string; rate: string }>(
+      "SELECT to_char(day, 'YYYY-MM-DD') AS day, rate FROM fx_daily ORDER BY day",
+    ).catch(() => [])).map<FxDay>((d) => ({ day: d.day, rate: Number(d.rate) }));
+    const split = splitAll(usHeld.map((h) => ({ ticker: h.ticker, name: h.name, quantity: Number(h.quantity), avg: Number(h.avg_price), cur: Number(h.cur_price) })), fills, fxDays, rate);
+    fxSplit = { ...split, empty: fxDays.length === 0 ? "날마다 환율을 아직 못 받았어요. 워커가 한국은행(ECOS_API_KEY)에서 받아 오면 채워져요." : !rate ? "지금 환율을 아직 못 받았어요." : null };
+  }
   const groups: [string, Holding[]][] = scope === "all"
     ? [["국내", shown.filter((h) => h.market === "KR")], ["해외", shown.filter((h) => h.market === "US")], ["ISA", isaHoldings]]
     : [["", shown]];
@@ -243,6 +260,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
         </section>
 
         <section>
+          {fxSplit && <FxSplit rows={fxSplit.rows} price={fxSplit.price} fx={fxSplit.fx} buyRate={fxSplit.buyRate} now={rate} unknown={fxSplit.unknown} empty={fxSplit.empty} />}
           <div className="panel flush holdings">
             <div className="panel-title">보유 종목 <span className="muted">{count}종목</span></div>
             {count === 0 ? (

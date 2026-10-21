@@ -8,6 +8,7 @@ import AiNote, { type AiComment } from "@/app/_components/AiNote";
 import StockNews from "@/app/_components/StockNews";
 import ChartMemo, { type Candle, type Doodle, type Level, type Mark, type Memo, type MinuteCandle, type Trade } from "@/app/_components/ChartMemo";
 import { wallClock } from "@/lib/candles";
+import { dartUrl, kindOf } from "@/lib/disclosures";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
 
 export const dynamic = "force-dynamic";
@@ -15,12 +16,17 @@ export const dynamic = "force-dynamic";
 type Stock = { ticker: string; name: string; market: string; position_id: number | null; watched: boolean; cur: string | null };
 type News = { url: string; title: string; title_ko: string | null; source: string; published_at: Date; summary: string; summary_ko: string | null };
 type Earnings = { period: string; title: string; url: string; reported_day: string | null; eps_actual: string | null; eps_estimate: string | null };
+type Filing = { rcept_no: string; title: string; kind: string; important: boolean; day: string; seen_at: Date };
 type Peer = { peer_ticker: string; peer_name: string; peer_market: string };
 
 // 워커가 처음 돌기 전의 예전 DB에는 종목 정보 테이블이 없을 수 있습니다.
 const safe = <T,>(sql: string, params: unknown[]) => query<T>(sql, params).catch(() => [] as T[]);
 const pct = (v: number | null) => (v === null ? "-" : `${v}%`);
 const kst = (d: Date) => d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+// DART 목록에는 시각이 없어, 접수한 날에 워커가 본 시각만 보여 줘요(처음 채운 옛 공시는 날짜만).
+const seenTime = (d: Date) => d.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false });
+const seenSameDay = (f: { day: string; seen_at: Date }) => f.seen_at.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }) === f.day;
 
 export default async function StockPage({ params }: { params: Promise<{ ticker: string }> }) {
   const ticker = decodeURIComponent((await params).ticker).toUpperCase();
@@ -68,6 +74,12 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
      FROM stock_earnings WHERE ticker = $1 ORDER BY reported_on DESC NULLS LAST, period DESC LIMIT 8`,
     [ticker],
   );
+  // 공시 표는 워커 업데이트 뒤에 생겨요.
+  const filings = stock.market === "KR" ? await safe<Filing>(
+    `SELECT rcept_no, title, kind, important, to_char(day, 'YYYY-MM-DD') AS day, seen_at FROM stock_disclosures
+     WHERE ticker = $1 ORDER BY day DESC, rcept_no DESC LIMIT 20`,
+    [ticker],
+  ) : [];
   const financials = await safe<FinancialRow>("SELECT * FROM stock_financials WHERE ticker = $1 ORDER BY period DESC", [ticker]);
   const peers = await safe<Peer>("SELECT peer_ticker, peer_name, peer_market FROM stock_peers WHERE ticker = $1 ORDER BY peer_name", [ticker]);
   const peerLatest = await safe<FinancialRow>(
@@ -196,6 +208,37 @@ export default async function StockPage({ params }: { params: Promise<{ ticker: 
         </select>
         <button type="submit">추가</button>
       </form>
+
+      {stock.market === "KR" && (
+        <>
+          <h2>공시</h2>
+          {filings.length === 0 ? (
+            <p className="muted">
+              {process.env.DART_API_KEY ? "아직 없어요. 들고 있는 종목이면 워커가 10분마다 DART에서 확인해요. ETF는 공시가 없어요." : "DART_API_KEY를 넣으면 워커가 들고 있는 종목의 공시를 10분마다 확인해요."}
+            </p>
+          ) : (
+            <div className="panel">
+              <div className="muted" style={{ fontSize: "0.8rem" }}>중요한 공시는 텔레그램으로 바로 알려 드려요. 지분·기타 공시는 여기에만 보여요.</div>
+              <ul className="disc">
+                {filings.map((f) => {
+                  const k = kindOf(f.kind);
+                  return (
+                    <li key={f.rcept_no} className={f.important ? "" : "quiet"}>
+                      <div className="when">{f.day.slice(5).replace("-", ".")}{seenSameDay(f) && <><br />{seenTime(f.seen_at)}</>}</div>
+                      <div className="what">
+                        <span className={`badge ${k.tone}`}>{k.label}</span>
+                        <a href={dartUrl(f.rcept_no)} target="_blank" rel="noopener noreferrer">{f.title}</a>
+                        {f.important && k.explain && <div className="why">{k.explain}</div>}
+                      </div>
+                      <a className="muted" href={dartUrl(f.rcept_no)} target="_blank" rel="noopener noreferrer">DART ›</a>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
 
       <h2>최근 실적</h2>
       {earnings.length === 0 && <p className="muted">아직 없습니다. {stock.market === "KR" ? "DART_API_KEY" : "FINNHUB_API_KEY"}를 넣으면 워커가 가져옵니다.</p>}

@@ -572,3 +572,36 @@ button:disabled { opacity: 0.6; cursor: default; filter: none; }
   .cal7-v { font-size: 0.66rem; }
   .cal7-r { font-size: 0.56rem; }
 }
+
+/* 미국 주식 수익 쪼개 보기 */
+.fx-top { display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+.fx-big { font-size: 1.6rem; font-weight: 700; }
+.fx-mid { font-size: 1.15rem; font-weight: 600; }
+.fx-c { color: var(--macro); }
+.fx-rate { margin-left: auto; text-align: right; font-size: 0.8rem; }
+.fx-bar { display: flex; gap: 2px; height: 14px; border-radius: 5px; overflow: hidden; margin: 12px 0 6px; background: var(--surface-2); }
+.fx-bar i { display: block; height: 100%; }
+.fx-up { background: var(--up); } .fx-down { background: var(--down); } .fx-fx { background: var(--macro); }
+.fx-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; vertical-align: -1px; }
+.fx-legend { font-size: 0.8rem; margin-bottom: 10px; }
+.fx-note { font-size: 0.76rem; margin-top: 8px; line-height: 1.6; }
+.fx-table td, .fx-table th { white-space: nowrap; }
+
+/* 종목 공시 */
+.disc { list-style: none; margin: 0; padding: 0; }
+.disc li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line-2); }
+.disc .when { width: 64px; flex-shrink: 0; color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
+.disc .what { flex: 1; min-width: 0; }
+.disc .what a { color: var(--fg); }
+.disc .why { color: var(--muted); font-size: 0.84rem; margin-top: 2px; }
+.disc li.quiet .what a { color: var(--muted); }
+.disc .badge { margin-right: 6px; }
+.fx-list { display: none; list-style: none; margin: 0; padding: 0; }
+.fx-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line-2); font-size: 0.9rem; }
+.fx-list li .muted { font-size: 0.8rem; margin-top: 2px; }
+@media (max-width: 640px) {
+  .fx-wide { display: none; }
+  .fx-list { display: block; }
+  .fx-rate { margin-left: 0; text-align: left; }
+  .fx-big { font-size: 1.35rem; }
+}

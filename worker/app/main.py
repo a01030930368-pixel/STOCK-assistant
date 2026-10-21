@@ -15,6 +15,7 @@ from .screener_job import ScreenerJob
 from .intraday_job import IntradayJob
 from .ai_job import AiJob
 from .mistakes_job import MistakesJob
+from .disclosure_job import DisclosureJob
 from .briefing_job import BriefingJob
 from .watch_job import WatchJob
 from .bot import Bot
@@ -163,6 +164,23 @@ def refresh_macro(cfg: config.Config, conn: psycopg.Connection, http: httpx.Clie
             db.save_indicators(conn, fetch())
         except Exception:
             log.exception("%s 매크로 지표 가져오기 실패", name)
+    if cfg.ecos_api_key:
+        try:
+            refresh_fx(cfg.ecos_api_key, conn, http, today)
+        except Exception:
+            log.exception("날마다 환율 가져오기 실패")
+
+
+FX_BACK = timedelta(days=365)  # 미국 주식 체결 기록이 없어도 1년 치는 받아 둬요
+
+
+def refresh_fx(key: str, conn: psycopg.Connection, http: httpx.Client, today) -> None:
+    """미국 주식을 처음 산 날부터 오늘까지 날마다 환율을 채웁니다. 이미 있는 날은 최근 1주만 다시 받아요."""
+    need = min(filter(None, [db.first_us_buy(conn), today - FX_BACK]))
+    lo, hi = db.fx_range(conn)
+    spans = [(need, today)] if lo is None else [(hi - timedelta(days=7), today)] + ([(need, lo - timedelta(days=1))] if need < lo else [])
+    for start, end in spans:
+        db.save_fx(conn, macro.fetch_usdkrw_days(key, start, end, http))
 
 
 def main() -> None:
@@ -190,6 +208,7 @@ def main() -> None:
     minutes = IntradayJob(http, kiwoom)
     comments = AiJob(cfg, http)
     notebook = MistakesJob(cfg, http)
+    filings = DisclosureJob(cfg, http, lambda: research.dart_codes)
     notices = BriefingJob(cfg, http)
     watching = WatchJob(cfg, http, kiwoom)
     trades = FillsJob(kiwoom)
@@ -209,7 +228,7 @@ def main() -> None:
     threading.Thread(target=alert_loop, args=(cfg, kiwoom, isa), name="alerts", daemon=True).start()
     jobs = [
         ("종목 정보 수집", research.run), ("관심종목 갱신", watching.run), ("체결 내역 갱신", trades.run),
-        ("ISA 체결 갱신", isa_trades.run), ("매매 당시 기록", buy_context.run),
+        ("ISA 체결 갱신", isa_trades.run), ("공시 알림", filings.run), ("매매 당시 기록", buy_context.run),
         ("검색기 갱신", screener.run), ("분봉 갱신", minutes.run), ("AI 한마디", comments.run), ("실수 노트", notebook.run), ("일정 알림", notices.run),
     ]
     while True:
