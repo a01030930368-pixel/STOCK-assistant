@@ -409,6 +409,28 @@ MIGRATIONS = [
       fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (ticker, code)
     )""",
+    """CREATE TABLE IF NOT EXISTS stock_briefs (
+      ticker      TEXT PRIMARY KEY,
+      market      TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      cells       JSONB NOT NULL,
+      one_line    TEXT,
+      good        JSONB,
+      bad         JSONB,
+      pending     BOOLEAN NOT NULL DEFAULT true,
+      error       TEXT,
+      model       TEXT,
+      made_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      done_at     TIMESTAMPTZ
+    )""",
+    """CREATE TABLE IF NOT EXISTS us_ext_quotes (
+      ticker      TEXT PRIMARY KEY,
+      session     TEXT NOT NULL CHECK (session IN ('pre', 'post')),
+      price       NUMERIC(18, 4) NOT NULL,
+      base        NUMERIC(18, 4) NOT NULL,
+      quoted_at   TIMESTAMPTZ NOT NULL,
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
 
 
@@ -1384,3 +1406,36 @@ def news_since(conn: psycopg.Connection, ticker: str, since) -> list[str]:
 def us_exchange_rate(conn: psycopg.Connection) -> float | None:
     row = conn.execute("SELECT exch_rate FROM us_account_summary WHERE id = 1").fetchone()
     return float(row[0]) if row and row[0] else None
+
+
+def us_held_tickers(conn: psycopg.Connection) -> list[str]:
+    return [r[0] for r in conn.execute("SELECT ticker FROM holdings WHERE market = 'US' AND quantity > 0 ORDER BY ticker").fetchall()]
+
+
+def save_ext_quote(conn: psycopg.Connection, q) -> None:
+    conn.execute(
+        """INSERT INTO us_ext_quotes (ticker, session, price, base, quoted_at, fetched_at) VALUES (%s, %s, %s, %s, %s, now())
+           ON CONFLICT (ticker) DO UPDATE SET session = EXCLUDED.session, price = EXCLUDED.price, base = EXCLUDED.base,
+             quoted_at = EXCLUDED.quoted_at, fetched_at = now()""",
+        (q.ticker, q.session, q.price, q.base, q.at),
+    )
+
+
+def delete_ext_quote(conn: psycopg.Connection, ticker: str) -> None:
+    conn.execute("DELETE FROM us_ext_quotes WHERE ticker = %s", (ticker,))
+
+
+def pending_brief(conn: psycopg.Connection):
+    """(ticker, name, market, cells) 가장 먼저 부탁받은 요약 하나."""
+    return conn.execute(
+        "SELECT ticker, name, market, cells FROM stock_briefs WHERE pending ORDER BY made_at LIMIT 1"
+    ).fetchone()
+
+
+def finish_brief(conn: psycopg.Connection, ticker: str, one_line: str | None, good: list[str], bad: list[str],
+                 model: str | None, error: str | None) -> None:
+    conn.execute(
+        """UPDATE stock_briefs SET one_line = %s, good = %s, bad = %s, model = %s, error = %s, pending = false, done_at = now()
+           WHERE ticker = %s""",
+        (one_line, Jsonb(good), Jsonb(bad), model, error, ticker),
+    )
