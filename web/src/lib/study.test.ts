@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALL_PARTS, applyDraft, bars, cleanFields, emptyFields, filled, numbersOf, pastSelf, peerLine, reviewDefault, splitOf, type Version } from "./study";
+import { ALL_PARTS, applyDraft, bars, cheapGap, groupBySector, NO_SECTOR, cleanFields, emptyFields, filled, numbersOf, pastSelf, peerLine, reviewDefault, splitOf, type Version } from "./study";
 import type { StatementRow } from "./statements";
 
 describe("study notes", () => {
@@ -92,6 +92,13 @@ describe("study notes", () => {
     expect(out.verdict).toBe("");
     expect(applyDraft(emptyFields(), { promises: "실적 자료" }, ALL_PARTS).promises).toEqual([]);
     expect(cleanFields({ styles: ["가치주", "가치주", "x"] }).styles).toEqual(["가치주"]);
+  });
+
+  it("groups notes by sector, biggest first, unknown last", () => {
+    const g = groupBySector([{ sector: "은행" }, { sector: "" }, { sector: "반도체" }, { sector: " 반도체 " }]);
+    expect(g.map((x) => [x.sector, x.items.length])).toEqual([["반도체", 2], ["은행", 1], [NO_SECTOR, 1]]);
+    expect(cheapGap(220000, 259500)).toBe(-15.2);
+    expect(cheapGap(null, 100)).toBeNull();
   });
 
   it("puts the review date three months out", () => {

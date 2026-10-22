@@ -824,6 +824,26 @@ export async function readStudyPick(id: string): Promise<{ status: string; ticke
   return { status: v.status ?? "pending", ticker: v.ticker, error: v.error };
 }
 
+// 같은 업종 비교 표의 ✨ AI 한 줄 비교. 워커(study.py compare)가 app_settings 'study_compare'에 답을 써요.
+export async function requestStudyCompare(sector: string, tickers: string[]): Promise<string> {
+  const id = Math.random().toString(36).slice(2, 10);
+  const list = (Array.isArray(tickers) ? tickers : []).map((t) => String(t).toUpperCase()).filter((t) => STUDY_TICKER.test(t)).slice(0, 8);
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ('study_compare', $1::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify({ id, sector: String(sector ?? "").slice(0, 40), tickers: list, status: "pending", at: new Date().toISOString() })],
+  );
+  return id;
+}
+
+export async function readStudyCompare(id: string): Promise<{ status: string; text?: string; error?: string } | null> {
+  const [row] = await query<{ value: { id?: string; status?: string; text?: string; error?: string } | null }>(
+    "SELECT value FROM app_settings WHERE key = 'study_compare'",
+  ).catch(() => []);
+  const v = row?.value;
+  if (!v || v.id !== id) return null;
+  return { status: v.status ?? "pending", text: v.text, error: v.error };
+}
+
 // fill이면 초안이 왔을 때 빈 칸에 전부 넣고 한 장 노트로 마쳐요(settleStudyFill).
 export async function requestStudyDraft(ticker: string, fill = false) {
   const t = String(ticker ?? "").toUpperCase();

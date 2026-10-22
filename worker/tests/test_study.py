@@ -130,3 +130,20 @@ def test_draft_uses_web_search_and_falls_back_without_it():
         w.draft(mock.Mock(), "000660", "SK하이닉스", "KR", "t1")
         out = db.finish_study_draft.call_args.args[2]
         assert out["one"] == "검색 없이" and out["searched"] is False
+
+
+def test_compare_writes_ai_line_or_error():
+    w = study.StudyWorker(mock.Mock(gemini_api_key="", anthropic_api_key=""), mock.Mock())
+    w.ask, w.key, w.model = mock.Mock(return_value="  하이닉스가 이익률이 더 높아요.\n마이크론은 성장이 빨라요. "), "k", "m"
+    req = {"id": "c1", "sector": "반도체", "tickers": ["000660", "MU"], "status": "pending"}
+    with mock.patch.object(study, "db") as db:
+        db.get_setting.side_effect = lambda conn, key: req if key == "study_compare" else None
+        db.pending_study_draft.return_value = None
+        db.study_compare_context.return_value = [{"name": "SK하이닉스", "one": "메모리", "margin": "35%"}, {"name": "Micron", "growth": "+31%"}]
+        assert w.run_once(mock.Mock())
+        saved = db.set_setting.call_args.args[2]
+        assert saved["status"] == "done" and saved["text"] == "하이닉스가 이익률이 더 높아요. 마이크론은 성장이 빨라요."
+        assert "영업이익률 35%" in w.ask.call_args.args[1] and "업종: 반도체" in w.ask.call_args.args[1]
+        db.study_compare_context.return_value = [{"name": "x"}]
+        w.compare(mock.Mock(), req)
+        assert db.set_setting.call_args.args[2]["status"] == "error"

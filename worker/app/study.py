@@ -196,6 +196,23 @@ def parse_draft(text: str, sources: list[dict] | None = None) -> dict:
     return out
 
 
+COMPARE_SYSTEM = """너는 한국 개인투자자가 같은 업종으로 공부한 회사들을 비교하도록 돕는 도우미야.
+주어진 노트와 숫자만 보고, 회사들의 차이를 2문장 안에(200자 안쪽) 쉬운 존댓말로 써.
+이익률·성장 같은 숫자 차이와 사업 구조의 차이를 같이 짚어. "사세요", "파세요" 같은 권유는 하지 마.
+설명 글이나 머리말 없이 비교 문장만 써."""
+
+
+def compare_prompt(sector: str, rows: list[dict]) -> str:
+    lines = [f"업종: {sector}"]
+    for r in rows:
+        bits = [f"{r['name']}"]
+        for key, label in (("one", "한 줄"), ("moat", "강점"), ("risk", "걱정"), ("margin", "영업이익률"), ("growth", "매출 성장")):
+            if r.get(key) not in (None, ""):
+                bits.append(f"{label} {r[key]}")
+        lines.append("- " + " / ".join(bits))
+    return "\n".join(lines)
+
+
 def draft_prompt(name: str, market: str, ctx: dict) -> str:
     lines = [f"회사: {name} ({'국내' if market == 'KR' else '미국'})"]
     if ctx.get("pick"):
@@ -237,7 +254,29 @@ class StudyWorker:
         if row:
             self.draft(conn, *row)
             return True
+        req = db.get_setting(conn, "study_compare")
+        if isinstance(req, dict) and req.get("status") == "pending":
+            self.compare(conn, req)
+            return True
         return False
+
+    def compare(self, conn: psycopg.Connection, req: dict) -> None:
+        """같은 업종으로 공부한 회사들을 AI가 한두 문장으로 비교해요(참고용)."""
+        if not self.ask:
+            db.set_setting(conn, "study_compare", {**req, "status": "error", "error": "AI 키가 없어요"})
+            return
+        rows = db.study_compare_context(conn, [str(t) for t in req.get("tickers") or []][:8])
+        if len(rows) < 2:
+            db.set_setting(conn, "study_compare", {**req, "status": "error", "error": "비교할 회사가 2곳 이상 있어야 해요"})
+            return
+        try:
+            text = _s(self.ask(COMPARE_SYSTEM, compare_prompt(str(req.get("sector") or ""), rows), self.key, self.model, self.http, 1024), 300)
+            if not text:
+                raise ValueError("AI 답이 비었어요")
+            db.set_setting(conn, "study_compare", {**req, "status": "done", "text": text, "model": self.model, "at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e:
+            db.set_setting(conn, "study_compare", {**req, "status": "error", "error": str(e)[:200]})
+            log.warning("기업 공부 업종 비교 실패: %s", e)
 
     def pick(self, conn: psycopg.Connection, req: dict) -> None:
         market = req.get("market") if req.get("market") in ("KR", "US") else None

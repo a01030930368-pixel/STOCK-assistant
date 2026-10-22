@@ -1715,6 +1715,26 @@ def study_context(conn: psycopg.Connection, ticker: str, market: str) -> dict:
     return ctx
 
 
+def study_compare_context(conn: psycopg.Connection, tickers: list[str]) -> list[dict]:
+    """업종 비교에 넣을 노트 요약: 이름, 한 줄, 강점, 첫 번째 걱정, 최근 영업이익률·매출 성장(%)."""
+    out = []
+    for ticker, name, fields in conn.execute("SELECT ticker, name, fields FROM study_notes WHERE ticker = ANY(%s) ORDER BY name", (tickers,)):
+        f = fields or {}
+        risks = [r.get("text") for r in f.get("risks") or [] if isinstance(r, dict) and r.get("text")]
+        fin = conn.execute(
+            """SELECT revenue, operating_income FROM stock_financials WHERE ticker = %s AND period ~ '^(FY)?[0-9]{4}$'
+               ORDER BY regexp_replace(period, '^FY', '') DESC LIMIT 2""", (ticker,),
+        ).fetchall()
+        margin = growth = None
+        if fin and fin[0][0]:
+            margin = f"{float(fin[0][1] or 0) / float(fin[0][0]) * 100:.0f}%" if fin[0][1] is not None else None
+            if len(fin) > 1 and fin[1][0]:
+                growth = f"{(float(fin[0][0]) / float(fin[1][0]) - 1) * 100:+.0f}%"
+        out.append({"ticker": ticker, "name": name, "one": str(f.get("one") or "")[:120], "moat": str(f.get("moat") or "")[:120],
+                    "risk": (risks[0] if risks else "")[:80], "margin": margin, "growth": growth})
+    return out
+
+
 def study_reminders(conn: psycopg.Connection, today) -> list[tuple]:
     """다시 볼 날이 된 노트. (ticker, name, 판단, 공부한 날, 그때 주가, 지금 주가, market)"""
     return conn.execute(
