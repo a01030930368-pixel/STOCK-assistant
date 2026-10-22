@@ -482,7 +482,7 @@ p.small { font-size: 0.82rem; margin: 6px 0 0; }
 
 /* 차트 그림 도구 (지지·저항, 낙서) */
 .chart-stage { position: relative; }
-.chart-wrap.big .chart-stage { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.chart-wrap.big .chart-stage { flex: 1; display: flex; flex-direction: row; min-height: 0; }
 .pen-layer { position: absolute; inset: 0; z-index: 3; cursor: crosshair; touch-action: none; }
 .draw-hint { position: absolute; left: 12px; right: 90px; bottom: 34px; z-index: 4; pointer-events: none; background: rgba(42, 36, 24, 0.92); border: 1px solid #4a3f28; color: #e7cf9c; border-radius: 8px; padding: 6px 12px; font-size: 0.8rem; }
 .near { border: 1px solid; border-radius: 999px; padding: 3px 10px; font-size: 0.76rem; white-space: nowrap; font-family: var(--mono); }
@@ -694,7 +694,7 @@ button:disabled { opacity: 0.6; cursor: default; filter: none; }
 /* 차트 왼쪽 세로 그리기 막대 */
 .chart-stage { display: flex; }
 .chart-area { position: relative; flex: 1; min-width: 0; }
-.chart-wrap.big .chart-area { display: flex; flex-direction: column; min-height: 0; }
+.chart-wrap.big .chart-area { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .draw-rail { display: flex; flex-direction: column; gap: 3px; padding: 6px 4px; border-right: 1px solid var(--line-2); z-index: 4; }
 .draw-rail button { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; color: var(--sub); border: 1px solid transparent; font-size: 0.95rem; line-height: 1; }
 .draw-rail button:hover { background: var(--surface-2); filter: none; }
