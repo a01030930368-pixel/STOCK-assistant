@@ -26,6 +26,7 @@ from .buy_context_job import BuyContextJob
 from .sector_job import SectorJob
 from .flow_job import FlowJob
 from .history_job import HistoryJob
+from .practice_pool import PoolJob
 from .extended import ExtJob
 from .market import kr_market_open, kr_trading_now, us_market_open, us_trading_now
 
@@ -244,6 +245,7 @@ def main() -> None:
     sector_trends = SectorJob(http, kiwoom)
     flows = FlowJob(kiwoom)
     history = HistoryJob(http, kiwoom)
+    practice = PoolJob(http, kiwoom)
     ext_quotes = ExtJob(http)
     last_macro: datetime | None = None
     db_conn = Connection(cfg.database_url)
@@ -261,7 +263,7 @@ def main() -> None:
     jobs = [
         ("종목 정보 수집", research.run), ("관심종목 갱신", watching.run), ("체결 내역 갱신", trades.run), ("미국 장외 시세", ext_quotes.run),
         ("ISA 체결 갱신", isa_trades.run), ("공시 알림", filings.run), ("실적 정리", results.run), ("매매 당시 기록", buy_context.run),
-        ("검색기 갱신", screener.run), ("섹터 동향", sector_trends.run), ("수급·테마", flows.run), ("비교·복기 일봉", history.run), ("분봉 갱신", minutes.run), ("AI 한마디", comments.run), ("실수 노트", notebook.run), ("일정 알림", notices.run),
+        ("검색기 갱신", screener.run), ("섹터 동향", sector_trends.run), ("수급·테마", flows.run), ("비교·복기 일봉", history.run), ("연습용 일봉", practice.run), ("분봉 갱신", minutes.run), ("AI 한마디", comments.run), ("실수 노트", notebook.run), ("일정 알림", notices.run),
     ]
     while True:
         now = datetime.now(timezone.utc)

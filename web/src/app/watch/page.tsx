@@ -2,6 +2,7 @@ import Link from "next/link";
 import { addWatch, deleteAlert, removeWatch, toggleAlert } from "@/app/actions";
 import { query } from "@/lib/db";
 import { signClass, usd, won } from "@/lib/format";
+import WatchTabs from "./WatchTabs";
 import { gapPct, nearest, sparkGeometry, wayLabel, type WatchAlert } from "@/lib/watch";
 
 export const dynamic = "force-dynamic";
@@ -44,11 +45,11 @@ export default async function WatchPage() {
 
   return (
     <>
-      <div className="page-head">
+      <div className="board-head">
         <h1>관심종목</h1>
-        <Link href="/compare" className="chip-btn">⇄ 종목 비교</Link>
-        <span className="muted">안 가진 종목도 정한 가격에 닿으면 텔레그램으로 알려 드려요. 점선이 목표가예요.</span>
+        <WatchTabs on="watch" />
       </div>
+      <p className="muted">안 가진 종목도 정한 가격에 닿으면 텔레그램으로 알려 드려요. 점선이 목표가예요.</p>
 
       <form action={addWatch} className="panel watch-form">
         <input name="ticker" placeholder="종목코드·티커 (005930, PLTR)" required />

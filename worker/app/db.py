@@ -455,6 +455,28 @@ MIGRATIONS = [
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS chart_shapes_ticker_idx ON chart_shapes (ticker, view)",
+    # 관심종목 › 연습하기: 연습용으로 일봉을 받아 둘 큰 종목들, 연습 기록
+    """CREATE TABLE IF NOT EXISTS practice_pool (
+      ticker      TEXT PRIMARY KEY,
+      name        TEXT NOT NULL DEFAULT '',
+      market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+      fetched_at  TIMESTAMPTZ,
+      error       TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS practice_sessions (
+      id          SERIAL PRIMARY KEY,
+      ticker      TEXT NOT NULL,
+      name        TEXT NOT NULL DEFAULT '',
+      start_day   DATE NOT NULL,
+      end_day     DATE NOT NULL,
+      blind       BOOLEAN NOT NULL DEFAULT true,
+      trades      JSONB NOT NULL DEFAULT '[]',
+      return_pct  NUMERIC(10, 2) NOT NULL,
+      hold_pct    NUMERIC(10, 2) NOT NULL,
+      calls       INTEGER NOT NULL DEFAULT 0,
+      hits        INTEGER NOT NULL DEFAULT 0,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
 
 
@@ -1537,3 +1559,25 @@ def index_moves(conn: psycopg.Connection) -> dict[str, str]:
         if len(rows) == 2 and float(rows[1][1]):
             out[label] = f"{rows[0][0]} {(float(rows[0][1]) / float(rows[1][1]) - 1) * 100:+.1f}%"
     return out
+
+
+def seed_practice_pool(conn: psycopg.Connection, rows) -> None:
+    for ticker, name, market in rows:
+        conn.execute(
+            "INSERT INTO practice_pool (ticker, name, market) VALUES (%s, %s, %s) ON CONFLICT (ticker) DO UPDATE SET name = EXCLUDED.name",
+            (ticker, name, market),
+        )
+
+
+def practice_due(conn: psycopg.Connection, before, limit: int, kiwoom: bool = True) -> list:
+    """아직 안 받았거나 오래된 연습용 종목. 키움 키가 없으면 미국만."""
+    return conn.execute(
+        """SELECT ticker, market FROM practice_pool
+           WHERE (fetched_at IS NULL OR fetched_at < %s) AND (%s OR market = 'US')
+           ORDER BY fetched_at NULLS FIRST, ticker LIMIT %s""",
+        (before, kiwoom, limit),
+    ).fetchall()
+
+
+def practice_fetched(conn: psycopg.Connection, ticker: str, now, error) -> None:
+    conn.execute("UPDATE practice_pool SET fetched_at = %s, error = %s WHERE ticker = %s", (now, error, ticker))
