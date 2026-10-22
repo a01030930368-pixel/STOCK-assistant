@@ -319,30 +319,70 @@ SEC_TAGS = {
 }
 
 
-def current_first(gaap: dict, tags: tuple[str, ...]) -> list[str]:
+IFRS_TAGS = {
+    "revenue": ("Revenue", "RevenueFromContractsWithCustomers"),
+    "operating_income": ("ProfitLossFromOperatingActivities",),
+    "liabilities": ("Liabilities",),
+    "equity": ("EquityAttributableToOwnersOfParent", "Equity"),
+    "operating_cash_flow": ("CashFlowsFromUsedInOperatingActivities",),
+}
+ANNUAL_FORMS = ("10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A")
+ER_API = "https://open.er-api.com/v6/latest/USD"
+
+
+def sec_book(facts: dict) -> tuple[dict, str, bool]:
+    """(태그 묶음, 통화, IFRS인가). 미국 회사는 us-gaap·달러, 노키아처럼 20-F를 내는 외국 회사는 ifrs-full에
+    자기 나라 돈(유로 등)으로 적어요. 그 회사가 가장 많이 쓴 통화를 골라요."""
+    all_facts = facts.get("facts", {})
+    gaap = all_facts.get("us-gaap", {})
+    if any("USD" in gaap.get(t, {}).get("units", {}) for tags in (SEC_TAGS["revenue"], SEC_TAGS["operating_income"]) for t in tags):
+        return gaap, "USD", False
+    ifrs = all_facts.get("ifrs-full", {})
+    count: dict[str, int] = {}
+    for tag in IFRS_TAGS["revenue"] + IFRS_TAGS["operating_income"]:
+        for unit, rows in ifrs.get(tag, {}).get("units", {}).items():
+            if re.fullmatch(r"[A-Z]{3}", unit):
+                count[unit] = count.get(unit, 0) + len(rows)
+    if not count:
+        return gaap, "USD", False
+    return ifrs, max(count, key=count.get), True
+
+
+def usd_rate(currency: str, http: httpx.Client) -> Decimal:
+    """1 (통화) = 몇 달러. 외국 회사 재무제표를 달러로 바꿔 미국 회사와 나란히 비교하려고 써요(오늘 환율 하나로)."""
+    if currency == "USD":
+        return Decimal(1)
+    res = http.get(ER_API)
+    res.raise_for_status()
+    per_usd = res.json().get("rates", {}).get(currency)
+    if not per_usd:
+        raise ValueError(f"{currency} 환율을 못 받았어요")
+    return Decimal(1) / Decimal(str(per_usd))
+
+
+def current_first(gaap: dict, tags: tuple[str, ...], unit: str = "USD") -> list[str]:
     """요즘 보고에 쓰는 태그를 앞에 둬요. 겹치는 기간은 앞 태그 값을 쓰니까, 예전 태그에 잘못 적힌 값
     (예: 아이온큐 2022년 Revenues가 1,113만 달러가 아니라 12억 3,500만 달러로 적힘)이 섞이지 않게 해요.
     가장 최근 기간(end)이 같으면 원래 순서대로."""
     def latest(tag: str) -> str:
-        return max((f.get("end", "") for f in gaap.get(tag, {}).get("units", {}).get("USD", [])), default="")
+        return max((f.get("end", "") for f in gaap.get(tag, {}).get("units", {}).get(unit, [])), default="")
     return sorted(tags, key=lambda t: (latest(t), -tags.index(t)), reverse=True)
 
 
-def _annual(facts: dict, tags: tuple[str, ...]) -> dict[str, Decimal]:
-    """10-K에 보고된 연간 값을 회계연도 말일(end)별로 모읍니다. 같은 값이 여러 보고서에 반복되면 나중 것을 씁니다.
+def _annual(book: dict, unit: str, tags: tuple[str, ...]) -> dict[str, Decimal]:
+    """10-K(외국 회사는 20-F)에 보고된 연간 값을 회계연도 말일(end)별로 모읍니다. 같은 값이 여러 보고서에 반복되면 나중 것을 씁니다.
 
     회사가 해마다 다른 태그로 보고하기도 해서(예: 예전엔 Revenues, 요즘은 RevenueFromContract...)
     모든 태그를 합치고, 같은 연도가 겹치면 요즘 쓰는 태그 값을 씁니다.
     """
-    gaap = facts.get("facts", {}).get("us-gaap", {})
     merged: dict[str, Decimal] = {}
-    for tag in current_first(gaap, tags):
-        units = gaap.get(tag, {}).get("units", {}).get("USD")
+    for tag in current_first(book, tags, unit):
+        units = book.get(tag, {}).get("units", {}).get(unit)
         if not units:
             continue
         by_end: dict[str, Decimal] = {}
         for f in sorted(units, key=lambda f: f.get("filed", "")):
-            if f.get("form") not in ("10-K", "10-K/A") or f.get("fp") != "FY":
+            if f.get("form") not in ANNUAL_FORMS or f.get("fp") != "FY":
                 continue
             if "start" in f:
                 # 손익·현금흐름은 1년짜리 기간만 씁니다(분기 누적 값 제외).
@@ -354,8 +394,11 @@ def _annual(facts: dict, tags: tuple[str, ...]) -> dict[str, Decimal]:
     return merged
 
 
-def parse_sec_financials(ticker: str, facts: dict) -> list[Financials]:
-    series = {field: _annual(facts, tags) for field, tags in SEC_TAGS.items()}
+def parse_sec_financials(ticker: str, facts: dict, rate: Decimal = Decimal(1)) -> list[Financials]:
+    """rate: 그 회사 통화 1 = 몇 달러 (미국 회사는 1)"""
+    book, unit, ifrs = sec_book(facts)
+    names = IFRS_TAGS if ifrs else SEC_TAGS
+    series = {field: {end: (v * rate).quantize(Decimal("0.01")) for end, v in _annual(book, unit, names[field]).items()} for field in SEC_TAGS}
     ends = sorted(set(series["revenue"]) | set(series["operating_income"]), reverse=True)[:3]
     return [
         Financials(ticker=ticker, period=f"FY{end[:4]}", **{field: values.get(end) for field, values in series.items()})
@@ -363,7 +406,14 @@ def parse_sec_financials(ticker: str, facts: dict) -> list[Financials]:
     ]
 
 
-def sec_financials(ticker: str, cik: int, user_agent: str, http: httpx.Client) -> list[Financials]:
+def sec_facts(cik: int, user_agent: str, http: httpx.Client) -> tuple[dict, Decimal]:
+    """(SEC 재무 자료, 달러 환율)"""
     res = http.get(SEC_FACTS.format(cik=cik), headers={"User-Agent": user_agent})
     res.raise_for_status()
-    return parse_sec_financials(ticker, res.json())
+    facts = res.json()
+    return facts, usd_rate(sec_book(facts)[1], http)
+
+
+def sec_financials(ticker: str, cik: int, user_agent: str, http: httpx.Client) -> list[Financials]:
+    facts, rate = sec_facts(cik, user_agent, http)
+    return parse_sec_financials(ticker, facts, rate)

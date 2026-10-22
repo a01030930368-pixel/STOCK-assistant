@@ -225,10 +225,11 @@ export function applyDraft(f: Fields, d: Draft, parts: string[]): Fields {
     out.risks = d.risks.map((r) => ({ ...r }));
     while (out.risks.length < 3) out.risks.push({ text: "", signal: "" });
   }
-  if (parts.includes("price") && out.cheap === null && out.pricey === null && !out.priceWhy) {
+  // 가격 숫자가 둘 다 비었으면 AI 숫자를 넣어요. 이유는 이미 적었으면 그대로.
+  if (parts.includes("price") && out.cheap === null && out.pricey === null && (d.cheap != null || d.pricey != null || !out.priceWhy)) {
     out.cheap = d.cheap ?? null;
     out.pricey = d.pricey ?? null;
-    out.priceWhy = d.priceWhy ?? "";
+    if (!out.priceWhy) out.priceWhy = d.priceWhy ?? "";
   }
   if (parts.includes("conclusion") && !out.conclusion && d.conclusion) out.conclusion = d.conclusion;
   if (parts.includes("sources") && out.sources.length === 0 && d.sources?.length) out.sources = d.sources.map((x) => ({ ...x }));

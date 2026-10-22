@@ -96,11 +96,12 @@ DRAFT_SYSTEM = """너는 한국 개인투자자의 기업 공부 노트를 대�
  "customers": "주요 고객 (40자 안쪽)",
  "power": "강함 또는 보통 또는 약함", "powerWhy": "가격을 올릴 힘이 그런 이유 (50자 안쪽)",
  "numbersNote": "최근 매출·이익·현금흐름 숫자를 보고 읽을 점 (100자 안쪽)",
+ "peers": [{"ticker": "같은 업종에서 가장 비슷한 경쟁사 코드(국내 6자리, 미국 티커)", "name": "이름", "market": "KR 또는 US"}, ...2~3개, 국내·미국 상장사만],
  "moat": "경쟁사가 쉽게 못 따라 하는 이 회사만의 강점 (60자 안쪽)",
  "promises": [{"when": "2026.07 처럼 연.월", "said": "경영진이 최근 공개적으로 약속·제시한 목표"}, ...최대 3개],
  "events": [{"when": "언제(예: 2027년 1월 말)", "text": "주가에 중요한 앞으로의 일"}, ...최대 3개],
  "risks": [{"text": "이 회사에 투자하면 틀릴 수 있는 이유", "signal": "이게 보이면 다시 생각할 신호"}, ...3개],
- "cheap": 싸다고 볼 만한 주가 숫자 또는 null, "pricey": 비싸다고 볼 만한 주가 숫자 또는 null,
+ "cheap": 싸다고 볼 만한 주가 숫자, "pricey": 비싸다고 볼 만한 주가 숫자 (둘 다 지금 주가와 같은 돈 단위: 국내는 원, 미국은 달러. 정확한 자료가 없어도 지난 몇 년 PER·PBR 범위나 주가 범위로 어림해서 꼭 숫자로 채우고, priceWhy에 어림이라고 적어),
  "priceWhy": "그 가격의 근거 (예: 지난 5년 PER 8~15배, 지금 12배) (80자 안쪽)",
  "conclusion": "공부한 내용을 3~5줄로 정리. 좋은 점과 걱정되는 점을 같이 (250자 안쪽)",
  "questions": ["사용자가 스스로 더 확인해 볼 질문", ...3개]}"""
@@ -155,14 +156,18 @@ def parse_pick(text: str, sample: list[Candidate]) -> tuple[Candidate, list[str]
         raise ValueError("AI가 후보에 없는 종목을 골랐어요")
     why = [_s(x, 80) for x in (data.get("why") or []) if _s(x, 80)][:3]
     first = [_s(x, 80) for x in (data.get("first") or []) if _s(x, 80)][:3]
+    return chosen, why, first, parse_peers(data.get("peers"), chosen.ticker)
+
+
+def parse_peers(items, own: str) -> list[dict]:
     peers = []
-    for p in data.get("peers") or []:
+    for p in items if isinstance(items, list) else []:
         if not isinstance(p, dict):
             continue
         t, m, n = str(p.get("ticker", "")).strip().upper(), str(p.get("market", "")).strip().upper(), _s(p.get("name"), 40)
-        if m in ("KR", "US") and valid_ticker(t, m) and t != chosen.ticker and n:
+        if m in ("KR", "US") and valid_ticker(t, m) and t != own.upper() and n and t not in (x["ticker"] for x in peers):
             peers.append({"ticker": t, "name": n, "market": m})
-    return chosen, why, first, peers[:3]
+    return peers[:3]
 
 
 def fallback_pick(sample: list[Candidate], rand: random.Random) -> tuple[Candidate, list[str], list[str], list[dict]]:
@@ -178,7 +183,7 @@ def _price(v) -> float | None:
     return round(n, 2) if n > 0 else None
 
 
-def parse_draft(text: str, sources: list[dict] | None = None) -> dict:
+def parse_draft(text: str, sources: list[dict] | None = None, own: str = "") -> dict:
     d = _json(text)
     out: dict = {
         "sector": _s(d.get("sector"), 30),
@@ -203,6 +208,7 @@ def parse_draft(text: str, sources: list[dict] | None = None) -> dict:
                        for x in promises if isinstance(x, dict) and _s(x.get("said"), 120)][:3] if isinstance(promises, list) else []
     out["events"] = [{"when": _s(x.get("when"), 30), "text": _s(x.get("text"), 80)} for x in d.get("events") or [] if isinstance(x, dict) and _s(x.get("text"), 80)][:3]
     out["risks"] = [{"text": _s(x.get("text"), 80), "signal": _s(x.get("signal"), 80)} for x in d.get("risks") or [] if isinstance(x, dict) and _s(x.get("text"), 80)][:3]
+    out["peers"] = parse_peers(d.get("peers"), own)
     out["questions"] = [_s(x, 80) for x in d.get("questions") or [] if _s(x, 80)][:3]
     seen, out["sources"] = set(), []
     for x in sources or []:
@@ -340,16 +346,17 @@ class StudyWorker:
             out = None
             if self.search:
                 try:
-                    out = parse_draft(*self.search(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096))
+                    out = parse_draft(*self.search(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096), own=ticker)
                     out["searched"] = True
                 except Exception as e:
                     log.warning("%s 기업 공부 검색 초안 실패, 검색 없이 다시 써요: %s", name, e)
             if out is None:
-                out = parse_draft(self.ask(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096))
+                out = parse_draft(self.ask(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096), own=ticker)
                 out["searched"] = False
             out["model"] = self.model
             out["at"] = datetime.now(timezone.utc).isoformat()
             db.finish_study_draft(conn, ticker, out, "done", None, asked_at)
+            db.add_study_peers(conn, ticker, out["peers"])
             log.info("%s 기업 공부 AI 초안을 썼습니다", name)
         except Exception as e:
             db.finish_study_draft(conn, ticker, None, "error", str(e)[:200], asked_at)

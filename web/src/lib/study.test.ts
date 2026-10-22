@@ -94,6 +94,13 @@ describe("study notes", () => {
     expect(cleanFields({ styles: ["가치주", "가치주", "x"] }).styles).toEqual(["가치주"]);
   });
 
+  it("adds AI prices when I only have a reason without numbers", () => {
+    const f = { ...emptyFields(), priceWhy: "확인 필요" };
+    const out = applyDraft(f, { cheap: 7, pricey: 11, priceWhy: "PER 어림" }, ALL_PARTS);
+    expect([out.cheap, out.pricey, out.priceWhy]).toEqual([7, 11, "확인 필요"]);
+    expect(applyDraft(f, { priceWhy: "x" }, ALL_PARTS).priceWhy).toBe("확인 필요");
+  });
+
   it("groups notes by sector, biggest first, unknown last", () => {
     const g = groupBySector([{ sector: "은행" }, { sector: "" }, { sector: "반도체" }, { sector: " 반도체 " }]);
     expect(g.map((x) => [x.sector, x.items.length])).toEqual([["반도체", 2], ["은행", 1], [NO_SECTOR, 1]]);

@@ -95,3 +95,16 @@ def test_sec_prefers_tag_the_company_uses_now():
     lines = from_sec(facts)
     assert pick(lines, "Y", "2022", "revenue") == D(11131000)
     assert pick(lines, "Y", "2025", "revenue") == D(130016000)
+
+
+def test_sec_ifrs_company_in_euros_turns_into_dollars():
+    # 노키아처럼 20-F를 내는 외국 회사는 us-gaap 없이 ifrs-full·유로로 적어요.
+    facts = {"facts": {"ifrs-full": {
+        "Revenue": {"units": {"EUR": [fact("CY2024", 100, "20-F")]}},
+        "ProfitLossFromOperatingActivities": {"units": {"EUR": [fact("CY2024", 10, "20-F")]}},
+        "Assets": {"units": {"EUR": [fact("CY2024Q4I", 400, "20-F")]}},
+    }}}
+    lines = from_sec(facts, D("1.1"))
+    assert pick(lines, "Y", "2024", "revenue") == D(110)
+    assert pick(lines, "Y", "2024", "operating_income") == D(11)
+    assert pick(lines, "Y", "2024", "assets") == D(440)

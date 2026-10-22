@@ -171,3 +171,11 @@ def test_fresh_pool_keeps_everything_when_too_few_left():
     cs = [cand("A"), cand("B"), cand("C")]
     assert study.fresh_pool(cs, {"A": "반도체"}, {"반도체"}) == cs
     assert [c.ticker for c in study.fresh_pool(cs + [cand("D")], {"A": "반도체"}, {"반도체"})] == ["B", "C", "D"]
+
+
+def test_parse_draft_keeps_peers_but_not_itself():
+    d = study.parse_draft(json.dumps({"peers": [
+        {"ticker": "ERIC", "name": "에릭슨", "market": "US"}, {"ticker": "nok", "name": "노키아", "market": "US"},
+        {"ticker": "CSCO", "name": "시스코", "market": "US"}, {"ticker": "ERIC", "name": "에릭슨", "market": "US"}]}), own="NOK")
+    assert [p["ticker"] for p in d["peers"]] == ["ERIC", "CSCO"]
+    assert study.parse_draft("{}")["peers"] == []
