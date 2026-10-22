@@ -1788,6 +1788,17 @@ def peers_of(conn: psycopg.Connection, tickers: list[str]) -> list[tuple[str, st
     ).fetchall()
 
 
+def add_study_peers(conn: psycopg.Connection, ticker: str, peers: list[dict]) -> None:
+    """AI가 고른 경쟁사를 넣어요. 사용자가 이미 넣은 경쟁사가 있으면 건드리지 않아요."""
+    if not peers or conn.execute("SELECT 1 FROM stock_peers WHERE ticker = %s LIMIT 1", (ticker,)).fetchone():
+        return
+    for p in peers:
+        conn.execute(
+            """INSERT INTO stock_peers (ticker, peer_ticker, peer_name, peer_market) VALUES (%s, %s, %s, %s)
+               ON CONFLICT DO NOTHING""", (ticker, p["ticker"], p["name"], p["market"]),
+        )
+
+
 def study_peers_unresearched(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
     """공부 노트의 비교 기업 중 재무가 아직 없는 것. (ticker, name, market)"""
     return conn.execute(

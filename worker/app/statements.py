@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import httpx
 
-from .research import SEC_FACTS, _amount, _dart_json, current_first
+from .research import _amount, _dart_json, current_first, sec_book, sec_facts
 
 FLOW = ("revenue", "cost_of_sales", "gross_profit", "operating_income", "net_income", "cfo", "cfi", "cff", "capex")
 STOCK = ("assets", "cash", "liabilities", "equity")
@@ -169,27 +169,44 @@ SEC_ITEMS = {
     "cff": ("NetCashProvidedByUsedInFinancingActivities",),
     "capex": ("PaymentsToAcquirePropertyPlantAndEquipment",),
 }
+# 20-F를 내는 외국 회사(노키아 등)는 IFRS 태그로 적어요
+IFRS_ITEMS = {
+    "revenue": ("Revenue", "RevenueFromContractsWithCustomers"),
+    "cost_of_sales": ("CostOfSales",),
+    "gross_profit": ("GrossProfit",),
+    "operating_income": ("ProfitLossFromOperatingActivities",),
+    "net_income": ("ProfitLossAttributableToOwnersOfParent", "ProfitLoss"),
+    "assets": ("Assets",),
+    "cash": ("CashAndCashEquivalents",),
+    "liabilities": ("Liabilities",),
+    "equity": ("EquityAttributableToOwnersOfParent", "Equity"),
+    "cfo": ("CashFlowsFromUsedInOperatingActivities",),
+    "cfi": ("CashFlowsFromUsedInInvestingActivities",),
+    "cff": ("CashFlowsFromUsedInFinancingActivities",),
+    "capex": ("PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities", "PurchaseOfPropertyPlantAndEquipment"),
+}
 YEAR_FRAME = re.compile(r"^CY(\d{4})$")
 QUARTER_FRAME = re.compile(r"^CY(\d{4})Q([1-4])$")
 INSTANT_FRAME = re.compile(r"^CY(\d{4})Q([1-4])I$")
 KEEP_YEARS = 4
 
 
-def _frames(facts: dict, tags: tuple[str, ...]) -> dict[str, Decimal]:
-    gaap = facts.get("facts", {}).get("us-gaap", {})
+def _frames(book: dict, unit: str, tags: tuple[str, ...], rate: Decimal) -> dict[str, Decimal]:
     out: dict[str, Decimal] = {}
-    for tag in current_first(gaap, tags):
-        for f in gaap.get(tag, {}).get("units", {}).get("USD", []):
+    for tag in current_first(book, tags, unit):
+        for f in book.get(tag, {}).get("units", {}).get(unit, []):
             if (frame := f.get("frame")) and frame not in out:
-                out[frame] = Decimal(str(f["val"]))
+                out[frame] = (Decimal(str(f["val"])) * rate).quantize(Decimal("0.01"))
     return out
 
 
-def from_sec(facts: dict) -> list[Line]:
+def from_sec(facts: dict, rate: Decimal = Decimal(1)) -> list[Line]:
+    """rate: 그 회사 통화 1 = 몇 달러 (미국 회사는 1)"""
+    book, unit, ifrs = sec_book(facts)
     years: dict[str, dict[str, Decimal]] = {}
     quarters: dict[str, dict[str, Decimal]] = {}
-    for item, tags in SEC_ITEMS.items():
-        for frame, v in _frames(facts, tags).items():
+    for item, tags in (IFRS_ITEMS if ifrs else SEC_ITEMS).items():
+        for frame, v in _frames(book, unit, tags, rate).items():
             v = abs(v) if item == "capex" else v
             if item in STOCK and (m := INSTANT_FRAME.match(frame)):
                 quarters.setdefault(f"{m[1]}Q{m[2]}", {})[item] = v
@@ -225,7 +242,5 @@ def sec_shares(facts: dict) -> tuple[Decimal, date] | None:
 
 def sec_statements(cik: int, user_agent: str, http: httpx.Client) -> tuple[list[Line], tuple[Decimal, date] | None]:
     """(재무제표 줄, (주식 수, 기준일))"""
-    res = http.get(SEC_FACTS.format(cik=cik), headers={"User-Agent": user_agent})
-    res.raise_for_status()
-    facts = res.json()
-    return from_sec(facts), sec_shares(facts)
+    facts, rate = sec_facts(cik, user_agent, http)
+    return from_sec(facts, rate), sec_shares(facts)

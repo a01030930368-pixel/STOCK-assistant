@@ -222,3 +222,22 @@ def test_dart_ir_earnings_reads_each_notice_once():
     research.dart_ir_earnings("000660", "SK하이닉스", "00164779", "k", date(2026, 10, 20), http, seen)
     assert len([c for c in calls if c.endswith("document.xml")]) == 1
     assert research.dart_ir_earnings("000660", "SK하이닉스", "00164779", "k", date(2026, 10, 30), http, seen) == []
+
+
+def test_sec_financials_for_ifrs_filer_use_their_currency_and_rate():
+    def f(val, start="2024-01-01", end="2024-12-31"):
+        return {"val": val, "start": start, "end": end, "form": "20-F", "fp": "FY", "filed": "2025-03-01"}
+    facts = {"facts": {"us-gaap": {}, "ifrs-full": {
+        "Revenue": {"units": {"EUR": [f(19000)]}},
+        "ProfitLossFromOperatingActivities": {"units": {"EUR": [f(1000)]}},
+        "Equity": {"units": {"EUR": [{"val": 20000, "end": "2024-12-31", "form": "20-F", "fp": "FY", "filed": "2025-03-01"}]}},
+    }}}
+    assert research.sec_book(facts)[1:] == ("EUR", True)
+    rows = research.parse_sec_financials("NOK", facts, Decimal("1.1"))
+    assert rows[0].period == "FY2024" and rows[0].revenue == Decimal("20900") and rows[0].equity == Decimal("22000")
+
+
+def test_usd_rate_reads_rate_per_dollar():
+    http = client(lambda req: httpx.Response(200, json={"rates": {"USD": 1, "EUR": 0.8}}))
+    assert research.usd_rate("USD", http) == 1
+    assert research.usd_rate("EUR", http) == Decimal("1.25")
