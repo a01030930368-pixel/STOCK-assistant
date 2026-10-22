@@ -163,3 +163,30 @@ def test_gemini_forces_json_only_when_asked():
     gemini_text('JSON 하나만 출력해: {"a": 1}', "p", "k", "m", http, 400)
     assert "responseMimeType" not in sent[0] and sent[1]["responseMimeType"] == "application/json"
     assert sent[0]["maxOutputTokens"] >= 4096
+
+
+def test_gemini_search_turns_on_google_search_and_returns_sources():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"candidates": [{
+            "content": {"parts": [{"text": "생각", "thought": True}, {"text": '{"one": "a"}'}]},
+            "groundingMetadata": {"groundingChunks": [{"web": {"uri": "https://n.com/a", "title": "n.com"}}]},
+        }]})
+
+    text, sources = ai._gemini_search("JSON 하나만", "p", "k", "m", httpx.Client(transport=httpx.MockTransport(handler)), 100)
+    assert text == '{"one": "a"}' and sources == [{"title": "n.com", "url": "https://n.com/a"}]
+    assert seen["body"]["tools"] == [{"google_search": {}}] and "responseMimeType" not in seen["body"]["generationConfig"]
+
+
+def test_claude_search_collects_result_links():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["tools"][0]["name"] == "web_search"
+        return httpx.Response(200, json={"content": [
+            {"type": "server_tool_use"}, {"type": "web_search_tool_result", "content": [{"type": "web_search_result", "url": "https://a.com", "title": "A"}]},
+            {"type": "text", "text": '{"one": "b"}'},
+        ]})
+
+    text, sources = ai._claude_search("s", "p", "k", "m", httpx.Client(transport=httpx.MockTransport(handler)), 100)
+    assert text == '{"one": "b"}' and sources == [{"title": "A", "url": "https://a.com"}]

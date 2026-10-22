@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
-export type ListItem = { ticker: string; name: string; status: string; updated: string; done: boolean; ai: boolean; progress: string | null; verdict: string; due: boolean };
+export type ListItem = { ticker: string; name: string; status: string; updated: string; done: boolean; ai: boolean; progress: string | null; verdict: string; due: boolean; kind: string };
 
 export default function StudyList({ items, on }: { items: ListItem[]; on: string | null }) {
   const [q, setQ] = useState("");
@@ -19,7 +19,7 @@ export default function StudyList({ items, on }: { items: ListItem[]; on: string
             <Link key={i.ticker} href={`/watch/study?t=${encodeURIComponent(i.ticker)}`} className={`study-item${i.ticker === on ? " on" : ""}`}>
               <span className="study-item-name">{i.ai && <span title="AI가 골라 준 회사">🎲 </span>}{i.name}</span>
               <span className={`study-tag s-${i.status.replace(/\s/g, "")}`}>{i.status}</span>
-              <span className="muted study-item-sub">{i.due ? "🔔 다시 볼 날" : i.progress ? `적는 중 ${i.progress}` : i.verdict || "다 적음"}</span>
+              <span className="muted study-item-sub">{i.due ? "🔔 다시 볼 날" : i.progress ? `적는 중 ${i.progress}` : i.verdict || "다 적음"}{i.kind && ` · ${i.kind}`}</span>
               <span className="muted study-item-date">{i.updated}</span>
             </Link>
           ))}

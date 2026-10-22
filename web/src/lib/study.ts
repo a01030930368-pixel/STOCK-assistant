@@ -14,7 +14,12 @@ export const RESULTS: { key: Promise_["result"]; label: string }[] = [
   { key: "kept", label: "✓ 지킴" }, { key: "broken", label: "✗ 안 지킴" }, { key: "wait", label: "… 지켜보는 중" },
 ];
 
+// 주식 유형(1~3개 고름). 워커 study.py STYLES와 같은 목록이에요.
+export const STYLES = ["기술주", "성장주", "가치주", "배당주", "경기민감주", "경기방어주", "우량주", "턴어라운드", "테마주"] as const;
+
 export type Fields = {
+  sector: string; // 업종
+  styles: string[]; // 주식 유형
   one: string; // ① 한 줄로 말하면
   lines: { name: string; pct: number }[]; // ② 매출 비중
   customers: string;
@@ -34,14 +39,18 @@ export type Fields = {
 };
 
 export const emptyFields = (): Fields => ({
-  one: "", lines: [], customers: "", power: "", powerWhy: "", numbersNote: "", moat: "", promises: [], events: [],
+  sector: "", styles: [], one: "", lines: [], customers: "", power: "", powerWhy: "", numbersNote: "", moat: "", promises: [], events: [],
   risks: [{ text: "", signal: "" }, { text: "", signal: "" }, { text: "", signal: "" }], cheap: null, pricey: null, priceWhy: "",
   conclusion: "", verdict: "", sources: [],
 });
 
 export type Draft = {
-  one?: string; lines?: { name: string; pct: number }[]; customers?: string; power?: Power; powerWhy?: string; moat?: string;
-  events?: { when: string; text: string }[]; risks?: { text: string; signal: string }[]; promises?: string; questions?: string[]; model?: string;
+  sector?: string; styles?: string[];
+  one?: string; lines?: { name: string; pct: number }[]; customers?: string; power?: Power; powerWhy?: string; moat?: string; numbersNote?: string;
+  events?: { when: string; text: string }[]; risks?: { text: string; signal: string }[];
+  promises?: { when: string; said: string }[] | string; // 예전 초안은 "찾을 곳" 한 줄(string)
+  cheap?: number | null; pricey?: number | null; priceWhy?: string; conclusion?: string; sources?: { title: string; url: string }[];
+  questions?: string[]; model?: string; searched?: boolean;
 };
 export type Pick = { why: string[]; first: string[]; flow: string; model: string | null; at: string };
 
@@ -62,6 +71,8 @@ export function cleanFields(raw: unknown, keepBlank = false): Fields {
   const filledRisks = keep(risks, "text", "signal");
   while (filledRisks.length < 3) filledRisks.push({ text: "", signal: "" });
   return {
+    sector: str(r.sector, 40),
+    styles: (Array.isArray(r.styles) ? r.styles : []).filter((x): x is string => (STYLES as readonly unknown[]).includes(x)).filter((x, i, a) => a.indexOf(x) === i).slice(0, 3),
     one: str(r.one, 300),
     lines: keep(list(r.lines, 8, (x) => ({ name: str(x.name, 40), pct: Math.max(0, Math.min(100, Math.round(Number(x.pct) || 0))) })), "name"),
     customers: str(r.customers, 300),
@@ -188,9 +199,17 @@ export function splitOf(lines: { name: string; pct: number }[]): { name: string;
   return [...lines, { name: "기타", pct: 100 - sum, other: true }];
 }
 
+// 초안이 채울 수 있는 칸 전부(🤖 AI가 전부 채우기). 판단(산다·기다린다·안 산다)은 내가 골라요.
+export const ALL_PARTS = ["kind", "one", "model", "numbers", "moat", "promises", "events", "risks", "price", "conclusion", "sources"];
+export const draftPromises = (d: Draft) => (Array.isArray(d.promises) ? d.promises : []);
+
 // AI 초안을 빈 칸에만 옮겨요(이미 적은 칸은 그대로).
 export function applyDraft(f: Fields, d: Draft, parts: string[]): Fields {
   const out = { ...f };
+  if (parts.includes("kind")) {
+    if (!out.sector && d.sector) out.sector = d.sector;
+    if (out.styles.length === 0 && d.styles?.length) out.styles = d.styles.filter((x) => (STYLES as readonly string[]).includes(x)).slice(0, 3);
+  }
   if (parts.includes("one") && !out.one && d.one) out.one = d.one;
   if (parts.includes("model")) {
     if (out.lines.length === 0 && d.lines?.length) out.lines = d.lines.map((l) => ({ ...l }));
@@ -198,11 +217,20 @@ export function applyDraft(f: Fields, d: Draft, parts: string[]): Fields {
     if (!out.power && d.power) out.power = d.power;
     if (!out.powerWhy && d.powerWhy) out.powerWhy = d.powerWhy;
   }
+  if (parts.includes("numbers") && !out.numbersNote && d.numbersNote) out.numbersNote = d.numbersNote;
   if (parts.includes("moat") && !out.moat && d.moat) out.moat = d.moat;
+  if (parts.includes("promises") && out.promises.length === 0 && draftPromises(d).length) out.promises = draftPromises(d).map((p) => ({ when: p.when, said: p.said, result: "wait" }));
   if (parts.includes("events") && out.events.length === 0 && d.events?.length) out.events = d.events.map((e) => ({ day: "", text: `${e.when ? `${e.when} · ` : ""}${e.text}` }));
   if (parts.includes("risks") && out.risks.every((r) => !r.text) && d.risks?.length) {
     out.risks = d.risks.map((r) => ({ ...r }));
     while (out.risks.length < 3) out.risks.push({ text: "", signal: "" });
   }
+  if (parts.includes("price") && out.cheap === null && out.pricey === null && !out.priceWhy) {
+    out.cheap = d.cheap ?? null;
+    out.pricey = d.pricey ?? null;
+    out.priceWhy = d.priceWhy ?? "";
+  }
+  if (parts.includes("conclusion") && !out.conclusion && d.conclusion) out.conclusion = d.conclusion;
+  if (parts.includes("sources") && out.sources.length === 0 && d.sources?.length) out.sources = d.sources.map((x) => ({ ...x }));
   return out;
 }

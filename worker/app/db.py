@@ -508,6 +508,8 @@ MIGRATIONS = [
       saved_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS study_versions_ticker ON study_versions (ticker, saved_at)",
+    # 🤖 AI가 전부 채우기: 초안이 오면 화면이 빈 칸에 다 넣고 한 장 노트로 마쳐요
+    "ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS ai_fill BOOLEAN NOT NULL DEFAULT false",
 ]
 
 
@@ -842,12 +844,13 @@ def save_quote(conn: psycopg.Connection, quote) -> None:
 
 
 def sector_due(conn: psycopg.Connection, max_age_days: int = 7) -> list[tuple[str, str, str]]:
-    """업종 이름을 새로 받아야 하는 보유·관심 종목. (ticker, name, market)"""
+    """업종 이름을 새로 받아야 하는 보유·관심·공부 종목. (ticker, name, market)"""
     return conn.execute(
         """SELECT s.ticker, s.name, s.market FROM (
              SELECT ticker, name, market FROM holdings WHERE quantity > 0
              UNION SELECT ticker, name, 'KR' FROM isa_holdings WHERE quantity > 0
-             UNION SELECT ticker, name, market FROM watchlist) s
+             UNION SELECT ticker, name, market FROM watchlist
+             UNION SELECT ticker, name, market FROM study_notes WHERE status <> '탈락') s
            LEFT JOIN stock_sectors x ON x.ticker = s.ticker
            WHERE x.ticker IS NULL OR x.sector = '' OR x.fetched_at < now() - make_interval(days => %s)
            ORDER BY s.ticker""",
@@ -1693,6 +1696,15 @@ def study_context(conn: psycopg.Connection, ticker: str, market: str) -> dict:
         if rev is not None:
             money.append(f"{period}년 매출 {float(rev) / unit:,.0f}{label}" + (f", 영업이익 {float(op) / unit:,.0f}{label}" if op is not None else ""))
     ctx["money"] = money
+    cfo = conn.execute(
+        """SELECT period, value FROM stock_statements WHERE ticker = %s AND kind = 'Y' AND item = 'cfo' ORDER BY period DESC LIMIT 3""", (ticker,),
+    ).fetchall()
+    ctx["cfo"] = [f"{p}년 영업현금흐름 {float(v) / unit:,.0f}{label}" for p, v in cfo if v is not None]
+    price = conn.execute("SELECT close FROM price_history WHERE ticker = %s ORDER BY day DESC LIMIT 1", (ticker,)).fetchone()
+    ctx["price"] = f"{float(price[0]):,.0f}원" if price and market == "KR" else f"${float(price[0]):,.2f}" if price else ""
+    sector = conn.execute("SELECT sector FROM stock_sectors WHERE ticker = %s", (ticker,)).fetchone()
+    ctx["sector"] = sector[0] if sector else ""
+    ctx["peers"] = [r[0] for r in conn.execute("SELECT peer_name FROM stock_peers WHERE ticker = %s ORDER BY peer_name", (ticker,))]
     ctx["themes"] = study_themes(conn, [ticker]).get(ticker, [])[:5]
     ctx["news"] = [r[0] for r in conn.execute(
         "SELECT COALESCE(title_ko, title) FROM stock_news WHERE ticker = %s ORDER BY published_at DESC LIMIT 8", (ticker,))]

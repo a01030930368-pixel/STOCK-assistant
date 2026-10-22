@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyDraft, bars, cleanFields, emptyFields, filled, numbersOf, pastSelf, peerLine, reviewDefault, splitOf, type Version } from "./study";
+import { ALL_PARTS, applyDraft, bars, cleanFields, emptyFields, filled, numbersOf, pastSelf, peerLine, reviewDefault, splitOf, type Version } from "./study";
 import type { StatementRow } from "./statements";
 
 describe("study notes", () => {
@@ -73,6 +73,25 @@ describe("study notes", () => {
     expect(out.customers).toBe("엔비디아");
     expect(out.risks).toHaveLength(3);
     expect(out.risks[0].text).toBe("값 하락");
+  });
+
+  it("fills every blank part from a full draft but leaves the verdict to me", () => {
+    const f = { ...emptyFields(), moat: "내가 쓴 강점", cheap: 100 };
+    const out = applyDraft(f, {
+      sector: "반도체", styles: ["기술주", "아무거나"], numbersNote: "현금도 늘어요", moat: "AI 강점",
+      promises: [{ when: "2026.07", said: "HBM4 양산" }], cheap: 90, pricey: 200, priceWhy: "PER", conclusion: "정리", sources: [{ title: "IR", url: "https://x.com" }],
+    }, ALL_PARTS);
+    expect(out.sector).toBe("반도체");
+    expect(out.styles).toEqual(["기술주"]);
+    expect(out.numbersNote).toBe("현금도 늘어요");
+    expect(out.moat).toBe("내가 쓴 강점");
+    expect(out.promises).toEqual([{ when: "2026.07", said: "HBM4 양산", result: "wait" }]);
+    expect([out.cheap, out.pricey]).toEqual([100, null]);
+    expect(out.conclusion).toBe("정리");
+    expect(out.sources).toHaveLength(1);
+    expect(out.verdict).toBe("");
+    expect(applyDraft(emptyFields(), { promises: "실적 자료" }, ALL_PARTS).promises).toEqual([]);
+    expect(cleanFields({ styles: ["가치주", "가치주", "x"] }).styles).toEqual(["가치주"]);
   });
 
   it("puts the review date three months out", () => {
