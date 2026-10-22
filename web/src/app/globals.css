@@ -1055,7 +1055,9 @@ a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-d
 .study-who.auto { border-color: #24453a; color: var(--div); }
 .study-lab { font-size: 0.8rem; color: var(--muted); display: grid; gap: 4px; }
 p .study-lab, span.study-lab { display: inline; margin-right: 6px; }
-.study-text { margin: 0; line-height: 1.6; }
+.study-text { margin: 0; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 적을 때 넣은 줄바꿈을 그대로 보여 줘요. */
+.study-rows li, .study-risks li, .study-past p, .study-versions li div { white-space: pre-wrap; }
 .study-text.big { font-size: 1.02rem; }
 .study-mine { border-left: 2px solid #4a3f28; padding-left: 10px; }
 .study-empty { margin: 0; font-size: 0.88rem; }

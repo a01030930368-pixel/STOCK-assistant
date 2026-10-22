@@ -21,6 +21,7 @@ describe("study notes", () => {
     expect(f.verdict).toBe("");
     expect(f.sources).toEqual([{ title: "보고서", url: "" }]);
     expect(cleanFields(null)).toEqual(emptyFields());
+    expect(cleanFields({ one: "상품 : A\n고객 : B\n" }).one).toBe("상품 : A\n고객 : B");
   });
 
   it("counts filled questions", () => {
