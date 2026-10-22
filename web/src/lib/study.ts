@@ -52,7 +52,7 @@ export type Draft = {
   cheap?: number | null; pricey?: number | null; priceWhy?: string; conclusion?: string; sources?: { title: string; url: string }[];
   questions?: string[]; model?: string; searched?: boolean;
 };
-export type Pick = { why: string[]; first: string[]; flow: string; model: string | null; at: string };
+export type Pick = { why: string[]; first: string[]; flow: string; model: string | null; at: string; fresh?: boolean };
 
 const str = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "");
 const list = <T,>(v: unknown, n: number, f: (x: Record<string, unknown>) => T | null): T[] =>

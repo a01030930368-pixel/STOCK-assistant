@@ -109,7 +109,7 @@ export default function StudyNote({ note }: { note: NoteData }) {
 function PickCard({ pick }: { pick: Pick }) {
   return (
     <div className="panel study-pick">
-      <div className="study-pick-head"><b>🎲 AI가 이 회사를 고른 이유</b><span className="muted practice-small">{pick.flow}</span></div>
+      <div className="study-pick-head"><b>🎲 AI가 이 회사를 고른 이유</b>{pick.fresh && <span className="study-tag">🧭 안 해 본 쪽에서</span>}<span className="muted practice-small">{pick.flow}</span></div>
       {pick.why.length > 0 && <ul>{pick.why.map((w) => <li key={w}>{w}</li>)}</ul>}
       {pick.first.length > 0 && (
         <>

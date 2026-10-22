@@ -805,12 +805,13 @@ export async function deleteStudy(form: FormData) {
 }
 
 // 🎲 AI 추천: 화면이 부탁을 남기면 워커가 몇 초 안에 골라서 노트를 만들어요.
-export async function requestStudyPick(market: string): Promise<string> {
+// fresh: 지금까지 공부한 업종은 빼고, 안 해 본 업종·유형에서 골라 달라고 해요.
+export async function requestStudyPick(market: string, fresh = false): Promise<string> {
   const id = Math.random().toString(36).slice(2, 10);
   const m = market === "KR" || market === "US" ? market : "ALL";
   await query(
     `INSERT INTO app_settings (key, value) VALUES ('study_pick', $1::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-    [JSON.stringify({ id, market: m, status: "pending", at: new Date().toISOString() })],
+    [JSON.stringify({ id, market: m, fresh: Boolean(fresh), status: "pending", at: new Date().toISOString() })],
   );
   return id;
 }

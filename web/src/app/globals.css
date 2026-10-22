@@ -1059,6 +1059,9 @@ a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-d
 .study-compare-tags .study-tag + .study-tag { margin-left: 4px; }
 .study-compare-conf { color: var(--accent); letter-spacing: 1px; }
 .study-compare-conf span { color: var(--line); }
+.study-fresh { display: flex; gap: 8px; align-items: flex-start; font-size: 0.86rem; cursor: pointer; }
+.study-fresh input { margin-top: 3px; accent-color: var(--accent); }
+.study-fresh small { display: block; font-size: 0.76rem; }
 .study-draft { border: 1px dashed #4a3f28; background: #17140e; border-radius: 9px; padding: 10px 12px; font-size: 0.9rem; }
 .study-draft ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 3px; }
 .study-draft-head { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
