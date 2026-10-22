@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
-import { addAlert, addChartMemo, addDoodle, addLevel, deleteChartMemo, deleteDoodle, deleteLevel, updateLevel } from "@/app/actions";
-import { COLORS, KIND_LABEL, kindFor, markColor, moveEdge, nearest, snap, strokeDistance, thin, zone, type Doodle, type DoodlePoint, type Mark } from "@/lib/drawings";
+import { addAlert, addChartMemo, addDoodle, addLevel, addShape, deleteChartMemo, deleteDoodle, deleteLevel, deleteShape, updateLevel, updateShape } from "@/app/actions";
+import {
+  COLORS, fibPrices, KIND_LABEL, kindFor, markColor, measure, moveEdge, nearest, segmentDistance, SHAPE_LABEL, SHAPE_POINTS, snap, strokeDistance, thin, zone,
+  type Doodle, type DoodlePoint, type Mark, type Shape, type ShapeKind,
+} from "@/lib/drawings";
 import { Drawings, RESIST, SUPPORT, type Stroke } from "./chartDrawings";
 import BandChart from "./BandChart";
 import type { BandKind } from "@/lib/bands";
@@ -16,10 +19,19 @@ export type { Candle, MinuteCandle };
 export type Memo = { id: number; day: string; body: string };
 export type Trade = { day: string; side: "buy" | "sell"; price: number; quantity: number };
 export type Level = { kind: "avg" | "stop" | "target" | "alert"; price: number };
-export type { Doodle, Mark };
-type Tool = "none" | "line" | "zone" | "move" | "pen" | "eraser";
+export type { Doodle, Mark, Shape };
+type Tool = "none" | "line" | "trend" | "channel" | "zone" | "fib" | "ruler" | "move" | "pen" | "eraser";
+// 왼쪽 막대에서 선 칸(가로선·추세선·평행 채널)은 하나로 묶고, 누르면 옆으로 펼쳐져요.
+const LINE_TOOLS: { key: Tool; name: string; icon: string }[] = [
+  { key: "line", name: "가로선", icon: "—" }, { key: "trend", name: "추세선", icon: "／" }, { key: "channel", name: "평행 채널", icon: "⫽" },
+];
+const isLine = (t: Tool) => t === "line" || t === "trend" || t === "channel";
 const TOOLS: { key: Tool; name: string; icon: string; hint: string }[] = [
-  { key: "line", name: "선", icon: "／", hint: "차트에서 원하는 높이를 한 번 누르세요. 지금 가격보다 위면 저항, 아래면 지지예요." },
+  { key: "line", name: "가로선", icon: "—", hint: "차트에서 원하는 높이를 한 번 누르세요. 지금 가격보다 위면 저항, 아래면 지지예요." },
+  { key: "trend", name: "추세선", icon: "／", hint: "선의 시작점과 끝점을 차례로 누르세요. 선은 끝점 너머로 길게 이어져요." },
+  { key: "channel", name: "평행 채널", icon: "⫽", hint: "추세선의 두 점을 누른 뒤, 평행선이 지나갈 자리를 한 번 더 누르세요." },
+  { key: "fib", name: "피보나치", icon: "Fib", hint: "시작점(예: 저점)과 끝점(예: 고점)을 차례로 누르세요. 그 사이 23.6·38.2·50·61.8·78.6% 선이 생겨요." },
+  { key: "ruler", name: "자", icon: "📏", hint: "재고 싶은 두 점을 차례로 누르세요. 등락률, 봉 수, 날짜 수가 보여요. 저장은 안 돼요." },
   { key: "zone", name: "구간", icon: "▭", hint: "구간의 위·아래를 차례로 한 번씩 누르세요." },
   { key: "move", name: "옮기기", icon: "↕", hint: "옮길 선이나 구간의 위·아래 끝을 잡고 위아래로 끄세요. 다 옮겼으면 ↕ 옮기기를 다시 눌러 끝내요." },
   { key: "pen", name: "낙서", icon: "✎", hint: "손가락이나 마우스로 그리세요. 낙서는 이 차트에서만 보여요. 다 그렸으면 ✎ 낙서를 다시 눌러 끝내요." },
@@ -83,9 +95,9 @@ const md = (day: string) => `${Number(day.slice(5, 7))}.${Number(day.slice(8, 10
 const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
 const compact = (v: number): string => (v < 0 ? `−${compact(-v)}` : v >= 1e12 ? `${(v / 1e12).toFixed(1)}조` : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v.toLocaleString("ko-KR"));
 
-export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles, statements = [], shares = null }: {
+export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles, statements = [], shares = null, shapes: savedShapes = [] }: {
   ticker: string; name: string; market: string; candles: Candle[]; minutes: MinuteCandle[]; memos: Memo[]; trades: Trade[]; levels: Level[]; today: string;
-  current: number | null; marks: Mark[]; doodles: Doodle[]; statements?: StatementRow[]; shares?: number | null;
+  current: number | null; marks: Mark[]; doodles: Doodle[]; statements?: StatementRow[]; shares?: number | null; shapes?: Shape[];
 }) {
   const [mode, setMode] = useState<"price" | BandKind>("price");
   const [menu, setMenu] = useState<null | "ind" | "show">(null);
@@ -136,6 +148,11 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   const [marks, setMarks] = useState<Mark[]>(savedMarks);
   const [doodles, setDoodles] = useState<Doodle[]>(savedDoodles);
   const [tool, setTool] = useState<Tool>("none");
+  const [lineTool, setLineTool] = useState<Tool>("line");
+  const [lineOpen, setLineOpen] = useState(false);
+  const [shapes, setShapes] = useState<Shape[]>(savedShapes);
+  const [draft, setDraft] = useState<DoodlePoint[]>([]); // 추세선·채널·피보나치·자에서 지금까지 누른 점
+  const [ruler, setRuler] = useState<{ a: DoodlePoint; b: DoodlePoint; text: string } | null>(null);
   const [pending, setPending] = useState<number | null>(null);
   const [drawShown, setDrawShown] = useState(true);
   const [magnet, setMagnet] = useState(true);
@@ -382,8 +399,23 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
 
   const strokes = useMemo<Stroke[]>(() => doodles.filter((d) => d.view === view), [doodles, view]);
   function syncDrawings() {
-    drawRef.current?.set({ marks: marksRef.current, strokes: strokesRef.current, visible: drawShownRef.current, pending: pendingRef.current });
+    drawRef.current?.set({ marks: marksRef.current, strokes: strokesRef.current, visible: drawShownRef.current, pending: pendingRef.current, shapes: shapesRef.current });
   }
+  const viewShapes = useMemo(() => shapes.filter((x) => x.view === view), [shapes, view]);
+  const shapesRef = useRef(viewShapes);
+  shapesRef.current = viewShapes;
+  useEffect(() => {
+    drawRef.current?.set({ shapes: viewShapes });
+  }, [viewShapes]);
+  useEffect(() => {
+    drawRef.current?.set({ ruler });
+  }, [ruler]);
+  // 도구를 바꾸면 그리던 점은 버려요. 자는 다른 도구를 고르면 지워져요.
+  useEffect(() => {
+    setDraft([]);
+    drawRef.current?.set({ draft: null });
+    if (tool !== "ruler") setRuler(null);
+  }, [tool, view]);
   const strokesRef = useRef(strokes);
   strokesRef.current = strokes;
   const drawShownRef = useRef(drawShown);
@@ -435,6 +467,12 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         void deleteDoodle(hit.id!);
         return;
       }
+      const sh = shapesRef.current.find((one) => shapeDistance(d, one, [x, y]) <= 8);
+      if (sh) {
+        setShapes((ss) => ss.filter((v) => v.id !== sh.id));
+        void deleteShape(sh.id);
+        return;
+      }
       const m = marksRef.current.find((mk) => {
         const top = d.y(mk.high ?? mk.low), bottom = d.y(mk.low);
         return top !== null && bottom !== null && y >= top - 6 && y <= bottom + 6;
@@ -465,6 +503,71 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     const [x, y] = [e.clientX - r.left, e.clientY - r.top];
     const at = priceRef.current?.coordinateToPrice(y) ?? null;
     if (at !== null && at > 0) drawAt(toolRef.current === "eraser" ? at : snapAt(y, x, at), x, y);
+  }
+
+  // 추세선·채널·피보나치·자: 누른 자리를 점으로(자석이 켜져 있으면 캔들 꼬리·몸통 가격에 붙여요).
+  function pointAt(e: React.PointerEvent<HTMLDivElement>): DoodlePoint | null {
+    const r = e.currentTarget.getBoundingClientRect();
+    const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+    const pt = toPoint(x, y);
+    if (!pt) return null;
+    return [pt[0], pt[1], snapAt(y, x, pt[2])];
+  }
+  function rulerText(a: DoodlePoint, b: DoodlePoint): string {
+    const at = (p: DoodlePoint) => {
+      const i = bars.findIndex((x) => x.key === p[0]);
+      return { price: p[2], index: i + p[1], day: bars[Math.max(0, i)].day };
+    };
+    return measure(at(a), at(b));
+  }
+  function hoverShape(e: React.PointerEvent<HTMLDivElement>) {
+    const t = toolRef.current;
+    if (t === "ruler") {
+      if (ruler && draft.length === 1) {
+        const b = pointAt(e);
+        if (b) drawRef.current?.set({ ruler: { a: draft[0], b, text: rulerText(draft[0], b) } });
+      }
+      return;
+    }
+    if (!draft.length) return;
+    const p = pointAt(e);
+    if (p) drawRef.current?.set({ draft: { kind: t as ShapeKind, points: [...draft, p] } });
+  }
+  async function tapShape(e: React.PointerEvent<HTMLDivElement>) {
+    const t = toolRef.current;
+    const p = pointAt(e);
+    if (!p) return;
+    if (t === "ruler") {
+      // 첫 점 → 둘째 점에서 멈춤 → 다시 누르면 새로 재기
+      if (draft.length === 1) {
+        setRuler({ a: draft[0], b: p, text: rulerText(draft[0], p) });
+        setDraft([]);
+      } else {
+        setDraft([p]);
+        setRuler({ a: p, b: p, text: rulerText(p, p) });
+      }
+      return;
+    }
+    const kind = t as ShapeKind;
+    const points = [...draft, p];
+    if (points.length < SHAPE_POINTS[kind]) {
+      setDraft(points);
+      drawRef.current?.set({ draft: { kind, points } });
+      return;
+    }
+    setDraft([]);
+    drawRef.current?.set({ draft: null });
+    setTool("none");
+    const id = await addShape({ ticker, name, view, kind, points });
+    if (id !== null) setShapes((ss) => [...ss, { id, view, kind, points, color: null, alert: false }]);
+  }
+  function changeShape(id: number, change: Partial<Pick<Shape, "alert">>) {
+    setShapes((ss) => ss.map((x) => (x.id === id ? { ...x, ...change } : x)));
+    void updateShape(id, change);
+  }
+  function removeShape(id: number) {
+    setShapes((ss) => ss.filter((x) => x.id !== id));
+    void deleteShape(id);
   }
 
   // ↕ 옮기기 모드에서 선(구간이면 위·아래 끝)을 잡고 위아래로 끌면 옮겨져요.
@@ -746,9 +849,23 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
             </div>
             <div className="chart-stage">
               <div className="draw-rail" role="toolbar" aria-label="그리기 도구">
-                {TOOLS.map((t) => (
+                <div className="rail-group">
+                  <button type="button" className={isLine(tool) ? "on more" : "more"} aria-pressed={isLine(tool)} aria-expanded={lineOpen} aria-label={`선: ${LINE_TOOLS.find((t) => t.key === lineTool)!.name}`}
+                    title="선 (가로선·추세선·평행 채널)" onClick={() => setLineOpen((v) => !v)}>{LINE_TOOLS.find((t) => t.key === lineTool)!.icon}</button>
+                  {lineOpen && (
+                    <div className="rail-fly" role="menu">
+                      {LINE_TOOLS.map((t) => (
+                        <button key={t.key} type="button" role="menuitem" className={tool === t.key ? "on" : ""}
+                          onClick={() => { setLineTool(t.key); setTool(t.key); setLineOpen(false); setDrawShown(true); }}>
+                          <span>{t.icon}</span>{t.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {TOOLS.filter((t) => !isLine(t.key)).map((t) => (
                   <button key={t.key} type="button" className={tool === t.key ? "on" : ""} aria-pressed={tool === t.key} aria-label={t.name} title={t.name}
-                    onClick={() => { setTool(tool === t.key ? "none" : t.key); setDrawShown(true); }}>{t.icon}</button>
+                    onClick={() => { setTool(tool === t.key ? "none" : t.key); setDrawShown(true); setLineOpen(false); }}><span className={t.icon === "Fib" ? "fib-ic" : ""}>{t.icon}</span></button>
                 ))}
                 <i />
                 <button type="button" className={magnet ? "on" : ""} aria-pressed={magnet} aria-label="자석" title="자석: 캔들 꼬리·몸통에 붙이기" onClick={() => setMagnet((v) => !v)}>🧲</button>
@@ -761,9 +878,13 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
                 <div className="pen-layer" onPointerDown={penDown} onPointerMove={penMove} onPointerUp={penUp} onPointerCancel={penUp} />
               )}
               {(tool === "line" || tool === "zone" || tool === "eraser") && <div className="pen-layer" onPointerUp={tap} />}
+              {(tool === "trend" || tool === "channel" || tool === "fib" || tool === "ruler") && <div className="pen-layer" onPointerUp={tapShape} onPointerMove={hoverShape} />}
               {tool !== "none" && (
                 <div className="draw-hint">
-                  {tool === "zone" && pending !== null ? `${fmt(pending)}을 골랐어요. 이제 구간의 다른 끝을 누르세요.` : TOOLS.find((t) => t.key === tool)!.hint}
+                  {tool === "zone" && pending !== null ? `${fmt(pending)}을 골랐어요. 이제 구간의 다른 끝을 누르세요.`
+                    : (tool === "trend" || tool === "channel" || tool === "fib") && draft.length
+                      ? `${draft.length}번째 점을 찍었어요. ${tool === "channel" && draft.length === 2 ? "이제 평행선이 지나갈 자리를 누르세요." : "다음 점을 누르세요."}`
+                      : TOOLS.find((t) => t.key === tool)!.hint}
                 </div>
               )}
               </div>
@@ -775,6 +896,29 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a> Lightweight Charts
         </p>}
       </div>
+
+      {viewShapes.length > 0 && (
+        <div className="list levels-list">
+          <div className="muted levels-head">이 차트에 그린 추세선·채널·피보나치 · 일봉 추세선·채널은 🔔를 켜 두면 가격이 닿을 때 텔레그램으로 알려요</div>
+          {viewShapes.map((x) => (
+            <div key={x.id} className="list-item level-row">
+              <span className="sw line" style={{ background: x.color ?? "#e7cf9c" }} />
+              <b className="level-kind">{SHAPE_LABEL[x.kind]}</b>
+              <span className="num">
+                {x.kind === "fib"
+                  ? `${fmt(x.points[0][2])} → ${fmt(x.points[1][2])} · 50% ${fmt(fibPrices(x.points[0][2], x.points[1][2])[3].price)}`
+                  : `${x.points[0][0].slice(0, 10)} ${fmt(x.points[0][2])} → ${x.points[1][0].slice(0, 10)} ${fmt(x.points[1][2])}`}
+              </span>
+              {x.kind !== "fib" && view === "D" && (
+                <button type="button" className={x.alert ? "chip-btn on" : "chip-btn"} aria-pressed={x.alert} onClick={() => changeShape(x.id, { alert: !x.alert })}>
+                  {x.alert ? "🔔 알림 켜짐" : "🔕 알림 꺼짐"}
+                </button>
+              )}
+              <button type="button" className="ghost" onClick={() => removeShape(x.id)}>지우기</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {marks.length > 0 && (
         <div className="list levels-list">
@@ -840,6 +984,25 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
       )}
     </>
   );
+}
+
+// 지우개: 누른 자리와 그림 사이 거리(화면 픽셀). 추세선·채널은 오른쪽으로 늘린 부분까지, 피보나치는 가로선들까지.
+function shapeDistance(d: Drawings, s: Shape, p: [number, number]): number {
+  const px = d.shapePixels(s.points);
+  if (!px) return Infinity;
+  if (s.kind === "fib") {
+    const left = Math.min(px[0][0], px[1][0]);
+    if (p[0] < left) return Infinity;
+    return Math.min(...fibPrices(s.points[0][2], s.points[1][2]).map((l) => Math.abs((d.y(l.price) ?? -1e9) - p[1])));
+  }
+  const [a, b] = px;
+  const far: [number, number] = b[0] === a[0] ? b : [a[0] + (b[0] - a[0]) * 1e3, a[1] + (b[1] - a[1]) * 1e3];
+  let best = segmentDistance(p, a, far);
+  if (s.kind === "channel" && px[2]) {
+    const off = px[2][1] - (a[1] + (b[0] === a[0] ? 0 : ((b[1] - a[1]) * (px[2][0] - a[0])) / (b[0] - a[0])));
+    best = Math.min(best, segmentDistance(p, [a[0], a[1] + off], [far[0], far[1] + off]));
+  }
+  return best;
 }
 
 // 고른 기간이 시작하는 봉 번호. 전체면 0.

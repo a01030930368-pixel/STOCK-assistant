@@ -395,6 +395,23 @@ CREATE TABLE chart_doodles (
 );
 CREATE INDEX chart_doodles_ticker_idx ON chart_doodles (ticker, view);
 
+-- 차트에 그린 추세선·평행 채널·피보나치. 그린 차트에서만 보여요. points = [[봉 키, 봉 안 위치(0~1), 가격], ...]
+-- 추세선은 두 점, 채널은 세 번째 점이 평행선 높이, 피보나치는 저점·고점 두 점이에요. 일봉 추세선·채널만 알림을 보낼 수 있어요.
+CREATE TABLE chart_shapes (
+  id          SERIAL PRIMARY KEY,
+  ticker      TEXT NOT NULL,
+  name        TEXT NOT NULL DEFAULT '',
+  view        TEXT NOT NULL,
+  kind        TEXT NOT NULL CHECK (kind IN ('trend', 'channel', 'fib')),
+  points      JSONB NOT NULL,
+  color       TEXT,
+  alert       BOOLEAN NOT NULL DEFAULT false,
+  last_price  NUMERIC(18, 4),
+  alerted_at  TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX chart_shapes_ticker_idx ON chart_shapes (ticker, view);
+
 -- 날짜 계산(CURRENT_DATE)을 한국 날짜로 합니다.
 DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET timezone TO %L', current_database(), 'Asia/Seoul'); END $$;
 

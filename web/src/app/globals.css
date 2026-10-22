@@ -910,3 +910,11 @@ a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-d
   .ind-chip > button, .ind-chip > span { padding: 2px 3px 2px 7px; }
   .ind-chip .x { padding: 2px 6px 2px 3px; }
 }
+/* 왼쪽 그리기 막대: 선 묶음 펼치기 */
+.rail-group { position: relative; }
+.draw-rail button.more { position: relative; }
+.draw-rail button.more::after { content: ""; position: absolute; right: 3px; bottom: 3px; border: 3px solid transparent; border-right-color: var(--muted); border-bottom-color: var(--muted); }
+.rail-fly { position: absolute; left: calc(100% + 6px); top: 0; z-index: 25; display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 5px; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5); }
+.draw-rail .rail-fly button { width: auto; height: auto; display: flex; gap: 10px; align-items: center; padding: 7px 12px; white-space: nowrap; font-size: 0.84rem; }
+.rail-fly button span { width: 16px; text-align: center; }
+.fib-ic { font-size: 0.62rem; font-weight: 700; letter-spacing: -0.02em; }

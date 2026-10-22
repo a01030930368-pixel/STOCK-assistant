@@ -94,3 +94,28 @@ export function moveEdge(m: Mark, edge: "low" | "high", price: number): Mark {
   const other = edge === "low" ? m.high : m.low;
   return { ...m, low: Math.min(price, other), high: Math.max(price, other) };
 }
+
+// ---------------------------------------------------------------- 추세선·평행 채널·피보나치
+// points: 추세선 [시작, 끝], 채널 [시작, 끝, 평행선 높이], 피보나치 [시작(0%), 끝(100%)]
+export type ShapeKind = "trend" | "channel" | "fib";
+export type Shape = { id: number; view: string; kind: ShapeKind; points: DoodlePoint[]; color: string | null; alert: boolean };
+export const SHAPE_POINTS: Record<ShapeKind, number> = { trend: 2, channel: 3, fib: 2 };
+export const SHAPE_LABEL: Record<ShapeKind, string> = { trend: "추세선", channel: "평행 채널", fib: "피보나치" };
+export const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+
+export function validShape(kind: unknown, points: unknown): kind is ShapeKind {
+  return (kind === "trend" || kind === "channel" || kind === "fib") && validDoodle(points) && points.length === SHAPE_POINTS[kind];
+}
+
+// 피보나치 되돌림: 끝점(100% 반대쪽)에서 시작점 쪽으로 되돌아온 비율마다의 가격. 0%는 끝점, 100%는 시작점이에요.
+export function fibPrices(start: number, end: number): { ratio: number; price: number }[] {
+  return FIB_LEVELS.map((r) => ({ ratio: r, price: end - (end - start) * r }));
+}
+
+// 자: 두 점 사이 등락률, 봉 수, 날짜 수
+export function measure(a: { price: number; index: number; day: string }, b: { price: number; index: number; day: string }): string {
+  const pct = (b.price / a.price - 1) * 100;
+  const bars = Math.abs(Math.round(b.index - a.index));
+  const days = Math.abs(Math.round((Date.parse(b.day) - Date.parse(a.day)) / 86400000));
+  return `${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct).toFixed(2)}% · ${bars}봉 · ${days}일`;
+}

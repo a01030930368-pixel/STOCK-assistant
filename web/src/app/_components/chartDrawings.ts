@@ -4,7 +4,7 @@ import type {
   IChartApi, IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, ISeriesPrimitiveAxisView,
   PrimitivePaneViewZOrder, SeriesAttachedParameter, Time,
 } from "lightweight-charts";
-import { KIND_LABEL, markColor, type DoodlePoint, type Mark } from "@/lib/drawings";
+import { fibPrices, KIND_LABEL, markColor, SHAPE_LABEL, type DoodlePoint, type Mark, type Shape } from "@/lib/drawings";
 
 type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
@@ -16,10 +16,15 @@ export type DrawState = {
   marks: Mark[]; strokes: Stroke[]; visible: boolean;
   pending: number | null; // 구간 긋기에서 첫 번째로 누른 가격
   selected: number | null;
+  shapes: Shape[];
+  draft: { kind: Shape["kind"]; points: DoodlePoint[] } | null; // 그리는 중인 추세선·채널·피보나치(마지막 점은 손가락 자리)
+  ruler: { a: DoodlePoint; b: DoodlePoint; text: string } | null;
 };
+export const TREND = "#e7cf9c", RULER = "#6fa8d9";
+const FIB_COLORS = ["#9b968b", "#e8806f", "#d9b45a", "#6fbf9a", "#6fa8d9", "#b48ead", "#9b968b"];
 
 export class Drawings implements ISeriesPrimitive<Time> {
-  state: DrawState = { marks: [], strokes: [], visible: true, pending: null, selected: null };
+  state: DrawState = { marks: [], strokes: [], visible: true, pending: null, selected: null, shapes: [], draft: null, ruler: null };
   private chart: IChartApi | null = null;
   private series: ISeriesApi<"Candlestick"> | null = null;
   private request: (() => void) | null = null;
@@ -43,6 +48,11 @@ export class Drawings implements ISeriesPrimitive<Time> {
     const i = this.index.get(key);
     if (i === undefined || !this.chart) return null;
     return this.chart.timeScale().logicalToCoordinate((i + frac) as never);
+  }
+  // 추세선·채널·피보나치의 화면 좌표. 점 하나라도 이 차트에 없으면 null.
+  shapePixels(points: DoodlePoint[]): [number, number][] | null {
+    const px = this.pixels(points);
+    return px.length === points.length ? px : null;
   }
   // 낙서 점을 화면 좌표로. 지금 차트에 없는 봉의 점은 건너뜁니다.
   pixels(points: DoodlePoint[]): [number, number][] {
@@ -114,6 +124,14 @@ export class Drawings implements ISeriesPrimitive<Time> {
           if (px.length === 1) c.lineTo(px[0][0] + 0.1, px[0][1]);
           c.stroke();
         }
+        const { shapes, draft, ruler } = this.state;
+        if (visible) for (const sh of shapes) this.drawShape(c, sh.kind, sh.points, sh.color ?? TREND, mediaSize.width, sh.id === selected, sh.alert);
+        if (draft && draft.points.length >= 2) this.drawShape(c, draft.kind, draft.points, TREND, mediaSize.width, true, false);
+        else if (draft) {
+          const px = this.shapePixels(draft.points);
+          if (px) { c.fillStyle = TREND; c.beginPath(); c.arc(px[0][0], px[0][1], 4, 0, Math.PI * 2); c.fill(); }
+        }
+        if (ruler) this.drawRuler(c, ruler);
         if (pending !== null) {
           const yv = this.y(pending);
           if (yv !== null) {
@@ -125,5 +143,73 @@ export class Drawings implements ISeriesPrimitive<Time> {
         }
       }),
     };
+  }
+
+  // 추세선은 끝점 너머 오른쪽 끝까지 늘려 그려요(알림도 그 연장선으로 봐요).
+  private drawShape(c: CanvasRenderingContext2D, kind: Shape["kind"], points: DoodlePoint[], color: string, width: number, bold: boolean, alert: boolean) {
+    const px = this.shapePixels(points);
+    if (!px || px.length < 2) return;
+    const [[x1, y1], [x2, y2]] = px;
+    c.lineWidth = bold ? 2 : 1.5;
+    c.strokeStyle = color;
+    c.fillStyle = color;
+    if (kind === "fib") {
+      const levels = fibPrices(points[0][2], points[1][2]);
+      const left = Math.min(x1, x2);
+      c.font = "11px Pretendard, sans-serif";
+      levels.forEach((l, k) => {
+        const y = this.y(l.price);
+        if (y === null) return;
+        c.strokeStyle = FIB_COLORS[k];
+        c.fillStyle = FIB_COLORS[k];
+        c.beginPath(); c.moveTo(left, y); c.lineTo(width, y); c.stroke();
+        c.fillText(`${(l.ratio * 100).toFixed(1).replace(".0", "")}% · ${this.fmt(l.price)}`, left + 4, y - 4);
+      });
+      c.setLineDash([3, 3]);
+      c.strokeStyle = "#9b968b";
+      c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+      c.setLineDash([]);
+      return;
+    }
+    const ray = (ax: number, ay: number, bx: number, by: number) => {
+      const ex = bx > ax ? width : bx < ax ? 0 : bx;
+      const ey = bx === ax ? by : ay + ((by - ay) * (ex - ax)) / (bx - ax);
+      c.beginPath(); c.moveTo(ax, ay); c.lineTo(ex, ey); c.stroke();
+      return [ex, ey] as const;
+    };
+    const [ex, ey] = ray(x1, y1, x2, y2);
+    for (const [x, y] of [[x1, y1], [x2, y2]]) { c.beginPath(); c.arc(x, y, bold ? 4 : 3, 0, Math.PI * 2); c.fill(); }
+    if (kind === "channel" && px.length >= 3) {
+      // 세 번째 점을 지나는 평행선
+      const [x3, y3] = px[2];
+      const slope = x2 === x1 ? 0 : (y2 - y1) / (x2 - x1);
+      const off = y3 - (y1 + slope * (x3 - x1));
+      c.setLineDash([5, 4]);
+      ray(x1, y1 + off, x2, y2 + off);
+      c.setLineDash([]);
+      c.globalAlpha = 0.07;
+      c.beginPath(); c.moveTo(x1, y1); c.lineTo(ex, ey); c.lineTo(ex, ey + off); c.lineTo(x1, y1 + off); c.closePath(); c.fill();
+      c.globalAlpha = 1;
+    }
+    c.font = "11.5px Pretendard, sans-serif";
+    c.fillText(`${SHAPE_LABEL[kind]}${alert ? " 🔔" : ""}`, x2 + 6, y2 - 6);
+  }
+
+  private drawRuler(c: CanvasRenderingContext2D, r: NonNullable<DrawState["ruler"]>) {
+    const px = this.shapePixels([r.a, r.b]);
+    if (!px) return;
+    const [[x1, y1], [x2, y2]] = px;
+    c.fillStyle = RULER + "1f";
+    c.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+    c.strokeStyle = RULER;
+    c.lineWidth = 1.4;
+    c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+    c.font = "600 12px Pretendard, sans-serif";
+    const w = c.measureText(r.text).width + 16;
+    const bx = (x1 + x2) / 2 - w / 2, by = Math.min(y1, y2) - 28;
+    c.fillStyle = "#1d2a3a";
+    c.beginPath(); c.roundRect(bx, by, w, 22, 6); c.fill();
+    c.fillStyle = "#8fb8e8";
+    c.fillText(r.text, bx + 8, by + 15);
   }
 }

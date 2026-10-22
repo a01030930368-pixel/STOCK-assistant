@@ -68,6 +68,7 @@ def test_tick_saves_isa_balance_separately(monkeypatch):
     monkeypatch.setattr("app.db.current_prices", lambda conn: {})
     monkeypatch.setattr("app.db.active_alerts", lambda conn: [])
     monkeypatch.setattr("app.db.chart_levels", lambda conn: [])
+    monkeypatch.setattr("app.db.chart_shapes", lambda conn: [])
     cfg = type("C", (), {"telegram_bot_token": "", "telegram_chat_id": ""})()
     main.tick(cfg, object(), None, True, False, datetime(2026, 10, 20, 3, tzinfo=timezone.utc), FakeIsa())
     assert saved["balance"].holdings[0].ticker == "360750" and saved["cash"].deposit == 14200

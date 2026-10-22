@@ -6,7 +6,7 @@ import { loadSummaries } from "@/lib/summaryData";
 import SummaryLine from "@/app/_components/SummaryLine";
 import AiNote, { type AiComment } from "@/app/_components/AiNote";
 import StockNews from "@/app/_components/StockNews";
-import ChartMemo, { type Candle, type Doodle, type Level, type Mark, type Memo, type MinuteCandle, type Trade } from "@/app/_components/ChartMemo";
+import ChartMemo, { type Candle, type Doodle, type Level, type Mark, type Memo, type MinuteCandle, type Shape, type Trade } from "@/app/_components/ChartMemo";
 import { wallClock } from "@/lib/candles";
 import { dartUrl, kindOf } from "@/lib/disclosures";
 import Statements from "@/app/_components/Statements";
@@ -159,6 +159,8 @@ export default async function StockPage({ params, searchParams }: { params: Prom
     "SELECT id, kind, low, high, memo, alert, NULL AS color FROM chart_levels WHERE ticker = $1 ORDER BY id", [ticker],
   ))).map<Mark>((m) => ({ ...m, low: Number(m.low), high: m.high === null ? null : Number(m.high) }));
   const doodles = await safe<Doodle>("SELECT id, view, color, points FROM chart_doodles WHERE ticker = $1 ORDER BY id", [ticker]);
+  // 워커 업데이트 전 DB에는 chart_shapes 표가 없어요(safe가 빈 목록을 돌려줘요).
+  const shapes = await safe<Shape>("SELECT id, view, kind, points, color, alert FROM chart_shapes WHERE ticker = $1 ORDER BY id", [ticker]);
   const memos = await safe<Memo>(
     "SELECT id, to_char(day, 'YYYY-MM-DD') AS day, body FROM chart_memos WHERE ticker = $1 ORDER BY day DESC, id DESC",
     [ticker],
@@ -192,7 +194,7 @@ export default async function StockPage({ params, searchParams }: { params: Prom
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}
 
       <h2>차트 · 메모 · 가격 알림</h2>
-      <ChartMemo ticker={ticker} name={stock.name} current={stock.cur === null ? null : Number(stock.cur)} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} marks={marks} doodles={doodles}
+      <ChartMemo ticker={ticker} name={stock.name} current={stock.cur === null ? null : Number(stock.cur)} market={stock.market} candles={candles} minutes={minutes} memos={memos} trades={trades} levels={levels} today={today} marks={marks} doodles={doodles} shapes={shapes}
         statements={statements} shares={shares} />
 
       {stock.market === "KR" && (

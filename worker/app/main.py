@@ -8,7 +8,7 @@ import psycopg
 
 import httpx
 
-from . import alerts, brief, config, db, levels, logsafe, macro, telegram
+from . import alerts, brief, config, db, levels, logsafe, macro, shapes, telegram
 from .kiwoom import KiwoomClient
 from .research_job import ResearchJob
 from .screener_job import ScreenerJob
@@ -104,6 +104,19 @@ def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | No
                     continue
             log.info("지지·저항 알림 발송: %s", text)
         db.save_level_seen(conn, level.id, price, send)
+    shapes_ = db.chart_shapes(conn)
+    if shapes_:
+        cache: dict[str, list[str]] = {}
+        days_of = lambda t: cache.setdefault(t, db.trading_days(conn, t))
+        today = now.astimezone(timezone(timedelta(hours=9))).date().isoformat()
+        for shape, price, line, send in shapes.due(shapes_, prices, days_of, today, now):
+            if send:
+                text = shapes.message(shape, price, line)
+                if cfg.telegram_bot_token and cfg.telegram_chat_id:
+                    if not telegram.deliver(cfg.telegram_bot_token, cfg.telegram_chat_id, text):
+                        continue
+                log.info("추세선 알림 발송: %s", text)
+            db.save_shape_seen(conn, shape.id, price, send)
 
 
 def connect(url: str) -> psycopg.Connection:
