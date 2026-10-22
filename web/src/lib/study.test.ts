@@ -1,0 +1,80 @@
+import { describe, expect, it } from "vitest";
+import { applyDraft, bars, cleanFields, emptyFields, filled, numbersOf, pastSelf, peerLine, reviewDefault, splitOf, type Version } from "./study";
+import type { StatementRow } from "./statements";
+
+describe("study notes", () => {
+  it("cleans input: drops blank rows, clamps, keeps three risk slots", () => {
+    const f = cleanFields({
+      one: "  메모리를 팔아요  ", lines: [{ name: "D램", pct: 72.4 }, { name: "", pct: 10 }, { name: "낸드", pct: 300 }],
+      power: "엄청 강함", promises: [{ when: "2026.07", said: "HBM4 양산", result: "kept" }, { said: "", result: "x" }],
+      events: [{ day: "2027-01-28", text: "실적" }, { day: "언젠가", text: "인증" }], risks: [{ text: "값 하락", signal: "" }],
+      cheap: "220,000", pricey: -1, verdict: "hold", sources: [{ title: "보고서", url: "javascript:alert(1)" }],
+    });
+    expect(f.one).toBe("메모리를 팔아요");
+    expect(f.lines).toEqual([{ name: "D램", pct: 72 }, { name: "낸드", pct: 100 }]);
+    expect(f.power).toBe("");
+    expect(f.promises).toEqual([{ when: "2026.07", said: "HBM4 양산", result: "kept" }]);
+    expect(f.events).toEqual([{ day: "2027-01-28", text: "실적" }, { day: "", text: "인증" }]);
+    expect(f.risks).toHaveLength(3);
+    expect(f.cheap).toBe(220000);
+    expect(f.pricey).toBeNull();
+    expect(f.verdict).toBe("");
+    expect(f.sources).toEqual([{ title: "보고서", url: "" }]);
+    expect(cleanFields(null)).toEqual(emptyFields());
+  });
+
+  it("counts filled questions", () => {
+    const f = { ...emptyFields(), one: "메모리를 서버 회사에 팔아요", cheap: 1, conclusion: "기다린다", verdict: "wait" as const };
+    expect(filled(f)).toBe(3);
+  });
+
+  it("builds numbers from yearly statements", () => {
+    const rows: StatementRow[] = [];
+    const add = (p: string, item: string, value: number, kind: StatementRow["kind"] = "Y") => rows.push({ kind, period: p, item, value });
+    [["2022", 100, 20, 30], ["2023", 80, -10, 5], ["2024", 120, 30, 40], ["2025", 160, 56, 60]].forEach(([p, r, o, c]) => {
+      add(p as string, "revenue", r as number); add(p as string, "operating_income", o as number); add(p as string, "cfo", c as number);
+    });
+    add("2025", "liabilities", 61); add("2025", "equity", 100);
+    const n = numbersOf(rows)!;
+    expect(n.years).toEqual(["2022", "2023", "2024", "2025"]);
+    expect(n.margin).toBe(35);
+    expect(n.debt).toBe(61);
+    expect(n.together).toBe(true);
+    expect(bars(n.op)).toEqual([36, -18, 54, 100]);
+    expect(numbersOf([])).toBeNull();
+  });
+
+  it("compares peers on latest year, handling US FY periods", () => {
+    const rows = [
+      { ticker: "MU", period: "FY2025", revenue: "200", operating_income: "44", liabilities: "50", equity: "100" },
+      { ticker: "MU", period: "FY2024", revenue: "160", operating_income: "10", liabilities: "40", equity: "90" },
+    ];
+    expect(peerLine("MU", "Micron", rows)).toEqual({ ticker: "MU", name: "Micron", margin: 22, growth: 25, debt: 50, ready: true });
+    expect(peerLine("X", "x", rows).ready).toBe(false);
+  });
+
+  it("finds the past self at least 60 days back", () => {
+    const v = (id: number, at: string, price: number): Version => ({ id, fields: { ...emptyFields(), verdict: "wait" }, confidence: 3, price, saved_at: at });
+    const now = new Date("2026-10-22T03:00:00Z");
+    const past = pastSelf([v(1, "2026-04-01T00:00:00Z", 150), v(2, "2026-07-20T00:00:00Z", 200), v(3, "2026-10-20T00:00:00Z", 230)], now, 236)!;
+    expect(past.version.id).toBe(2);
+    expect(past.months).toBe(3);
+    expect(past.change).toBe(18);
+    expect(pastSelf([v(1, "2026-10-22T01:00:00Z", 1)], now, 2)).toBeNull();
+  });
+
+  it("splits revenue and fills drafts only into blank fields", () => {
+    expect(splitOf([{ name: "D램", pct: 72 }, { name: "낸드", pct: 25 }]).at(-1)).toEqual({ name: "기타", pct: 3, other: true });
+    expect(splitOf([{ name: "a", pct: 150 }, { name: "b", pct: 50 }]).map((s) => s.pct)).toEqual([75, 25]);
+    const f = { ...emptyFields(), one: "내가 쓴 한 줄" };
+    const out = applyDraft(f, { one: "AI 한 줄", customers: "엔비디아", risks: [{ text: "값 하락", signal: "고정가" }] }, ["one", "model", "risks"]);
+    expect(out.one).toBe("내가 쓴 한 줄");
+    expect(out.customers).toBe("엔비디아");
+    expect(out.risks).toHaveLength(3);
+    expect(out.risks[0].text).toBe("값 하락");
+  });
+
+  it("puts the review date three months out", () => {
+    expect(reviewDefault("2026-10-22")).toBe("2027-01-22");
+  });
+});

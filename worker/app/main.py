@@ -8,7 +8,7 @@ import psycopg
 
 import httpx
 
-from . import alerts, brief, config, db, levels, logsafe, macro, shapes, telegram
+from . import alerts, brief, config, db, levels, logsafe, macro, shapes, study, telegram
 from .kiwoom import KiwoomClient
 from .research_job import ResearchJob
 from .screener_job import ScreenerJob
@@ -247,6 +247,7 @@ def main() -> None:
     history = HistoryJob(http, kiwoom)
     practice = PoolJob(http, kiwoom)
     ext_quotes = ExtJob(http)
+    study_reminder = study.ReminderJob(cfg, http)
     last_macro: datetime | None = None
     db_conn = Connection(cfg.database_url)
     while True:
@@ -260,10 +261,11 @@ def main() -> None:
     Bot(cfg).start()
     threading.Thread(target=alert_loop, args=(cfg, kiwoom, isa), name="alerts", daemon=True).start()
     brief.start(cfg, Connection(cfg.database_url))
+    study.start(cfg, Connection(cfg.database_url))
     jobs = [
         ("종목 정보 수집", research.run), ("관심종목 갱신", watching.run), ("체결 내역 갱신", trades.run), ("미국 장외 시세", ext_quotes.run),
         ("ISA 체결 갱신", isa_trades.run), ("공시 알림", filings.run), ("실적 정리", results.run), ("매매 당시 기록", buy_context.run),
-        ("검색기 갱신", screener.run), ("섹터 동향", sector_trends.run), ("수급·테마", flows.run), ("비교·복기 일봉", history.run), ("연습용 일봉", practice.run), ("분봉 갱신", minutes.run), ("AI 한마디", comments.run), ("실수 노트", notebook.run), ("일정 알림", notices.run),
+        ("검색기 갱신", screener.run), ("섹터 동향", sector_trends.run), ("수급·테마", flows.run), ("비교·복기 일봉", history.run), ("연습용 일봉", practice.run), ("분봉 갱신", minutes.run), ("AI 한마디", comments.run), ("실수 노트", notebook.run), ("일정 알림", notices.run), ("기업 공부 다시 보기", study_reminder.run),
     ]
     while True:
         now = datetime.now(timezone.utc)

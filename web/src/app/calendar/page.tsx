@@ -19,7 +19,16 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
     `SELECT to_char(day, 'YYYY-MM-DD') AS day, kind, market, ticker, title, detail FROM calendar_events
      WHERE day >= $1 AND day < $2 ORDER BY day, kind DESC, title`,
     [first, next],
+  ).catch(() => [] as CalendarEvent[]);
+  // 기업 공부 노트 ⑥에 날짜를 넣은 일도 같이 보여요.
+  const studied = await query<CalendarEvent>(
+    `SELECT e->>'day' AS day, 'study' AS kind, s.market, s.ticker, '📒 ' || s.name || ' · ' || (e->>'text') AS title, '기업 공부 노트에 적은 일' AS detail
+     FROM study_notes s, jsonb_array_elements(CASE WHEN jsonb_typeof(s.fields->'events') = 'array' THEN s.fields->'events' ELSE '[]'::jsonb END) e
+     WHERE s.status <> '탈락' AND (e->>'day') ~ '^\\d{4}-\\d{2}-\\d{2}$' AND (e->>'day') >= $1 AND (e->>'day') < $2`,
+    [first, next],
   ).catch(() => []);
+  events.push(...studied);
+  events.sort((a, b) => a.day.localeCompare(b.day));
   // 보유 종목의 최근 1년 배당. 같은 금액을 앞으로 1년 동안 받는다고 보고 예상 배당금을 셉니다.
   const payers = await query<Payer>(
     `SELECT h.ticker, h.name, h.market, h.quantity, sum(d.amount) AS per_share, count(*)::int AS times,

@@ -477,6 +477,37 @@ MIGRATIONS = [
       hits        INTEGER NOT NULL DEFAULT 0,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
+    # 기업 공부 노트: 회사마다 한 장. fields에 ①~⑩ 칸, ai에 AI 초안(참고용), 다 적으면 done
+    """CREATE TABLE IF NOT EXISTS study_notes (
+      ticker       TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      market       TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+      status       TEXT NOT NULL DEFAULT '공부 중',
+      confidence   INTEGER NOT NULL DEFAULT 0,
+      fields       JSONB NOT NULL DEFAULT '{}',
+      step         INTEGER NOT NULL DEFAULT 0,
+      done         BOOLEAN NOT NULL DEFAULT false,
+      studied_on   DATE,
+      review_on    DATE,
+      reminded_on  DATE,
+      source       TEXT NOT NULL DEFAULT 'self',
+      pick         JSONB,
+      ai           JSONB,
+      ai_status    TEXT,
+      ai_error     TEXT,
+      ai_asked_at  TIMESTAMPTZ,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    """CREATE TABLE IF NOT EXISTS study_versions (
+      id          SERIAL PRIMARY KEY,
+      ticker      TEXT NOT NULL REFERENCES study_notes(ticker) ON DELETE CASCADE,
+      fields      JSONB NOT NULL,
+      confidence  INTEGER NOT NULL DEFAULT 0,
+      price       NUMERIC(18, 4),
+      saved_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS study_versions_ticker ON study_versions (ticker, saved_at)",
 ]
 
 
@@ -612,6 +643,7 @@ def watched_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
            UNION SELECT ticker, name, 'KR' FROM isa_holdings
            UNION SELECT ticker, name, market FROM positions WHERE status = 'open'
            UNION SELECT ticker, name, market FROM watchlist
+           UNION SELECT ticker, name, market FROM study_notes WHERE status <> '탈락'
            ORDER BY ticker"""
     ).fetchall()
 
@@ -620,7 +652,8 @@ def unpriced_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
     """일봉이 하나도 없는 관심종목·ISA 종목. (ticker, name, market)"""
     return conn.execute(
         """SELECT w.ticker, w.name, w.market FROM (
-             SELECT ticker, name, market FROM watchlist UNION SELECT ticker, name, 'KR' FROM isa_holdings) w
+             SELECT ticker, name, market FROM watchlist UNION SELECT ticker, name, 'KR' FROM isa_holdings
+             UNION SELECT ticker, name, market FROM study_notes WHERE status <> '탈락') w
            WHERE NOT EXISTS (SELECT 1 FROM price_history p WHERE p.ticker = w.ticker) ORDER BY w.ticker"""
     ).fetchall()
 
@@ -1581,3 +1614,130 @@ def practice_due(conn: psycopg.Connection, before, limit: int, kiwoom: bool = Tr
 
 def practice_fetched(conn: psycopg.Connection, ticker: str, now, error) -> None:
     conn.execute("UPDATE practice_pool SET fetched_at = %s, error = %s WHERE ticker = %s", (now, error, ticker))
+
+
+# ---------------------------------------------------------------- 기업 공부
+def study_universe(conn: psycopg.Connection, market: str | None) -> list[tuple[str, str, str, list[float]]]:
+    """🎲 추천 후보: 연습용 큰 종목 중 아직 노트가 없고 가지고 있지 않은 것. (ticker, name, market, 최근 1년 종가)"""
+    rows = conn.execute(
+        """SELECT p.ticker, p.name, p.market, array_agg(h.close ORDER BY h.day)
+           FROM practice_pool p
+           JOIN LATERAL (SELECT day, close FROM price_history WHERE ticker = p.ticker ORDER BY day DESC LIMIT 260) h ON true
+           WHERE (%s::text IS NULL OR p.market = %s)
+             AND NOT EXISTS (SELECT 1 FROM study_notes s WHERE s.ticker = p.ticker)
+             AND NOT EXISTS (SELECT 1 FROM held_all a WHERE a.ticker = p.ticker)
+           GROUP BY p.ticker, p.name, p.market""",
+        (market, market),
+    ).fetchall()
+    return [(t, n, m, [float(c) for c in closes]) for t, n, m, closes in rows]
+
+
+def study_themes(conn: psycopg.Connection, tickers: list[str]) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for t, name in conn.execute("SELECT ticker, name FROM stock_themes WHERE ticker = ANY(%s) ORDER BY name", (tickers,)):
+        out.setdefault(t, []).append(name)
+    return out
+
+
+def hot_themes(conn: psycopg.Connection, limit: int = 5) -> list[str]:
+    rows = conn.execute(
+        """SELECT name FROM theme_index WHERE updated_at > now() - interval '7 days' AND week_pct IS NOT NULL
+           ORDER BY week_pct DESC LIMIT %s""", (limit,),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def create_ai_study(conn: psycopg.Connection, ticker: str, name: str, market: str, pick: dict, peers: list[dict], draft: bool) -> None:
+    conn.execute(
+        """INSERT INTO study_notes (ticker, name, market, source, pick, ai_status, ai_asked_at)
+           VALUES (%s, %s, %s, 'ai', %s, %s, CASE WHEN %s THEN now() END)
+           ON CONFLICT (ticker) DO UPDATE SET pick = EXCLUDED.pick, updated_at = now()""",
+        (ticker, name, market, Jsonb(pick), "pending" if draft else None, draft),
+    )
+    for p in peers:
+        conn.execute(
+            """INSERT INTO stock_peers (ticker, peer_ticker, peer_name, peer_market) VALUES (%s, %s, %s, %s)
+               ON CONFLICT DO NOTHING""", (ticker, p["ticker"], p["name"], p["market"]),
+        )
+
+
+def pending_study_draft(conn: psycopg.Connection):
+    """(ticker, name, market, ai_asked_at) 가장 먼저 부탁받은 AI 초안 하나."""
+    return conn.execute(
+        "SELECT ticker, name, market, ai_asked_at FROM study_notes WHERE ai_status = 'pending' ORDER BY ai_asked_at NULLS FIRST LIMIT 1"
+    ).fetchone()
+
+
+def finish_study_draft(conn: psycopg.Connection, ticker: str, draft: dict | None, status: str, error: str | None, asked_at) -> None:
+    # 쓰는 사이에 다시 부탁했으면(asked_at이 바뀜) 덮지 않고 새 부탁을 다시 처리해요.
+    conn.execute(
+        """UPDATE study_notes SET ai = COALESCE(%s::jsonb, ai), ai_status = %s, ai_error = %s
+           WHERE ticker = %s AND ai_asked_at IS NOT DISTINCT FROM %s""",
+        (Jsonb(draft) if draft is not None else None, status, error, ticker, asked_at),
+    )
+
+
+def study_context(conn: psycopg.Connection, ticker: str, market: str) -> dict:
+    """AI 초안에 넣을 자료: 추천 이유, 최근 연간 매출·영업이익, 테마, 뉴스·공시 제목, 일정."""
+    ctx: dict = {}
+    row = conn.execute("SELECT pick FROM study_notes WHERE ticker = %s", (ticker,)).fetchone()
+    if row and row[0]:
+        ctx["pick"] = [row[0].get("flow", "")] + list(row[0].get("why") or [])
+    unit = 1e8 if market == "KR" else 1e6
+    label = "억원" if market == "KR" else "M달러"
+    money = []
+    for period, rev, op in conn.execute(
+        """SELECT period, MAX(value) FILTER (WHERE item = 'revenue'), MAX(value) FILTER (WHERE item = 'operating_income')
+           FROM stock_statements WHERE ticker = %s AND kind = 'Y' GROUP BY period ORDER BY period DESC LIMIT 3""", (ticker,),
+    ):
+        if rev is not None:
+            money.append(f"{period}년 매출 {float(rev) / unit:,.0f}{label}" + (f", 영업이익 {float(op) / unit:,.0f}{label}" if op is not None else ""))
+    ctx["money"] = money
+    ctx["themes"] = study_themes(conn, [ticker]).get(ticker, [])[:5]
+    ctx["news"] = [r[0] for r in conn.execute(
+        "SELECT COALESCE(title_ko, title) FROM stock_news WHERE ticker = %s ORDER BY published_at DESC LIMIT 8", (ticker,))]
+    ctx["filings"] = [f"{d:%m.%d} {t}" for t, d in conn.execute(
+        "SELECT title, day FROM stock_disclosures WHERE ticker = %s ORDER BY day DESC LIMIT 6", (ticker,))]
+    ctx["events"] = [f"{d:%Y.%m.%d} {t}" for d, t in conn.execute(
+        "SELECT day, title FROM calendar_events WHERE ticker = %s AND day >= CURRENT_DATE ORDER BY day LIMIT 4", (ticker,))]
+    return ctx
+
+
+def study_reminders(conn: psycopg.Connection, today) -> list[tuple]:
+    """다시 볼 날이 된 노트. (ticker, name, 판단, 공부한 날, 그때 주가, 지금 주가, market)"""
+    return conn.execute(
+        """SELECT s.ticker, s.name, s.fields->>'verdict', s.studied_on,
+             (SELECT price FROM study_versions v WHERE v.ticker = s.ticker ORDER BY saved_at DESC LIMIT 1),
+             (SELECT close FROM price_history p WHERE p.ticker = s.ticker ORDER BY day DESC LIMIT 1), s.market
+           FROM study_notes s
+           WHERE s.review_on <= %s AND (s.reminded_on IS NULL OR s.reminded_on < s.review_on) AND s.status <> '탈락'
+           ORDER BY s.review_on, s.name""", (today,),
+    ).fetchall()
+
+
+def study_reminded(conn: psycopg.Connection, tickers: list[str], today) -> None:
+    conn.execute("UPDATE study_notes SET reminded_on = %s WHERE ticker = ANY(%s)", (today, tickers))
+
+
+def study_unresearched(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
+    """새로 만든 공부 노트 중 재무제표가 아직 없는 종목. 12시간을 기다리지 않고 바로 모아요. (ticker, name, market)"""
+    return conn.execute(
+        """SELECT s.ticker, s.name, s.market FROM study_notes s
+           WHERE s.status <> '탈락' AND NOT EXISTS (SELECT 1 FROM stock_statements t WHERE t.ticker = s.ticker)
+           ORDER BY s.created_at"""
+    ).fetchall()
+
+
+def peers_of(conn: psycopg.Connection, tickers: list[str]) -> list[tuple[str, str, str]]:
+    return conn.execute(
+        "SELECT DISTINCT peer_ticker, peer_name, peer_market FROM stock_peers WHERE ticker = ANY(%s) ORDER BY 1", (tickers,)
+    ).fetchall()
+
+
+def study_peers_unresearched(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
+    """공부 노트의 비교 기업 중 재무가 아직 없는 것. (ticker, name, market)"""
+    return conn.execute(
+        """SELECT DISTINCT p.peer_ticker, p.peer_name, p.peer_market FROM stock_peers p
+           JOIN study_notes s ON s.ticker = p.ticker
+           WHERE NOT EXISTS (SELECT 1 FROM stock_financials f WHERE f.ticker = p.peer_ticker) ORDER BY 1"""
+    ).fetchall()

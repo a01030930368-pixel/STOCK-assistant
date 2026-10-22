@@ -435,6 +435,38 @@ CREATE TABLE practice_sessions (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 관심종목 › 기업 공부: 회사마다 노트 한 장(①~⑩ 칸은 fields), AI 초안(ai, 참고용), 다 적은 뒤 고칠 때마다 남는 버전
+CREATE TABLE study_notes (
+  ticker       TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  market       TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+  status       TEXT NOT NULL DEFAULT '공부 중',
+  confidence   INTEGER NOT NULL DEFAULT 0,
+  fields       JSONB NOT NULL DEFAULT '{}',
+  step         INTEGER NOT NULL DEFAULT 0,
+  done         BOOLEAN NOT NULL DEFAULT false,
+  studied_on   DATE,
+  review_on    DATE,
+  reminded_on  DATE,
+  source       TEXT NOT NULL DEFAULT 'self',
+  pick         JSONB,
+  ai           JSONB,
+  ai_status    TEXT,
+  ai_error     TEXT,
+  ai_asked_at  TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE study_versions (
+  id          SERIAL PRIMARY KEY,
+  ticker      TEXT NOT NULL REFERENCES study_notes(ticker) ON DELETE CASCADE,
+  fields      JSONB NOT NULL,
+  confidence  INTEGER NOT NULL DEFAULT 0,
+  price       NUMERIC(18, 4),
+  saved_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX study_versions_ticker ON study_versions (ticker, saved_at);
+
 -- 날짜 계산(CURRENT_DATE)을 한국 날짜로 합니다.
 DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET timezone TO %L', current_database(), 'Asia/Seoul'); END $$;
 

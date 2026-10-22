@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { asOf } from "@/lib/format";
 
-export type CalendarEvent = { day: string; kind: "holiday" | "earnings" | "policy" | "economic" | "dividend"; market: "KR" | "US"; ticker: string; title: string; detail: string };
+export type CalendarEvent = { day: string; kind: "holiday" | "earnings" | "policy" | "economic" | "dividend" | "study"; market: "KR" | "US"; ticker: string; title: string; detail: string };
 
 export const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
 const WEEKDAY = (day: string) => WEEK[new Date(`${day}T00:00:00Z`).getUTCDay()];
@@ -11,8 +11,9 @@ export default function EventLine({ e }: { e: CalendarEvent }) {
   return (
     <li>
       <div className="row2">
-        {e.ticker ? <Link href={`/stock/${encodeURIComponent(e.ticker)}`}>{e.title}</Link> : <span>{e.title}</span>}
-        <span className={`badge ${e.kind === "earnings" ? "gold" : e.kind === "policy" || e.kind === "economic" ? "macro" : e.kind === "dividend" ? "div" : ""}`}>{asOf(e.day).slice(5)} ({WEEKDAY(e.day)})</span>
+        {e.kind === "study" ? <Link href={`/watch/study?t=${encodeURIComponent(e.ticker)}`}>{e.title}</Link>
+          : e.ticker ? <Link href={`/stock/${encodeURIComponent(e.ticker)}`}>{e.title}</Link> : <span>{e.title}</span>}
+        <span className={`badge ${e.kind === "earnings" ? "gold" : e.kind === "policy" || e.kind === "economic" ? "macro" : e.kind === "dividend" ? "div" : e.kind === "study" ? "gold" : ""}`}>{asOf(e.day).slice(5)} ({WEEKDAY(e.day)})</span>
       </div>
       {e.detail && <div className="meta">{e.detail}</div>}
     </li>
