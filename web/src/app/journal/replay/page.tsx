@@ -61,7 +61,10 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
   const idx = (d: string) => (c ? c.days.findIndex((x) => x >= d) : -1);
   const marks: Mark[] = c ? book.pages.map((p) => ({ i: idx(p.day), kind: p.side, series: 1 })).filter((m) => m.i >= 0) : [];
   const at = c ? endIndex(c, book.end) : -1;
-  const mine = c ? valueAt(c.mine, at) : null, held = c ? valueAt(c.held, at) : null, ix = c ? valueAt(c.bench, at) : null;
+  const mine = c ? valueAt(c.mine, at) : null, ix = c ? valueAt(c.bench, at) : null;
+  // 계속 들고 있었다면: 다 판 권도 판 날이 아니라 마지막 일봉(오늘)까지 들고 있었을 때예요. 판 날 기준이면 판 값과 거의 같아 비교가 안 돼요.
+  const held = c ? valueAt(c.held, c.days.length - 1) : null;
+  const heldDay = c?.days.at(-1) ?? null;
 
   return (
     <>
@@ -79,8 +82,9 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
         <>
           <div className="replay-kpis">
             <div className="stat"><span className="label">내 결과</span><b className={`stat-value ${tone(mine)}`}>{pct(mine)}</b><span className="muted">{book.end ? `${md(book.start!)} → ${md(book.end)} 다 판 기준` : "지금 보유 중"}</span></div>
-            <div className="stat"><span className="label">계속 들고 있었다면</span><b className={`stat-value ${tone(held)}`}>{pct(held)}</b>
-              <span className="muted">{held !== null && mine !== null ? (book.sells === 0 ? "아직 안 팔았어요" : mine >= held ? `판 덕분에 ${pct(mine - held).replace("%", "%p")} 지켰어요` : `안 팔았으면 ${pct(held - mine).replace("%", "%p").replace("+", "")} 더 나았어요`) : ""}</span></div>
+            <div className="stat"><span className="label">{book.end ? "지금까지 들고 있었다면" : "계속 들고 있었다면"}</span><b className={`stat-value ${tone(held)}`}>{pct(held)}</b>
+              <span className="muted">{held !== null && mine !== null ? (book.sells === 0 ? "아직 안 팔았어요"
+                : `${book.end && heldDay ? `${md(heldDay)} 종가 기준 · ` : ""}${mine >= held ? `판 덕분에 ${pct(mine - held).replace("%", "%p").replace("+", "")} 지켰어요` : `안 팔았으면 ${pct(held - mine).replace("%", "%p").replace("+", "")} 더 나았어요`}`) : ""}</span></div>
             <div className="stat"><span className="label">같은 기간 {benchName}</span><b className={`stat-value ${tone(ix)}`}>{pct(ix)}</b>
               <span className="muted">{ix !== null && mine !== null ? `시장보다 ${pct(mine - ix).replace("%", "%p")}` : "지수 일봉을 받는 중이에요"}</span></div>
           </div>
@@ -91,7 +95,7 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
               { label: "내 결과", color: COLOR.mine, values: c.mine },
               { label: benchName, color: COLOR.bench, values: c.bench, dashed: true },
             ]} />
-            <p className="chart-foot">내 결과는 남은 주식 평가액과 판 돈(수수료·세금 뺀 값)을 넣은 돈과 비교했어요. 계속 보유는 산 주식을 하나도 안 팔았을 때예요.{book.end ? " 위 숫자 세 개는 모두 다 판 날 기준이고, 선은 그 뒤 주가도 이어서 보여 줘요." : ""}</p>
+            <p className="chart-foot">내 결과는 남은 주식 평가액과 판 돈(수수료·세금 뺀 값)을 넣은 돈과 비교했어요. 계속 보유는 산 주식을 하나도 안 팔았을 때예요.{book.end ? " 내 결과와 지수는 다 판 날 기준이고, 들고 있었다면은 마지막 종가까지 이어서 셌어요." : ""}</p>
           </div>
         </>
       ) : (
