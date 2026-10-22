@@ -10,6 +10,7 @@ import type { Book } from "@/lib/books";
 import { loadBook } from "@/lib/booksData";
 import { buildCells, type Cell } from "@/lib/brief";
 import { decodeGame, score, STEPS, type Decision } from "@/lib/practice";
+import { cleanFields, reviewDefault, STATUSES, type Fields } from "@/lib/study";
 import { loadBriefInput } from "@/lib/briefData";
 import { KIND_LABEL, validColor, validDoodle, validShape, type DoodlePoint, type LevelKind, type ShapeKind } from "@/lib/drawings";
 
@@ -706,4 +707,167 @@ export async function savePractice(input: { game: string; steps: number; decisio
   );
   revalidatePath("/watch/practice");
   return row.id;
+}
+
+// ---------------------------------------------------------------- 기업 공부
+const kstToday = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+const STUDY_TICKER = /^[0-9A-Z.]{1,12}$/;
+
+async function knownName(ticker: string): Promise<string | null> {
+  const [row] = await query<{ name: string }>(
+    `SELECT name FROM (SELECT name, 1 AS k FROM holdings WHERE ticker = $1 UNION ALL SELECT name, 2 FROM watchlist WHERE ticker = $1
+       UNION ALL SELECT name, 3 FROM practice_pool WHERE ticker = $1 UNION ALL SELECT name, 4 FROM screener_stocks WHERE ticker = $1
+       UNION ALL SELECT peer_name, 5 FROM stock_peers WHERE peer_ticker = $1) t WHERE name <> '' ORDER BY k LIMIT 1`, [ticker],
+  ).catch(() => []);
+  return row?.name ?? null;
+}
+
+async function priceNow(ticker: string): Promise<number | null> {
+  const [row] = await query<{ cur: string | null }>(
+    `SELECT COALESCE((SELECT cur_price FROM held_all WHERE ticker = $1 AND cur_price > 0 LIMIT 1), (SELECT price FROM watch_quotes WHERE ticker = $1),
+       (SELECT close FROM price_history WHERE ticker = $1 ORDER BY day DESC LIMIT 1)) AS cur`, [ticker],
+  ).catch(() => []);
+  return row?.cur ? Number(row.cur) : null;
+}
+
+function refreshStudy(ticker?: string) {
+  revalidatePath("/watch/study");
+  if (ticker) revalidatePath(`/stock/${ticker}`);
+}
+
+// ＋ 새 노트: 이미 있으면 그 노트로 가요.
+export async function startStudy(form: FormData) {
+  const ticker = text(form, "ticker").toUpperCase();
+  if (!STUDY_TICKER.test(ticker)) redirect("/watch/study?bad=1");
+  const name = text(form, "name").slice(0, 60) || (await knownName(ticker)) || ticker;
+  const market = text(form, "market") === "KR" || text(form, "market") === "US" ? text(form, "market") : tickerMarket(ticker, "US");
+  await query(
+    "INSERT INTO study_notes (ticker, name, market) VALUES ($1, $2, $3) ON CONFLICT (ticker) DO NOTHING", [ticker, name, market],
+  );
+  refreshStudy(ticker);
+  redirect(`/watch/study?t=${encodeURIComponent(ticker)}`);
+}
+
+// 적은 칸 저장. finish는 B 마지막 단계의 '다 적었어요'. 다 적은 노트를 고치면 하루에 한 버전씩 남겨요.
+export async function saveStudy(input: { ticker: string; fields: Fields; step?: number; finish?: boolean }): Promise<boolean> {
+  const ticker = String(input.ticker ?? "").toUpperCase();
+  if (!STUDY_TICKER.test(ticker)) return false;
+  const fields = cleanFields(input.fields);
+  const [note] = await query<{ done: boolean; confidence: number }>("SELECT done, confidence FROM study_notes WHERE ticker = $1", [ticker]);
+  if (!note) return false;
+  const step = Number.isInteger(input.step) ? Math.max(0, Math.min(5, input.step!)) : null;
+  const finishing = Boolean(input.finish) && !note.done;
+  const today = kstToday();
+  await query(
+    `UPDATE study_notes SET fields = $2::jsonb, step = COALESCE($3, step), updated_at = now(),
+       done = done OR $4, studied_on = CASE WHEN done OR $4 THEN $5::date ELSE studied_on END,
+       review_on = CASE WHEN $4 THEN COALESCE(review_on, $6::date) ELSE review_on END,
+       status = CASE WHEN $4 AND status = '공부 중' THEN '관심' ELSE status END
+     WHERE ticker = $1`,
+    [ticker, JSON.stringify(fields), step, finishing, today, reviewDefault(today)],
+  );
+  if (note.done || finishing) {
+    const price = await priceNow(ticker);
+    const [recent] = await query<{ id: number }>(
+      "SELECT id FROM study_versions WHERE ticker = $1 AND saved_at > now() - interval '1 day' ORDER BY saved_at DESC LIMIT 1", [ticker],
+    );
+    if (recent && !finishing) {
+      await query("UPDATE study_versions SET fields = $2::jsonb, confidence = $3 WHERE id = $1", [recent.id, JSON.stringify(fields), note.confidence]);
+    } else {
+      await query("INSERT INTO study_versions (ticker, fields, confidence, price) VALUES ($1, $2::jsonb, $3, $4)", [ticker, JSON.stringify(fields), note.confidence, price]);
+    }
+  }
+  refreshStudy(ticker);
+  return true;
+}
+
+export async function setStudyMeta(input: { ticker: string; status?: string; confidence?: number; reviewOn?: string | null }) {
+  const ticker = String(input.ticker ?? "").toUpperCase();
+  if (!STUDY_TICKER.test(ticker)) return;
+  if (input.status && (STATUSES as readonly string[]).includes(input.status)) {
+    await query("UPDATE study_notes SET status = $2, updated_at = now() WHERE ticker = $1", [ticker, input.status]);
+  }
+  if (Number.isInteger(input.confidence) && input.confidence! >= 0 && input.confidence! <= 5) {
+    await query("UPDATE study_notes SET confidence = $2 WHERE ticker = $1", [ticker, input.confidence]);
+  }
+  if (input.reviewOn !== undefined) {
+    const day = input.reviewOn && /^\d{4}-\d{2}-\d{2}$/.test(input.reviewOn) ? input.reviewOn : null;
+    await query("UPDATE study_notes SET review_on = $2::date, reminded_on = NULL WHERE ticker = $1", [ticker, day]);
+  }
+  refreshStudy(ticker);
+}
+
+export async function deleteStudy(form: FormData) {
+  const ticker = text(form, "ticker").toUpperCase();
+  await query("DELETE FROM study_notes WHERE ticker = $1", [ticker]);
+  refreshStudy(ticker);
+  redirect("/watch/study");
+}
+
+// 🎲 AI 추천: 화면이 부탁을 남기면 워커가 몇 초 안에 골라서 노트를 만들어요.
+export async function requestStudyPick(market: string): Promise<string> {
+  const id = Math.random().toString(36).slice(2, 10);
+  const m = market === "KR" || market === "US" ? market : "ALL";
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ('study_pick', $1::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify({ id, market: m, status: "pending", at: new Date().toISOString() })],
+  );
+  return id;
+}
+
+export async function readStudyPick(id: string): Promise<{ status: string; ticker?: string; error?: string } | null> {
+  const [row] = await query<{ value: { id?: string; status?: string; ticker?: string; error?: string } | null }>(
+    "SELECT value FROM app_settings WHERE key = 'study_pick'",
+  ).catch(() => []);
+  const v = row?.value;
+  if (!v || v.id !== id) return null;
+  return { status: v.status ?? "pending", ticker: v.ticker, error: v.error };
+}
+
+export async function requestStudyDraft(ticker: string) {
+  const t = String(ticker ?? "").toUpperCase();
+  if (!STUDY_TICKER.test(t)) return;
+  await query("UPDATE study_notes SET ai_status = 'pending', ai_error = NULL, ai_asked_at = now() WHERE ticker = $1", [t]);
+}
+
+export async function readStudyDraft(ticker: string): Promise<{ status: string | null; ai: unknown; error: string | null } | null> {
+  const [row] = await query<{ ai_status: string | null; ai: unknown; ai_error: string | null }>(
+    "SELECT ai_status, ai, ai_error FROM study_notes WHERE ticker = $1", [String(ticker ?? "").toUpperCase()],
+  ).catch(() => []);
+  return row ? { status: row.ai_status, ai: row.ai, error: row.ai_error } : null;
+}
+
+export async function addStudyPeer(form: FormData) {
+  const ticker = text(form, "ticker").toUpperCase();
+  const peer = text(form, "peerTicker").toUpperCase();
+  if (!STUDY_TICKER.test(ticker) || !STUDY_TICKER.test(peer) || peer === ticker) return;
+  const name = text(form, "peerName").slice(0, 60) || (await knownName(peer)) || peer;
+  await query(
+    `INSERT INTO stock_peers (ticker, peer_ticker, peer_name, peer_market) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (ticker, peer_ticker) DO UPDATE SET peer_name = EXCLUDED.peer_name`,
+    [ticker, peer, name, tickerMarket(peer, "US")],
+  );
+  refreshStudy(ticker);
+}
+
+export async function removeStudyPeer(form: FormData) {
+  const ticker = text(form, "ticker").toUpperCase();
+  await query("DELETE FROM stock_peers WHERE ticker = $1 AND peer_ticker = $2", [ticker, text(form, "peerTicker").toUpperCase()]);
+  refreshStudy(ticker);
+}
+
+// ⑧ 싸다 가격에 알림: 가지고 있지 않으면 관심종목에도 넣어야 워커가 현재가를 받아 확인해요.
+export async function studyAlert(input: { ticker: string; price: number }): Promise<boolean> {
+  const ticker = String(input.ticker ?? "").toUpperCase();
+  if (!STUDY_TICKER.test(ticker) || !(input.price > 0)) return false;
+  const [note] = await query<{ name: string; market: string }>("SELECT name, market FROM study_notes WHERE ticker = $1", [ticker]);
+  if (!note) return false;
+  await query(
+    `INSERT INTO watchlist (ticker, name, market, memo) SELECT $1, $2, $3, '기업 공부'
+     WHERE NOT EXISTS (SELECT 1 FROM held_all WHERE ticker = $1) ON CONFLICT (ticker) DO NOTHING`, [ticker, note.name, note.market],
+  );
+  await insertAlert(ticker, note.name, "below", input.price, "기업 공부: 싸다 가격");
+  refreshWatch(ticker);
+  refreshStudy(ticker);
+  return true;
 }

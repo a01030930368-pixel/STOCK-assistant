@@ -30,6 +30,7 @@ class ResearchJob:
         self.codes_at: datetime | None = None
         self.tried_prices: set[str] = set()
         self.ir_seen: dict = {}
+        self.tried_study: set[str] = set()
 
     @property
     def user_agent(self) -> str:
@@ -44,10 +45,12 @@ class ResearchJob:
             self.last_fundamentals = now
             self._refresh_codes(now)
             self._fundamentals(conn, now)
+            self.tried_study.update(t for t, _, _ in db.study_unresearched(conn) + db.study_peers_unresearched(conn))
             self._calendar(conn, now)
             self._dividends(conn, now)
             self._prices(conn, now)
         self._new_prices(conn, now)
+        self._new_study(conn, now)
         # 잔고가 비어 있을 때(키움 조회 전) 지우면 안 되므로, 잔고를 받아 온 뒤에만 정리합니다.
         if db.balance_synced(conn):
             db.prune_calendar(conn)
@@ -147,10 +150,23 @@ class ResearchJob:
             self._try("SEC 티커 목록", lambda: setattr(self, "sec_ciks", research.sec_ciks(self.user_agent, self.http)))
         self.codes_at = now
 
-    def _fundamentals(self, conn: psycopg.Connection, now: datetime) -> None:
+    def _new_study(self, conn: psycopg.Connection, now: datetime) -> None:
+        # 기업 공부 노트를 새로 만들면 재무·실적·비교 기업 재무를 바로 모아 ③④ 칸이 채워지게 해요. 종목마다 한 번만.
+        fresh = [s for s in db.study_unresearched(conn) if s[0] not in self.tried_study]
+        peers = [s for s in db.study_peers_unresearched(conn) if s[0] not in self.tried_study]
+        if not fresh and not peers:
+            return
+        self.tried_study.update(s[0] for s in fresh + peers)
+        self._refresh_codes(now)
+        if fresh:
+            self._fundamentals(conn, now, fresh)
+        if peers:
+            self._fundamentals(conn, now, [], peers)
+
+    def _fundamentals(self, conn: psycopg.Connection, now: datetime, only: list | None = None, only_peers: list | None = None) -> None:
         c = self.cfg
         today = now.date()
-        watched = db.watched_stocks(conn)
+        watched = db.watched_stocks(conn) if only is None else only
         for ticker, name, market in watched:
             if market == "KR" and (corp := self.dart_codes.get(ticker)):
                 self._try(f"{name} 실적 공시", lambda: db.save_earnings(
@@ -172,7 +188,8 @@ class ResearchJob:
                     db.save_shares(conn, ticker, shares)
                 self._try(f"{ticker} 재무제표", us_statements)
         seen = set()
-        for ticker, name, market in watched + db.peer_stocks(conn):
+        peers = only_peers if only_peers is not None else db.peer_stocks(conn) if only is None else db.peers_of(conn, [t for t, _, _ in only])
+        for ticker, name, market in watched + peers:
             if ticker in seen:
                 continue
             seen.add(ticker)

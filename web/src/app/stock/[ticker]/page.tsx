@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { addPeer, addWatch, deletePeer, removeWatch } from "@/app/actions";
+import { addPeer, addWatch, deletePeer, removeWatch, startStudy } from "@/app/actions";
 import { query } from "@/lib/db";
 import { loadSummaries } from "@/lib/summaryData";
 import SummaryLine from "@/app/_components/SummaryLine";
@@ -173,6 +173,7 @@ export default async function StockPage({ params, searchParams }: { params: Prom
   const here = `/stock/${encodeURIComponent(ticker)}`;
   const peerMargin = median(peerLatest.map(operatingMargin));
   const latestMargin = financials[0] ? operatingMargin(financials[0]) : null;
+  const [studied] = await safe<{ ticker: string }>("SELECT ticker FROM study_notes WHERE ticker = $1", [ticker]);
 
   return (
     <>
@@ -185,6 +186,8 @@ export default async function StockPage({ params, searchParams }: { params: Prom
           <button type="submit" className={stock.watched ? "chip-btn on" : "chip-btn"}>{stock.watched ? "★ 관심종목" : "☆ 관심종목에 추가"}</button>
           <Link href={`/compare?t=${stock.ticker}`} className="chip-btn">⇄ 비교</Link>
           <Link href={showBrief ? here : `${here}?brief=1`} scroll={false} className={showBrief ? "chip-btn on" : "chip-btn gold"}>📄 한 장 요약</Link>
+          {studied ? <Link href={`/watch/study?t=${encodeURIComponent(stock.ticker)}`} className="chip-btn on">📒 공부 노트</Link>
+            : <button type="submit" formAction={startStudy} className="chip-btn">📒 공부 노트 쓰기</button>}
         </form>
       </div>
       {showBrief && <BriefPanel ticker={ticker} name={stock.name} market={stock.market} brief={brief ?? null} closeHref={here}
