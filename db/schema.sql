@@ -454,6 +454,7 @@ CREATE TABLE study_notes (
   ai_status    TEXT,
   ai_error     TEXT,
   ai_asked_at  TIMESTAMPTZ,
+  ai_fill      BOOLEAN NOT NULL DEFAULT false,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );

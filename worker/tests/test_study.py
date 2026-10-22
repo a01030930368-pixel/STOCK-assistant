@@ -100,3 +100,33 @@ def test_reminder_sends_once_after_9_kst():
     text = deliver.call_args.args[2]
     assert "SK하이닉스" in text and "판단 기다린다" in text and "+18.0%" in text
     db.study_reminded.assert_called_with(mock.ANY, ["000660"], date(2026, 10, 23))
+
+
+def test_parse_draft_fills_whole_note_and_keeps_web_sources():
+    d = study.parse_draft(json.dumps({
+        "sector": "반도체", "styles": ["기술주", "성장주", "주식", "기술주"], "numbersNote": "이익과 현금이 같이 늘어요",
+        "promises": [{"when": "2026.07", "said": "HBM4 하반기 양산"}, {"said": ""}], "cheap": "180,000", "pricey": -3,
+        "priceWhy": "PER 8배", "conclusion": "좋은 점\n걱정되는 점",
+    }), [{"title": "IR 자료", "url": "https://example.com/ir"}, {"title": "x", "url": "javascript:1"}, {"title": "dup", "url": "https://example.com/ir"}])
+    assert d["sector"] == "반도체" and d["styles"] == ["기술주", "성장주"]
+    assert d["promises"] == [{"when": "2026.07", "said": "HBM4 하반기 양산"}]
+    assert d["cheap"] == 180000 and d["pricey"] is None and d["conclusion"] == "좋은 점\n걱정되는 점"
+    assert d["sources"] == [{"title": "IR 자료", "url": "https://example.com/ir"}]
+    assert study.parse_draft('{"promises": "실적 발표 자료"}')["promises"] == []
+
+
+def test_draft_uses_web_search_and_falls_back_without_it():
+    w = study.StudyWorker(mock.Mock(gemini_api_key="", anthropic_api_key=""), mock.Mock())
+    w.ask, w.key, w.model = mock.Mock(return_value='{"one": "검색 없이"}'), "k", "m"
+    w.search = mock.Mock(return_value=('```json\n{"one": "검색함"}\n```', [{"title": "기사", "url": "https://n.com/a"}]))
+    with mock.patch.object(study, "db") as db:
+        db.study_context.return_value = {"price": "236,000원"}
+        w.draft(mock.Mock(), "000660", "SK하이닉스", "KR", "t0")
+        out = db.finish_study_draft.call_args.args[2]
+        assert out["one"] == "검색함" and out["searched"] and out["sources"][0]["url"] == "https://n.com/a"
+        assert "지금 주가: 236,000원" in w.search.call_args.args[1]
+        w.ask.assert_not_called()
+        w.search.side_effect = RuntimeError("400")
+        w.draft(mock.Mock(), "000660", "SK하이닉스", "KR", "t1")
+        out = db.finish_study_draft.call_args.args[2]
+        assert out["one"] == "검색 없이" and out["searched"] is False

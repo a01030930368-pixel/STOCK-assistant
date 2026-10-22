@@ -7,19 +7,19 @@ import { addStudyPeer, deleteStudy, readStudyDraft, removeStudyPeer, requestStud
 import { usd, won } from "@/lib/format";
 import { money } from "@/lib/statements";
 import {
-  applyDraft, bars, CHECKS, filled, pastLabel, pastSelf, RESULTS, splitOf, STATUSES, STEPS, VERDICTS, verdictLabel,
+  applyDraft, bars, CHECKS, draftPromises, filled, pastLabel, pastSelf, RESULTS, splitOf, STATUSES, STEPS, STYLES, VERDICTS, verdictLabel,
   type Draft, type Fields, type Numbers, type PeerLine, type Pick, type Version,
 } from "@/lib/study";
 
 export type NoteData = {
   ticker: string; name: string; market: "KR" | "US"; status: string; confidence: number; fields: Fields; step: number; done: boolean;
   studiedOn: string | null; reviewOn: string | null; source: string; pick: Pick | null; ai: Draft | null; aiStatus: string | null; aiError: string | null;
-  price: number | null; numbers: Numbers | null; peers: PeerLine[]; versions: Version[]; events: { day: string; title: string }[];
+  price: number | null; numbers: Numbers | null; knownSector: string | null; peers: PeerLine[]; versions: Version[]; events: { day: string; title: string }[];
   filings: { day: string; title: string }[]; value: string | null; alerts: number[]; today: string;
 };
 
 type Set = (f: Fields) => void;
-const AI_PARTS = [["one", "model"], ["events"], [], ["moat"], ["risks"], []];
+const AI_PARTS = [["kind", "one", "model"], ["promises", "events"], ["numbers"], ["moat"], ["risks"], ["price", "conclusion", "sources"]];
 const dot = (d: string) => d.replaceAll("-", ".");
 const pct = (v: number | null, sign = false) => (v === null ? "-" : `${sign && v > 0 ? "+" : ""}${v}%`);
 
@@ -30,7 +30,7 @@ export default function StudyNote({ note }: { note: NoteData }) {
   const [status, setStatus] = useState(note.status);
   const [confidence, setConfidence] = useState(note.confidence);
   const [reviewOn, setReviewOn] = useState(note.reviewOn ?? "");
-  const [ai, setAi] = useState({ draft: note.ai, status: note.aiStatus, error: note.aiError });
+  const [ai, setAi] = useState({ draft: note.ai, status: note.aiStatus, error: note.aiError, fill: false });
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "fail">("");
   const money_ = (v: number) => (note.market === "US" ? usd(v) : `${won(v)}원`);
 
@@ -39,14 +39,17 @@ export default function StudyNote({ note }: { note: NoteData }) {
     if (ai.status !== "pending") return;
     const timer = setTimeout(async () => {
       const r = await readStudyDraft(note.ticker).catch(() => null);
-      if (r) setAi({ draft: (r.ai as Draft) ?? null, status: r.status, error: r.error });
+      if (r?.filled) router.refresh();
+      else if (r) setAi((a) => ({ ...a, draft: (r.ai as Draft) ?? null, status: r.status, error: r.error }));
     }, 3000);
     return () => clearTimeout(timer);
-  }, [ai, note.ticker]);
+  }, [ai, note.ticker, router]);
 
-  async function askAi() {
-    await requestStudyDraft(note.ticker);
-    setAi((a) => ({ ...a, status: "pending", error: null }));
+  async function askAi(fill = false) {
+    // 전부 채우기는 지금 적은 칸을 먼저 저장해 두고, 초안은 빈 칸에만 들어가요.
+    if (fill) await save(fields);
+    await requestStudyDraft(note.ticker, fill);
+    setAi((a) => ({ ...a, status: "pending", error: null, fill }));
   }
   async function save(next: Fields, extra: { step?: number; finish?: boolean } = {}) {
     setSaving("saving");
@@ -88,8 +91,9 @@ export default function StudyNote({ note }: { note: NoteData }) {
         <span className="study-saving">{saving === "saving" ? "저장 중…" : saving === "saved" ? "저장했어요" : saving === "fail" ? "저장 못 했어요" : ""}</span>
       </div>
 
+      <KindRow f={fields} known={note.knownSector} draft={ai.draft} onSave={async (next) => { setFields(next); await save(next); }} />
       {note.pick && <PickCard pick={note.pick} />}
-      <AiBar status={ai.status} error={ai.error} has={Boolean(ai.draft)} onAsk={askAi} />
+      <AiBar status={ai.status} error={ai.error} has={Boolean(ai.draft)} fill={ai.fill} searched={ai.draft?.searched} onAsk={askAi} />
 
       {note.done ? (
         <OnePage note={note} fields={fields} setFields={setFields} save={save} draft={ai.draft} money_={money_} />
@@ -118,15 +122,62 @@ function PickCard({ pick }: { pick: Pick }) {
   );
 }
 
-function AiBar({ status, error, has, onAsk }: { status: string | null; error: string | null; has: boolean; onAsk: () => void }) {
+function AiBar({ status, error, has, fill, searched, onAsk }: {
+  status: string | null; error: string | null; has: boolean; fill: boolean; searched?: boolean; onAsk: (fill?: boolean) => void;
+}) {
   if (status === "none") return null;
   return (
     <div className="study-aibar">
-      {status === "pending" ? <span className="muted">✨ AI가 사업보고서·뉴스를 보고 초안을 쓰는 중이에요…</span> : (
-        <button type="button" className="chip-btn" onClick={onAsk}>{has ? "✨ AI 초안 다시 받기" : "✨ AI 초안 받기"}</button>
+      {status === "pending" ? (
+        <span className="muted">{fill ? "🤖 AI가 검색해서 노트 전체를 채우는 중이에요… 1~2분 걸려요. 다른 화면에 가도 돼요." : "✨ AI가 검색해 보고 초안을 쓰는 중이에요…"}</span>
+      ) : (
+        <>
+          <button type="button" onClick={() => onAsk(true)}>🤖 AI가 전부 채우기</button>
+          <button type="button" className="chip-btn" onClick={() => onAsk(false)}>{has ? "✨ 초안 다시 받기" : "✨ 칸마다 초안만 보기"}</button>
+        </>
       )}
       {status === "error" && <span className="practice-warn practice-small">초안을 못 받았어요{error ? `: ${error}` : ""}</span>}
-      {has && status !== "pending" && <span className="muted practice-small">초안은 칸마다 ✨로 보여요. 참고용이라 틀릴 수 있으니 확인하고 고쳐 써 주세요.</span>}
+      {status !== "pending" && (
+        <span className="muted practice-small">
+          {has ? `초안은 칸마다 ✨로 보여요${searched === false ? " (이번엔 웹 검색 없이 썼어요)" : ""}. ` : ""}
+          전부 채우기는 빈 칸에만 넣고, 판단(산다·기다린다·안 산다)은 직접 골라요. AI 글은 틀릴 수 있어요.
+        </span>
+      )}
+    </div>
+  );
+}
+
+// 업종 · 주식 유형: 노트 맨 위 한 줄. 업종은 비어 있으면 증권사 분류를 보여 줘요.
+function KindRow({ f, known, draft, onSave }: { f: Fields; known: string | null; draft: Draft | null; onSave: (f: Fields) => Promise<void> }) {
+  const [edit, setEdit] = useState(false);
+  const [work, setWork] = useState(f);
+  const sector = f.sector || known || "";
+  if (edit) {
+    const toggle = (x: string) => setWork({ ...work, styles: work.styles.includes(x) ? work.styles.filter((y) => y !== x) : [...work.styles, x].slice(-3) });
+    return (
+      <div className="panel study-kind editing">
+        <label className="study-lab">업종<input value={work.sector} onChange={(e) => setWork({ ...work, sector: e.target.value })} placeholder={known ?? "예: 반도체, 2차전지, 인터넷"} /></label>
+        <div className="study-lab">주식 유형 <span className="muted">3개까지</span></div>
+        <div className="study-styles">
+          {STYLES.map((x) => <button key={x} type="button" className={`chip-btn${work.styles.includes(x) ? " on" : ""}`} aria-pressed={work.styles.includes(x)} onClick={() => toggle(x)}>{x}</button>)}
+        </div>
+        {draft && (draft.sector || draft.styles?.length) ? (
+          <p className="muted practice-small">✨ AI 생각: {[draft.sector, ...(draft.styles ?? [])].filter(Boolean).join(" · ")}
+            {" "}<button type="button" className="chip-btn" onClick={() => setWork(applyDraft(work, draft, ["kind"]))}>빈 칸에 넣기</button></p>
+        ) : null}
+        <div className="study-edit-acts">
+          <button type="button" onClick={async () => { await onSave(work); setEdit(false); }}>저장</button>
+          <button type="button" className="soft" onClick={() => setEdit(false)}>취소</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="study-kind">
+      <span className="study-lab">업종</span> {sector ? <b>{sector}</b> : <span className="muted">-</span>}
+      {!f.sector && known && <span className="muted practice-small"> (증권사 분류)</span>}
+      <span className="study-lab">유형</span> {f.styles.length ? f.styles.map((x) => <span key={x} className="study-tag">{x}</span>) : <span className="muted">-</span>}
+      <button type="button" className="chip-btn" onClick={() => { setWork(f); setEdit(true); }}>✎ 고치기</button>
     </div>
   );
 }
@@ -190,18 +241,26 @@ function Parts({ step, note, f, set, money_ }: { step: number; note: NoteData; f
 
 function DraftBox({ draft, parts, onUse }: { draft: Draft; parts: string[]; onUse: () => void }) {
   const items: ReactNode[] = [];
+  if (parts.includes("kind") && (draft.sector || draft.styles?.length)) items.push(<li key="kind"><b>업종·유형</b> {[draft.sector, ...(draft.styles ?? [])].filter(Boolean).join(" · ")}</li>);
   if (parts.includes("one") && draft.one) items.push(<li key="one"><b>한 줄</b> {draft.one}</li>);
   if (parts.includes("model")) {
     if (draft.lines?.length) items.push(<li key="lines"><b>매출 비중</b> {draft.lines.map((l) => `${l.name} 약 ${l.pct}%`).join(" · ")}</li>);
     if (draft.customers) items.push(<li key="c"><b>주요 고객</b> {draft.customers}</li>);
     if (draft.power) items.push(<li key="p"><b>가격 결정력</b> {draft.power}{draft.powerWhy ? ` · ${draft.powerWhy}` : ""}</li>);
   }
-  if (parts.includes("events")) {
-    if (draft.promises) items.push(<li key="pr"><b>경영진 약속 찾을 곳</b> {draft.promises}</li>);
-    draft.events?.forEach((e, i) => items.push(<li key={`e${i}`}><b>{e.when}</b> {e.text}</li>));
+  if (parts.includes("promises")) {
+    if (typeof draft.promises === "string" && draft.promises) items.push(<li key="pr"><b>경영진 약속 찾을 곳</b> {draft.promises}</li>);
+    draftPromises(draft).forEach((p, i) => items.push(<li key={`p${i}`}><b>{p.when || "최근"}</b> “{p.said}”</li>));
   }
+  if (parts.includes("events")) draft.events?.forEach((e, i) => items.push(<li key={`e${i}`}><b>{e.when}</b> {e.text}</li>));
+  if (parts.includes("numbers") && draft.numbersNote) items.push(<li key="num"><b>숫자 읽기</b> {draft.numbersNote}</li>);
   if (parts.includes("moat") && draft.moat) items.push(<li key="moat"><b>강점</b> {draft.moat}</li>);
   if (parts.includes("risks")) draft.risks?.forEach((r, i) => items.push(<li key={`r${i}`}>{r.text}{r.signal && <span className="muted"> → 신호: {r.signal}</span>}</li>));
+  if (parts.includes("price") && (draft.cheap || draft.pricey || draft.priceWhy)) items.push(
+    <li key="price"><b>가격</b> {[draft.cheap && `싸다 ${draft.cheap.toLocaleString()} 이하`, draft.pricey && `비싸다 ${draft.pricey.toLocaleString()} 이상`].filter(Boolean).join(" · ")}{draft.priceWhy && <span className="muted"> · {draft.priceWhy}</span>}</li>,
+  );
+  if (parts.includes("conclusion") && draft.conclusion) items.push(<li key="con" className="study-text"><b>정리</b> {draft.conclusion}</li>);
+  if (parts.includes("sources") && draft.sources?.length) items.push(<li key="src"><b>찾아본 자료</b> {draft.sources.map((x) => x.title).join(" · ")}</li>);
   if (items.length === 0) return null;
   return (
     <div className="study-draft">
@@ -255,14 +314,14 @@ function OnePage({ note, fields, setFields, save, draft, money_ }: {
             ) : empty
           ), (w, s) => <ModelEd f={w} set={s} />, { parts: ["model"] })}
           {sec("numbers", "③", "숫자가 뒷받침하나", <><NumbersView n={note.numbers} market={note.market} />{f.numbersNote && <p className="study-text study-mine">{f.numbersNote}</p>}</>,
-            (w, s) => <><NumbersView n={note.numbers} market={note.market} /><NumbersEd f={w} set={s} /></>, { auto: true })}
+            (w, s) => <><NumbersView n={note.numbers} market={note.market} /><NumbersEd f={w} set={s} /></>, { auto: true, parts: ["numbers"] })}
           {sec("peers", "④", "경쟁사와 비교", <><PeersView note={note} />{f.moat ? <p className="study-text study-mine"><span className="study-lab">이 회사만의 강점</span> {f.moat}</p> : null}</>,
             (w, s) => <><PeersView note={note} edit /><MoatEd f={w} set={s} /></>, { auto: true, parts: ["moat"] })}
           {sec("promises", "⑤", "경영진이 한 말 · 지켰나", f.promises.length ? (
             <ul className="study-rows">{f.promises.map((p, i) => (
               <li key={i}><span className="muted">{p.when}</span> “{p.said}” <span className={`study-res r-${p.result}`}>{RESULTS.find((r) => r.key === p.result)?.label}</span></li>
             ))}</ul>
-          ) : empty, (w, s) => <PromisesEd f={w} set={s} filings={note.filings} />)}
+          ) : empty, (w, s) => <PromisesEd f={w} set={s} filings={note.filings} />, { parts: ["promises"] })}
         </div>
         <div className="study-col">
           {sec("risks", "⑦", "내가 틀릴 수 있는 이유", f.risks.some((r) => r.text) ? (
@@ -273,16 +332,17 @@ function OnePage({ note, fields, setFields, save, draft, money_ }: {
           {sec("events", "⑥", "앞으로 일어날 일", f.events.length ? (
             <ul className="study-rows">{f.events.map((e, i) => <li key={i}>{e.day && <span className="muted">{dot(e.day)} </span>}{e.text}{e.day && e.day >= note.today && <span className="study-tag">일정에 표시</span>}</li>)}</ul>
           ) : empty, (w, s) => <EventsEd f={w} set={s} app={note.events} />, { parts: ["events"] })}
-          {sec("price", "⑧", "내 가격 생각", f.cheap || f.pricey ? <PriceView f={f} note={note} money_={money_} /> : empty, (w, s) => <PriceEd f={w} set={s} note={note} money_={money_} />)}
+          {sec("price", "⑧", "내 가격 생각", f.cheap || f.pricey || f.priceWhy ? <PriceView f={f} note={note} money_={money_} /> : empty, (w, s) => <PriceEd f={w} set={s} note={note} money_={money_} />, { parts: ["price"] })}
           {sec("conclusion", "⑨", "결론", f.conclusion || f.verdict ? (
             <>
               {f.conclusion && <p className="study-text">{f.conclusion}</p>}
-              {f.verdict && <p className="study-text"><span className="study-lab">판단</span> <b className="study-verdict">{verdictLabel(f.verdict)}</b></p>}
+              {f.verdict ? <p className="study-text"><span className="study-lab">판단</span> <b className="study-verdict">{verdictLabel(f.verdict)}</b></p>
+                : <p className="muted practice-small">판단(산다·기다린다·안 산다)은 ✎ 고치기에서 직접 골라 주세요.</p>}
             </>
-          ) : empty, (w, s) => <ConclusionEd f={w} set={s} />)}
+          ) : empty, (w, s) => <ConclusionEd f={w} set={s} />, { parts: ["conclusion"] })}
           {sec("sources", "⑩", "자료·출처", f.sources.length ? (
             <ul className="study-rows">{f.sources.map((x, i) => <li key={i}>{x.url ? <a href={x.url} target="_blank" rel="noreferrer">{x.title || x.url}</a> : x.title}</li>)}</ul>
-          ) : empty, (w, s) => <SourcesEd f={w} set={s} />)}
+          ) : empty, (w, s) => <SourcesEd f={w} set={s} />, { parts: ["sources"] })}
           {past && (
             <div className="panel study-past">
               <b>🕰 {pastLabel(past)}</b>

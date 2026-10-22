@@ -10,7 +10,7 @@ import type { Book } from "@/lib/books";
 import { loadBook } from "@/lib/booksData";
 import { buildCells, type Cell } from "@/lib/brief";
 import { decodeGame, score, STEPS, type Decision } from "@/lib/practice";
-import { cleanFields, reviewDefault, STATUSES, type Fields } from "@/lib/study";
+import { ALL_PARTS, applyDraft, cleanFields, reviewDefault, STATUSES, type Draft, type Fields } from "@/lib/study";
 import { loadBriefInput } from "@/lib/briefData";
 import { KIND_LABEL, validColor, validDoodle, validShape, type DoodlePoint, type LevelKind, type ShapeKind } from "@/lib/drawings";
 
@@ -824,17 +824,29 @@ export async function readStudyPick(id: string): Promise<{ status: string; ticke
   return { status: v.status ?? "pending", ticker: v.ticker, error: v.error };
 }
 
-export async function requestStudyDraft(ticker: string) {
+// fill이면 초안이 왔을 때 빈 칸에 전부 넣고 한 장 노트로 마쳐요(settleStudyFill).
+export async function requestStudyDraft(ticker: string, fill = false) {
   const t = String(ticker ?? "").toUpperCase();
   if (!STUDY_TICKER.test(t)) return;
-  await query("UPDATE study_notes SET ai_status = 'pending', ai_error = NULL, ai_asked_at = now() WHERE ticker = $1", [t]);
+  await query("UPDATE study_notes SET ai_status = 'pending', ai_error = NULL, ai_asked_at = now(), ai_fill = $2 WHERE ticker = $1", [t, Boolean(fill)]);
 }
 
-export async function readStudyDraft(ticker: string): Promise<{ status: string | null; ai: unknown; error: string | null } | null> {
+// 🤖 전부 채우기를 부탁했고 초안이 왔으면 한 번만 채워요. 화면을 열 때와 기다리는 중에 불러요.
+export async function settleStudyFill(ticker: string): Promise<boolean> {
+  const t = String(ticker ?? "").toUpperCase();
+  const [row] = await query<{ fields: unknown; ai: Draft | null }>(
+    "UPDATE study_notes SET ai_fill = false WHERE ticker = $1 AND ai_fill AND ai_status = 'done' AND ai IS NOT NULL RETURNING fields, ai", [t],
+  ).catch(() => []);
+  if (!row?.ai) return false;
+  return saveStudy({ ticker: t, fields: applyDraft(cleanFields(row.fields), row.ai, ALL_PARTS), finish: true });
+}
+
+export async function readStudyDraft(ticker: string): Promise<{ status: string | null; ai: unknown; error: string | null; filled: boolean } | null> {
+  const filled = await settleStudyFill(ticker);
   const [row] = await query<{ ai_status: string | null; ai: unknown; ai_error: string | null }>(
     "SELECT ai_status, ai, ai_error FROM study_notes WHERE ticker = $1", [String(ticker ?? "").toUpperCase()],
   ).catch(() => []);
-  return row ? { status: row.ai_status, ai: row.ai, error: row.ai_error } : null;
+  return row ? { status: row.ai_status, ai: row.ai, error: row.ai_error, filled } : null;
 }
 
 export async function addStudyPeer(form: FormData) {

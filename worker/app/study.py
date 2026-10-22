@@ -79,21 +79,30 @@ JSON 하나만 출력해:
  "first": ["이 회사를 공부할 때 먼저 확인할 질문 (40자 안쪽)", ...3개],
  "peers": [{"ticker": "같은 업종 경쟁사 코드(국내 6자리, 미국 티커)", "name": "이름", "market": "KR 또는 US"}, ...최대 3개]}"""
 
-DRAFT_SYSTEM = """너는 한국 개인투자자의 기업 공부 노트에 참고용 초안을 쓰는 도우미야.
-사용자가 이 초안을 보고 직접 확인해서 고쳐 쓸 거야. 확실하지 않은 건 "확인 필요"라고 붙여.
-주어진 자료에 없는 숫자는 지어내지 마. 매출 비중처럼 대략 아는 건 "약"을 붙여.
-"사세요", "파세요" 같은 매수·매도 권유는 절대 쓰지 마.
+STYLES = ("기술주", "성장주", "가치주", "배당주", "경기민감주", "경기방어주", "우량주", "턴어라운드", "테마주")
+
+DRAFT_SYSTEM = """너는 한국 개인투자자의 기업 공부 노트를 대신 채워 주는 조사 도우미야.
+웹 검색으로 사업보고서·실적 발표·IR 자료·믿을 만한 기사를 찾아보고, 아래 자료와 함께 노트 전체를 채워.
+사용자가 나중에 확인할 수 있게, 확실하지 않은 건 "확인 필요"라고 붙여.
+숫자는 자료나 검색 결과에서 확인한 것만 쓰고, 대략 아는 건 "약"을 붙여. 모르면 빈칸("")이나 빈 목록으로 둬.
+"사세요", "파세요" 같은 매수·매도 권유는 절대 쓰지 마. 가격 생각은 PER·PBR 같은 근거로 "이 정도면 싸다고 볼 만하다" 수준으로만 써.
 쉬운 한국어 존댓말(~예요, ~어요)로, 짧게 써.
-JSON 하나만 출력해:
-{"one": "이 회사는 ___을 ___에게 팔아 돈을 번다 형식의 한 줄 (60자 안쪽)",
+마지막에 JSON 하나만 출력해(설명 글 없이):
+{"sector": "업종 (예: 반도체, 2차전지, 인터넷, 은행)",
+ "styles": ["주식 유형 1~3개, 다음 중에서만: 기술주, 성장주, 가치주, 배당주, 경기민감주, 경기방어주, 우량주, 턴어라운드, 테마주"],
+ "one": "이 회사는 ___을 ___에게 팔아 돈을 번다 형식의 한 줄 (60자 안쪽)",
  "lines": [{"name": "사업 이름", "pct": 매출 비중 숫자}, ...최대 5개],
  "customers": "주요 고객 (40자 안쪽)",
  "power": "강함 또는 보통 또는 약함", "powerWhy": "가격을 올릴 힘이 그런 이유 (50자 안쪽)",
+ "numbersNote": "최근 매출·이익·현금흐름 숫자를 보고 읽을 점 (100자 안쪽)",
  "moat": "경쟁사가 쉽게 못 따라 하는 이 회사만의 강점 (60자 안쪽)",
+ "promises": [{"when": "2026.07 처럼 연.월", "said": "경영진이 최근 공개적으로 약속·제시한 목표"}, ...최대 3개],
  "events": [{"when": "언제(예: 2027년 1월 말)", "text": "주가에 중요한 앞으로의 일"}, ...최대 3개],
  "risks": [{"text": "이 회사에 투자하면 틀릴 수 있는 이유", "signal": "이게 보이면 다시 생각할 신호"}, ...3개],
- "promises": "경영진이 최근 약속한 것을 어디서 찾으면 되는지 한 줄 (예: 3분기 실적 발표 자료의 내년 목표)",
- "questions": ["공부하면서 스스로 답해 볼 질문", ...3개]}"""
+ "cheap": 싸다고 볼 만한 주가 숫자 또는 null, "pricey": 비싸다고 볼 만한 주가 숫자 또는 null,
+ "priceWhy": "그 가격의 근거 (예: 지난 5년 PER 8~15배, 지금 12배) (80자 안쪽)",
+ "conclusion": "공부한 내용을 3~5줄로 정리. 좋은 점과 걱정되는 점을 같이 (250자 안쪽)",
+ "questions": ["사용자가 스스로 더 확인해 볼 질문", ...3개]}"""
 
 
 def _s(v, limit: int) -> str:
@@ -143,12 +152,24 @@ def fallback_pick(sample: list[Candidate], rand: random.Random) -> tuple[Candida
     return c, [f"{describe(c)}예요."], ["이 회사는 무엇을 팔아 돈을 버나요?", "최근 실적이 주가 흐름을 뒷받침하나요?", "경쟁사보다 나은 점은 뭔가요?"], []
 
 
-def parse_draft(text: str) -> dict:
+def _price(v) -> float | None:
+    try:
+        n = float(str(v).replace(",", "").replace("$", "").replace("원", "").strip())
+    except (TypeError, ValueError):
+        return None
+    return round(n, 2) if n > 0 else None
+
+
+def parse_draft(text: str, sources: list[dict] | None = None) -> dict:
     d = _json(text)
     out: dict = {
+        "sector": _s(d.get("sector"), 30),
+        "styles": [x for x in dict.fromkeys(_s(v, 10) for v in d.get("styles") or []) if x in STYLES][:3],
         "one": _s(d.get("one"), 120), "customers": _s(d.get("customers"), 80),
         "power": d.get("power") if d.get("power") in ("강함", "보통", "약함") else "", "powerWhy": _s(d.get("powerWhy"), 100),
-        "moat": _s(d.get("moat"), 120), "promises": _s(d.get("promises"), 120),
+        "numbersNote": _s(d.get("numbersNote"), 200), "moat": _s(d.get("moat"), 120),
+        "cheap": _price(d.get("cheap")), "pricey": _price(d.get("pricey")), "priceWhy": _s(d.get("priceWhy"), 160),
+        "conclusion": str(d.get("conclusion") or "").strip()[:500],
     }
     lines = []
     for x in d.get("lines") or []:
@@ -159,9 +180,19 @@ def parse_draft(text: str) -> dict:
                 pct = 0.0
             lines.append({"name": _s(x.get("name"), 30), "pct": round(pct)})
     out["lines"] = lines[:5]
+    promises = d.get("promises")
+    out["promises"] = [{"when": _s(x.get("when"), 20), "said": _s(x.get("said"), 120)}
+                       for x in promises if isinstance(x, dict) and _s(x.get("said"), 120)][:3] if isinstance(promises, list) else []
     out["events"] = [{"when": _s(x.get("when"), 30), "text": _s(x.get("text"), 80)} for x in d.get("events") or [] if isinstance(x, dict) and _s(x.get("text"), 80)][:3]
     out["risks"] = [{"text": _s(x.get("text"), 80), "signal": _s(x.get("signal"), 80)} for x in d.get("risks") or [] if isinstance(x, dict) and _s(x.get("text"), 80)][:3]
     out["questions"] = [_s(x, 80) for x in d.get("questions") or [] if _s(x, 80)][:3]
+    seen, out["sources"] = set(), []
+    for x in sources or []:
+        url = str(x.get("url") or "")
+        if url.startswith(("http://", "https://")) and url not in seen:
+            seen.add(url)
+            out["sources"].append({"title": _s(x.get("title"), 80) or url[:80], "url": url[:500]})
+    out["sources"] = out["sources"][:6]
     return out
 
 
@@ -169,8 +200,16 @@ def draft_prompt(name: str, market: str, ctx: dict) -> str:
     lines = [f"회사: {name} ({'국내' if market == 'KR' else '미국'})"]
     if ctx.get("pick"):
         lines.append("요즘 주가 흐름: " + " / ".join(ctx["pick"]))
+    if ctx.get("price"):
+        lines.append(f"지금 주가: {ctx['price']}")
+    if ctx.get("sector"):
+        lines.append(f"증권사 업종 분류: {ctx['sector']}")
     if ctx.get("money"):
         lines.append("최근 연간 실적: " + "; ".join(ctx["money"]))
+    if ctx.get("cfo"):
+        lines.append("영업현금흐름: " + "; ".join(ctx["cfo"]))
+    if ctx.get("peers"):
+        lines.append("사용자가 넣은 경쟁사: " + ", ".join(ctx["peers"]))
     if ctx.get("themes"):
         lines.append("속한 테마: " + ", ".join(ctx["themes"]))
     if ctx.get("news"):
@@ -186,6 +225,7 @@ class StudyWorker:
     def __init__(self, cfg: Config, http: httpx.Client, rand: random.Random | None = None):
         self.http = http
         self.key, self.model, self.ask = ai.text_asker(cfg)
+        self.search = ai.search_asker(cfg)
         self.rand = rand or random.Random()
 
     def run_once(self, conn: psycopg.Connection) -> bool:
@@ -233,7 +273,17 @@ class StudyWorker:
             db.finish_study_draft(conn, ticker, None, "none", "AI 키가 없어요", asked_at)
             return
         try:
-            out = parse_draft(self.ask(DRAFT_SYSTEM, draft_prompt(name, market, db.study_context(conn, ticker, market)), self.key, self.model, self.http, 2048))
+            prompt = draft_prompt(name, market, db.study_context(conn, ticker, market))
+            out = None
+            if self.search:
+                try:
+                    out = parse_draft(*self.search(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096))
+                    out["searched"] = True
+                except Exception as e:
+                    log.warning("%s 기업 공부 검색 초안 실패, 검색 없이 다시 써요: %s", name, e)
+            if out is None:
+                out = parse_draft(self.ask(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096))
+                out["searched"] = False
             out["model"] = self.model
             out["at"] = datetime.now(timezone.utc).isoformat()
             db.finish_study_draft(conn, ticker, out, "done", None, asked_at)

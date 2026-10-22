@@ -136,6 +136,63 @@ def gemini_text(system: str, prompt: str, key: str, model: str, http: httpx.Clie
     raise RuntimeError("Gemini가 붐벼 다음에 다시 시도합니다: " + ", ".join(errors))
 
 
+def _gemini_search(system: str, prompt: str, key: str, model: str, http: httpx.Client, max_tokens: int) -> tuple[str, list[dict]]:
+    # 구글 검색을 켜면 JSON 형식 강제를 같이 못 써요. 글에서 JSON을 찾아 읽습니다.
+    errors = []
+    for m in dict.fromkeys((model, *GEMINI_FALLBACKS)):
+        res = http.post(
+            f"{GEMINI_API}{m}:generateContent",
+            headers={"x-goog-api-key": key, "content-type": "application/json"},
+            json={
+                "systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "tools": [{"google_search": {}}],
+                "generationConfig": {"maxOutputTokens": max(max_tokens, GEMINI_MIN_TOKENS)},
+            },
+            timeout=120,
+        )
+        if res.status_code in RETRY_STATUS:
+            errors.append(f"{m} {res.status_code}")
+            continue
+        if res.status_code >= 400:
+            raise RuntimeError(f"Gemini 검색 오류 {res.status_code}: {res.text[:160]}")
+        cands = res.json().get("candidates") or []
+        if not cands:
+            return "", []
+        parts = (cands[0].get("content") or {}).get("parts") or []
+        chunks = (cands[0].get("groundingMetadata") or {}).get("groundingChunks") or []
+        sources = [{"title": (c.get("web") or {}).get("title", ""), "url": (c.get("web") or {}).get("uri", "")} for c in chunks if c.get("web")]
+        return "".join(p.get("text", "") for p in parts if not p.get("thought")), sources
+    raise RuntimeError("Gemini가 붐벼 다음에 다시 시도합니다: " + ", ".join(errors))
+
+
+def _claude_search(system: str, prompt: str, key: str, model: str, http: httpx.Client, max_tokens: int) -> tuple[str, list[dict]]:
+    res = http.post(
+        API,
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+        json={"model": model, "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": prompt}],
+              "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]},
+        timeout=180,
+    )
+    if res.status_code >= 400:
+        raise RuntimeError(f"Claude 검색 오류 {res.status_code}: {res.text[:120]}")
+    blocks = res.json().get("content", [])
+    sources = [{"title": r.get("title", ""), "url": r.get("url", "")}
+               for b in blocks if b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list) for r in b["content"]]
+    # 검색 뒤에 쓴 마지막 글에 JSON이 있어요.
+    texts = [b.get("text", "") for b in blocks if b.get("type") == "text"]
+    return "".join(texts), sources
+
+
+def search_asker(cfg):
+    """웹 검색을 켜고 묻는 함수(system, prompt, key, model, http, max_tokens) -> (글, 출처 목록). 키가 없으면 None."""
+    if cfg.gemini_api_key:
+        return _gemini_search
+    if cfg.anthropic_api_key:
+        return _claude_search
+    return None
+
+
 def ask_gemini(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
     return parse(gemini_text(SYSTEM, prompt, key, model, http))
 

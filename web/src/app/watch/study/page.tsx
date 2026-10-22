@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { startStudy } from "@/app/actions";
+import { settleStudyFill, startStudy } from "@/app/actions";
 import { query } from "@/lib/db";
 import { loadBriefInput } from "@/lib/briefData";
 import { valueCell } from "@/lib/brief";
@@ -21,6 +21,8 @@ type NoteRow = {
 
 export default async function StudyPage({ searchParams }: { searchParams: Promise<{ t?: string; step?: string; bad?: string }> }) {
   const sp = await searchParams;
+  // 🤖 전부 채우기 초안이 기다리는 동안 도착했으면 지금 채워요.
+  if (sp.t) await settleStudyFill(sp.t).catch(() => false);
   const rows = await safe<NoteRow>(
     `SELECT ticker, name, market, status, confidence, fields, step, done, to_char(studied_on, 'YYYY-MM-DD') AS studied_on,
        to_char(review_on, 'YYYY-MM-DD') AS review_on, source, pick, ai, ai_status, ai_error, to_char(updated_at AT TIME ZONE 'Asia/Seoul', 'MM.DD') AS updated
@@ -31,7 +33,7 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
     const f = cleanFields(r.fields);
     return {
       ticker: r.ticker, name: r.name, status: r.status, updated: r.updated, done: r.done, ai: r.source === "ai",
-      progress: r.done ? null : `${filled(f)}/${CHECKS.length}`, verdict: verdictLabel(f.verdict),
+      progress: r.done ? null : `${filled(f)}/${CHECKS.length}`, verdict: verdictLabel(f.verdict), kind: [f.sector, ...f.styles].filter(Boolean).join(" · "),
       due: Boolean(r.review_on && r.review_on <= today && r.status !== "탈락"),
     };
   });
@@ -61,6 +63,7 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
     const alerts = await safe<{ price: string }>(
       "SELECT price FROM alerts WHERE ticker = $1 AND kind = 'custom' AND direction = 'below' AND active AND triggered_at IS NULL", [t],
     );
+    const [sector] = await safe<{ sector: string }>("SELECT sector FROM stock_sectors WHERE ticker = $1 AND sector <> ''", [t]);
     const value = valueCell(input);
     // 내 회사 줄은 ③과 같은 재무제표 숫자로 맞춰요(재무 요약과 기준이 조금 달라서).
     const numbers = numbersOf(input.statements);
@@ -76,7 +79,7 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
       ticker: t, name: picked.name, market: picked.market, status: picked.status, confidence: picked.confidence, fields: cleanFields(picked.fields, true),
       step: Math.max(0, Math.min(5, Number(sp.step ?? picked.step) || 0)), done: picked.done, studiedOn: picked.studied_on, reviewOn: picked.review_on,
       source: picked.source, pick: picked.pick, ai: picked.ai, aiStatus: picked.ai_status, aiError: picked.ai_error,
-      price: input.price, numbers,
+      price: input.price, numbers, knownSector: sector?.sector ?? null,
       peers: [mine, ...peers.map((p) => peerLine(p.peer_ticker, p.peer_name, fin))],
       versions, events, filings, value: value.signal === "n" ? null : value.text, alerts: alerts.map((a) => Number(a.price)), today,
     };
