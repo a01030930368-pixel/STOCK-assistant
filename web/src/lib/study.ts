@@ -234,3 +234,19 @@ export function applyDraft(f: Fields, d: Draft, parts: string[]): Fields {
   if (parts.includes("sources") && out.sources.length === 0 && d.sources?.length) out.sources = d.sources.map((x) => ({ ...x }));
   return out;
 }
+
+// 모아 보기: 업종마다 묶어요. 업종을 안 적었으면 증권사 분류, 그것도 없으면 "업종 미정". 많은 업종부터.
+export const NO_SECTOR = "업종 미정";
+export function groupBySector<T extends { sector: string }>(items: T[]): { sector: string; items: T[] }[] {
+  const map = new Map<string, T[]>();
+  for (const it of items) {
+    const key = it.sector.trim() || NO_SECTOR;
+    map.set(key, [...(map.get(key) ?? []), it]);
+  }
+  return [...map.entries()].map(([sector, items]) => ({ sector, items }))
+    .sort((a, b) => Number(a.sector === NO_SECTOR) - Number(b.sector === NO_SECTOR) || b.items.length - a.items.length || a.sector.localeCompare(b.sector, "ko"));
+}
+
+// 싸다 가격까지: 지금 값에서 몇 % 더 내려야(−) 싸다 가격인지. 이미 아래면 +.
+export const cheapGap = (cheap: number | null, price: number | null) =>
+  cheap && price ? Math.round((cheap / price - 1) * 1000) / 10 : null;

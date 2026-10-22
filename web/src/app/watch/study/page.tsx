@@ -3,9 +3,10 @@ import { settleStudyFill, startStudy } from "@/app/actions";
 import { query } from "@/lib/db";
 import { loadBriefInput } from "@/lib/briefData";
 import { valueCell } from "@/lib/brief";
-import { cleanFields, filled, CHECKS, numbersOf, peerLine, verdictLabel, type Draft, type FinRow, type Pick, type Version } from "@/lib/study";
+import { cheapGap, cleanFields, filled, CHECKS, groupBySector, numbersOf, peerLine, STYLES, verdictLabel, type Draft, type FinRow, type Pick, type Version } from "@/lib/study";
 import WatchTabs from "../WatchTabs";
 import StudyDice from "./StudyDice";
+import StudyGroups, { StudyCompare, type Group, type GroupItem } from "./StudyGroups";
 import StudyList, { type ListItem } from "./StudyList";
 import StudyNote, { type NoteData } from "./StudyNote";
 
@@ -19,7 +20,7 @@ type NoteRow = {
   updated: string;
 };
 
-export default async function StudyPage({ searchParams }: { searchParams: Promise<{ t?: string; step?: string; bad?: string }> }) {
+export default async function StudyPage({ searchParams }: { searchParams: Promise<{ t?: string; step?: string; bad?: string; view?: string; sector?: string; style?: string }> }) {
   const sp = await searchParams;
   // 🤖 전부 채우기 초안이 기다리는 동안 도착했으면 지금 채워요.
   if (sp.t) await settleStudyFill(sp.t).catch(() => false);
@@ -41,6 +42,37 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
     `SELECT DISTINCT ON (ticker) ticker, name FROM (SELECT ticker, name, 1 AS k FROM watchlist UNION ALL SELECT ticker, name, 2 FROM holdings
        UNION ALL SELECT ticker, name, 3 FROM practice_pool) t WHERE name <> '' ORDER BY ticker, k`,
   );
+
+  // 모아 보기(업종별 묶음 → 업종 이름을 누르면 같은 업종 비교)
+  const grouped = sp.view === "group" && !sp.t;
+  const style = sp.style && (STYLES as readonly string[]).includes(sp.style) ? sp.style : null;
+  let groups: Group[] = [];
+  let compare: { group: Group; cached: string | null } | null = null;
+  if (grouped) {
+    const tickers = rows.map((r) => r.ticker);
+    const known = new Map((await safe<{ ticker: string; sector: string }>("SELECT ticker, sector FROM stock_sectors WHERE ticker = ANY($1) AND sector <> ''", [tickers])).map((r) => [r.ticker, r.sector]));
+    const prices = new Map((await safe<{ ticker: string; cur: string | null }>(
+      `SELECT t AS ticker, COALESCE((SELECT cur_price FROM held_all WHERE ticker = t AND cur_price > 0 LIMIT 1), (SELECT price FROM watch_quotes WHERE ticker = t),
+         (SELECT close FROM price_history WHERE ticker = t ORDER BY day DESC LIMIT 1)) AS cur FROM unnest($1::text[]) t`, [tickers],
+    )).map((r) => [r.ticker, r.cur === null ? null : Number(r.cur)]));
+    const fin = sp.sector ? await safe<FinRow>("SELECT ticker, period, revenue, operating_income, liabilities, equity FROM stock_financials WHERE ticker = ANY($1)", [tickers]) : [];
+    const items: GroupItem[] = rows.map((r) => {
+      const f = cleanFields(r.fields);
+      return {
+        ticker: r.ticker, name: r.name, sector: f.sector || known.get(r.ticker) || "", known: !f.sector && known.has(r.ticker), styles: f.styles,
+        verdict: verdictLabel(f.verdict), verdictKey: f.verdict, status: r.status, done: r.done, gap: cheapGap(f.cheap, prices.get(r.ticker) ?? null),
+        ai: r.source === "ai", confidence: r.confidence, peer: peerLine(r.ticker, r.name, fin),
+      };
+    }).filter((it) => !style || it.styles.includes(style));
+    groups = groupBySector(items);
+    const g = sp.sector ? groups.find((x) => x.sector === sp.sector) : undefined;
+    if (g) {
+      const [c] = await safe<{ value: { sector?: string; tickers?: string[]; status?: string; text?: string } | null }>("SELECT value FROM app_settings WHERE key = 'study_compare'");
+      const v = c?.value;
+      const same = v?.status === "done" && v.sector === g.sector && [...(v.tickers ?? [])].sort().join() === g.items.map((i) => i.ticker).sort().join();
+      compare = { group: g, cached: same ? v?.text ?? null : null };
+    }
+  }
 
   const picked = sp.t ? rows.find((r) => r.ticker === sp.t!.toUpperCase()) : undefined;
   let note: NoteData | null = null;
@@ -91,8 +123,12 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
         <h1>관심종목</h1>
         <WatchTabs on="study" />
       </div>
-      <div className={`study-layout${note ? " has-note" : ""}`}>
+      <div className={`study-layout${note ? " has-note" : ""}${grouped ? " grouped" : ""}`}>
         <aside className="study-aside">
+          <nav className="segment study-view" aria-label="보기">
+            <Link href="/watch/study" aria-current={grouped ? undefined : "page"}>목록</Link>
+            <Link href="/watch/study?view=group" aria-current={grouped ? "page" : undefined}>업종별 모아 보기</Link>
+          </nav>
           <StudyList items={list} on={picked?.ticker ?? null} />
           <form action={startStudy} className="panel study-new">
             <b>＋ 새 노트</b>
@@ -105,7 +141,9 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
           <StudyDice />
         </aside>
         <section className="study-main">
-          {note ? (
+          {grouped ? (
+            compare ? <StudyCompare group={compare.group} all={groups} style={style} cached={compare.cached} /> : <StudyGroups groups={groups} style={style} />
+          ) : note ? (
             <>
               <Link href="/watch/study" className="study-back">‹ 노트 목록</Link>
               <StudyNote key={`${note.ticker}:${note.done}`} note={note} />
