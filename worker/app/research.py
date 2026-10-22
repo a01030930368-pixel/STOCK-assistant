@@ -319,15 +319,24 @@ SEC_TAGS = {
 }
 
 
+def current_first(gaap: dict, tags: tuple[str, ...]) -> list[str]:
+    """요즘 보고에 쓰는 태그를 앞에 둬요. 겹치는 기간은 앞 태그 값을 쓰니까, 예전 태그에 잘못 적힌 값
+    (예: 아이온큐 2022년 Revenues가 1,113만 달러가 아니라 12억 3,500만 달러로 적힘)이 섞이지 않게 해요.
+    가장 최근 기간(end)이 같으면 원래 순서대로."""
+    def latest(tag: str) -> str:
+        return max((f.get("end", "") for f in gaap.get(tag, {}).get("units", {}).get("USD", [])), default="")
+    return sorted(tags, key=lambda t: (latest(t), -tags.index(t)), reverse=True)
+
+
 def _annual(facts: dict, tags: tuple[str, ...]) -> dict[str, Decimal]:
     """10-K에 보고된 연간 값을 회계연도 말일(end)별로 모읍니다. 같은 값이 여러 보고서에 반복되면 나중 것을 씁니다.
 
     회사가 해마다 다른 태그로 보고하기도 해서(예: 예전엔 Revenues, 요즘은 RevenueFromContract...)
-    모든 태그를 합치고, 같은 연도가 겹치면 앞 태그를 씁니다.
+    모든 태그를 합치고, 같은 연도가 겹치면 요즘 쓰는 태그 값을 씁니다.
     """
     gaap = facts.get("facts", {}).get("us-gaap", {})
     merged: dict[str, Decimal] = {}
-    for tag in tags:
+    for tag in current_first(gaap, tags):
         units = gaap.get(tag, {}).get("units", {}).get("USD")
         if not units:
             continue

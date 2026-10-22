@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import httpx
 
-from .research import SEC_FACTS, _amount, _dart_json
+from .research import SEC_FACTS, _amount, _dart_json, current_first
 
 FLOW = ("revenue", "cost_of_sales", "gross_profit", "operating_income", "net_income", "cfo", "cfi", "cff", "capex")
 STOCK = ("assets", "cash", "liabilities", "equity")
@@ -178,7 +178,7 @@ KEEP_YEARS = 4
 def _frames(facts: dict, tags: tuple[str, ...]) -> dict[str, Decimal]:
     gaap = facts.get("facts", {}).get("us-gaap", {})
     out: dict[str, Decimal] = {}
-    for tag in tags:
+    for tag in current_first(gaap, tags):
         for f in gaap.get(tag, {}).get("units", {}).get("USD", []):
             if (frame := f.get("frame")) and frame not in out:
                 out[frame] = Decimal(str(f["val"]))
