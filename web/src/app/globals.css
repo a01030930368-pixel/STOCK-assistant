@@ -943,3 +943,32 @@ a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-d
 @media (max-width: 720px) {
   .practice-acts button { flex: 1; min-width: 0; }
 }
+
+/* 차트 탭: 여러 종목 바둑판 */
+.chart-grid-sub { font-size: 0.85rem; font-weight: 400; margin-left: 8px; }
+.chart-grid-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chart-grid-tools .segment.small { margin: 0; }
+.chart-grid { display: grid; gap: 12px; }
+.chart-grid.n2, .chart-grid.n4 { grid-template-columns: 1fr 1fr; }
+.chart-cell { padding: 10px 12px; min-width: 0; }
+.chart-cell-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 6px; }
+.chart-cell-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.chart-cell-right .segment.small { margin: 0; }
+.chart-cell-right input { width: 130px; padding: 6px 10px; font-size: 0.85rem; }
+.chart-cell-canvas { height: 360px; }
+.chart-grid.n1 .chart-cell-canvas { height: 620px; }
+.chart-grid.n4 .chart-cell-canvas { height: 300px; }
+@media (max-width: 720px) {
+  .chart-grid.n2, .chart-grid.n4 { grid-template-columns: 1fr; }
+  .chart-cell-canvas, .chart-grid.n4 .chart-cell-canvas { height: 270px; }
+  .chart-grid.n1 .chart-cell-canvas { height: 420px; }
+  .chart-grid-tools .pc-only { display: none; }
+  .chart-cell-right { margin-left: 0; width: 100%; }
+  .chart-cell-right input { flex: 1; width: auto; }
+}
+.chart-grid-tools .segment button, .chart-cell-right .segment button { white-space: nowrap; }
+.chart-cell-right input { min-width: 0; }
+@media (max-width: 720px) {
+  .chart-cell-right form { flex: 1; min-width: 0; display: flex; }
+  .chart-cell-right input { width: 100%; }
+}
