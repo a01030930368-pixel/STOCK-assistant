@@ -10,7 +10,7 @@ import type { Book } from "@/lib/books";
 import { loadBook } from "@/lib/booksData";
 import { buildCells, type Cell } from "@/lib/brief";
 import { loadBriefInput } from "@/lib/briefData";
-import { KIND_LABEL, validColor, validDoodle, type DoodlePoint, type LevelKind } from "@/lib/drawings";
+import { KIND_LABEL, validColor, validDoodle, validShape, type DoodlePoint, type LevelKind, type ShapeKind } from "@/lib/drawings";
 
 // values: 오류가 났을 때 입력한 값을 폼에 되돌려 주기 위해 사용합니다.
 export type FormState = { errors: string[]; values?: Record<string, string> };
@@ -601,6 +601,29 @@ export async function addDoodle(input: { ticker: string; view: string; color: st
 
 export async function deleteDoodle(id: number): Promise<void> {
   await query("DELETE FROM chart_doodles WHERE id = $1", [id]);
+}
+
+// 추세선·평행 채널·피보나치. 그린 차트(view)에서만 보여요.
+export async function addShape(input: { ticker: string; name: string; view: string; kind: ShapeKind; points: DoodlePoint[] }): Promise<number | null> {
+  const ticker = input.ticker.toUpperCase();
+  if (!TICKER.test(ticker) || !/^[0-9DWM]{1,3}$/.test(input.view) || !validShape(input.kind, input.points)) return null;
+  const [row] = await query<{ id: number }>(
+    "INSERT INTO chart_shapes (ticker, name, view, kind, points) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    [ticker, String(input.name ?? "").slice(0, 100), input.view, input.kind, JSON.stringify(input.points)],
+  );
+  return row.id;
+}
+
+export async function updateShape(id: number, change: { alert?: boolean; color?: string | null; points?: DoodlePoint[] }): Promise<void> {
+  if (change.alert !== undefined) await query("UPDATE chart_shapes SET alert = $2, last_price = NULL WHERE id = $1", [id, Boolean(change.alert)]);
+  if (change.color !== undefined && validColor(change.color)) await query("UPDATE chart_shapes SET color = $2 WHERE id = $1", [id, change.color]);
+  if (change.points !== undefined && validDoodle(change.points)) {
+    await query("UPDATE chart_shapes SET points = $2, last_price = NULL WHERE id = $1 AND jsonb_array_length(points) = $3", [id, JSON.stringify(change.points), change.points.length]);
+  }
+}
+
+export async function deleteShape(id: number): Promise<void> {
+  await query("DELETE FROM chart_shapes WHERE id = $1", [id]);
 }
 
 // 실수 노트를 지금 다시 읽어 달라고 워커에게 남깁니다. 워커가 다음 차례(1분 안팎)에 읽어요.

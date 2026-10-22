@@ -441,6 +441,20 @@ MIGRATIONS = [
   FROM (SELECT ticker, name, market, quantity, avg_price, cur_price, eval_amount, pnl, pnl_pct FROM holdings WHERE quantity > 0
         UNION ALL SELECT ticker, name, 'KR', quantity, avg_price, cur_price, eval_amount, pnl, pnl_pct FROM isa_holdings WHERE quantity > 0) t
   GROUP BY ticker""",
+    """CREATE TABLE IF NOT EXISTS chart_shapes (
+      id          SERIAL PRIMARY KEY,
+      ticker      TEXT NOT NULL,
+      name        TEXT NOT NULL DEFAULT '',
+      view        TEXT NOT NULL,
+      kind        TEXT NOT NULL CHECK (kind IN ('trend', 'channel', 'fib')),
+      points      JSONB NOT NULL,
+      color       TEXT,
+      alert       BOOLEAN NOT NULL DEFAULT false,
+      last_price  NUMERIC(18, 4),
+      alerted_at  TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS chart_shapes_ticker_idx ON chart_shapes (ticker, view)",
 ]
 
 
@@ -804,6 +818,25 @@ def chart_levels(conn: psycopg.Connection) -> list[Level]:
     rows = conn.execute(
         "SELECT id, ticker, name, kind, low, high, memo, alert, last_price, alerted_at FROM chart_levels ORDER BY id").fetchall()
     return [Level(*r) for r in rows]
+
+
+def chart_shapes(conn: psycopg.Connection) -> list:
+    """일봉 차트에 그린 추세선·채널(알림 판단용)."""
+    from .shapes import Shape
+    rows = conn.execute(
+        "SELECT id, ticker, name, kind, points, alert, last_price, alerted_at FROM chart_shapes WHERE view = 'D' AND kind IN ('trend', 'channel') ORDER BY id").fetchall()
+    return [Shape(*r) for r in rows]
+
+
+def trading_days(conn: psycopg.Connection, ticker: str) -> list[str]:
+    return [r[0].isoformat() for r in conn.execute("SELECT day FROM price_history WHERE ticker = %s ORDER BY day", (ticker,))]
+
+
+def save_shape_seen(conn: psycopg.Connection, shape_id: int, price: Decimal, alerted: bool) -> None:
+    conn.execute(
+        "UPDATE chart_shapes SET last_price = %s, alerted_at = CASE WHEN %s THEN now() ELSE alerted_at END WHERE id = %s",
+        (price, alerted, shape_id),
+    )
 
 
 def save_level_seen(conn: psycopg.Connection, level_id: int, price: Decimal, alerted: bool) -> None:

@@ -2,39 +2,70 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
-import { addAlert, addChartMemo, addDoodle, addLevel, deleteChartMemo, deleteDoodle, deleteLevel, updateLevel } from "@/app/actions";
-import { COLORS, KIND_LABEL, kindFor, markColor, moveEdge, nearest, snap, strokeDistance, thin, zone, type Doodle, type DoodlePoint, type Mark } from "@/lib/drawings";
+import { addAlert, addChartMemo, addDoodle, addLevel, addShape, deleteChartMemo, deleteDoodle, deleteLevel, deleteShape, updateLevel, updateShape } from "@/app/actions";
+import {
+  COLORS, fibPrices, KIND_LABEL, kindFor, markColor, measure, moveEdge, nearest, segmentDistance, SHAPE_LABEL, SHAPE_POINTS, snap, strokeDistance, thin, zone,
+  type Doodle, type DoodlePoint, type Mark, type Shape, type ShapeKind,
+} from "@/lib/drawings";
 import { Drawings, RESIST, SUPPORT, type Stroke } from "./chartDrawings";
 import BandChart from "./BandChart";
 import type { BandKind } from "@/lib/bands";
 import type { StatementRow } from "@/lib/statements";
 import { aggregate, aggregateMinutes, bollinger, bucketOf, MINUTES, rsi, sma, type Candle, type MinuteCandle, type Period } from "@/lib/candles";
+import { cleanSettings, DEFAULTS, divergences, ichimoku, macd, obv, PATTERNS, patterns, stochastic, vwap, type Settings } from "@/lib/indicators";
+import { Overlay } from "./chartOverlays";
 
 export type { Candle, MinuteCandle };
 export type Memo = { id: number; day: string; body: string };
 export type Trade = { day: string; side: "buy" | "sell"; price: number; quantity: number };
 export type Level = { kind: "avg" | "stop" | "target" | "alert"; price: number };
-export type { Doodle, Mark };
-type Tool = "none" | "line" | "zone" | "move" | "pen" | "eraser";
+export type { Doodle, Mark, Shape };
+type Tool = "none" | "line" | "trend" | "channel" | "zone" | "fib" | "ruler" | "move" | "pen" | "eraser";
+// 왼쪽 막대에서 선 칸(가로선·추세선·평행 채널)은 하나로 묶고, 누르면 옆으로 펼쳐져요.
+const LINE_TOOLS: { key: Tool; name: string; icon: string }[] = [
+  { key: "line", name: "가로선", icon: "—" }, { key: "trend", name: "추세선", icon: "／" }, { key: "channel", name: "평행 채널", icon: "⫽" },
+];
+const isLine = (t: Tool) => t === "line" || t === "trend" || t === "channel";
 const TOOLS: { key: Tool; name: string; icon: string; hint: string }[] = [
-  { key: "line", name: "선", icon: "／", hint: "차트에서 원하는 높이를 한 번 누르세요. 지금 가격보다 위면 저항, 아래면 지지예요." },
+  { key: "line", name: "가로선", icon: "—", hint: "차트에서 원하는 높이를 한 번 누르세요. 지금 가격보다 위면 저항, 아래면 지지예요." },
+  { key: "trend", name: "추세선", icon: "／", hint: "선의 시작점과 끝점을 차례로 누르세요. 선은 끝점 너머로 길게 이어져요." },
+  { key: "channel", name: "평행 채널", icon: "⫽", hint: "추세선의 두 점을 누른 뒤, 평행선이 지나갈 자리를 한 번 더 누르세요." },
+  { key: "fib", name: "피보나치", icon: "Fib", hint: "시작점(예: 저점)과 끝점(예: 고점)을 차례로 누르세요. 그 사이 23.6·38.2·50·61.8·78.6% 선이 생겨요." },
+  { key: "ruler", name: "자", icon: "📏", hint: "재고 싶은 두 점을 차례로 누르세요. 등락률, 봉 수, 날짜 수가 보여요. 저장은 안 돼요." },
   { key: "zone", name: "구간", icon: "▭", hint: "구간의 위·아래를 차례로 한 번씩 누르세요." },
   { key: "move", name: "옮기기", icon: "↕", hint: "옮길 선이나 구간의 위·아래 끝을 잡고 위아래로 끄세요. 다 옮겼으면 ↕ 옮기기를 다시 눌러 끝내요." },
   { key: "pen", name: "낙서", icon: "✎", hint: "손가락이나 마우스로 그리세요. 낙서는 이 차트에서만 보여요. 다 그렸으면 ✎ 낙서를 다시 눌러 끝내요." },
   { key: "eraser", name: "지우개", icon: "⌫", hint: "지울 낙서나 선을 누르세요." },
 ];
 const PEN = "#e7cf9c";
-// 오른쪽 위 접는 메뉴: [켜고 끌 것, 이름, 덧붙임]
-const INDICATORS = [["ma", "이동평균", "5·20·60·120"], ["bb", "볼린저 밴드", "20, 2"], ["volume", "거래량", ""], ["rsi", "RSI", "14"]] as const;
+// 오른쪽 위 "지표" 메뉴. over = 차트 위에 겹치기, pane = 아래 칸, auto = 자동으로 찾아 표시
+type IndKey = "ma" | "bb" | "ichimoku" | "vwap" | "vp" | "volume" | "rsi" | "macd" | "stoch" | "obv" | "patterns" | "divergence";
+type EditKey = "ma" | "bb" | "rsi" | "macd" | "stoch";
+const INDICATORS: { key: IndKey; group: "over" | "pane" | "auto"; name: string; note?: (s: Settings) => string; edit?: EditKey }[] = [
+  { key: "ma", group: "over", name: "이동평균", note: (s) => s.ma.join("·"), edit: "ma" },
+  { key: "bb", group: "over", name: "볼린저 밴드", note: (s) => s.bb.join(", "), edit: "bb" },
+  { key: "ichimoku", group: "over", name: "일목균형표", note: () => "9·26·52" },
+  { key: "vwap", group: "over", name: "VWAP" },
+  { key: "vp", group: "over", name: "매물대" },
+  { key: "volume", group: "pane", name: "거래량" },
+  { key: "rsi", group: "pane", name: "RSI", note: (s) => String(s.rsi), edit: "rsi" },
+  { key: "macd", group: "pane", name: "MACD", note: (s) => s.macd.join("·"), edit: "macd" },
+  { key: "stoch", group: "pane", name: "스토캐스틱", note: (s) => s.stoch.join("·"), edit: "stoch" },
+  { key: "obv", group: "pane", name: "OBV" },
+  { key: "patterns", group: "auto", name: "캔들 패턴" },
+  { key: "divergence", group: "auto", name: "RSI 다이버전스" },
+];
+const GROUPS = [["over", "차트 위에 겹치기"], ["pane", "아래 칸 · 거래량 말고 2개까지"], ["auto", "자동으로 찾아 표시"]] as const;
+const PANES: IndKey[] = ["rsi", "macd", "stoch", "obv"];
+const MAX_PANES = 2;
+// 숫자 바꾸기 칸: [설정 안 몇 번째, 이름]
+const FIELDS: Record<EditKey, string[]> = { ma: ["1", "2", "3", "4"], bb: ["기간", "배수"], rsi: ["기간"], macd: ["빠른 선", "느린 선", "신호"], stoch: ["기간", "평균"] };
+const SAVE_KEY = "chart-indicators-v1";
 const SHOWS = [["trades", "산 날·판 날", ""], ["levels", "평단·손절·알림 선", ""], ["memos", "메모", ""], ["drawings", "내가 그린 선·낙서", ""]] as const;
 
 const UP = "#e8806f", DOWN = "#86a8e6", GOLD = "#c9a96b", MUTED = "#9b968b", LINE = "#1b1b1f", BAND = "#a7a08f";
-const MAS = [
-  { n: 5, color: GOLD },
-  { n: 20, color: "#b48ead" },
-  { n: 60, color: "#7fb8a4" },
-  { n: 120, color: "#8a857b" },
-];
+const MA_COLORS = [GOLD, "#b48ead", "#7fb8a4", "#8a857b"];
+const SIGNAL = "#6fa8d9", TENKAN = "#d98f6f", KIJUN = "#6fa8d9", VWAP = "#d98fd0", DIVERGE = "#d9b45a";
 type View = Period | `${(typeof MINUTES)[number]}`;
 const VIEWS: { key: View; label: string }[] = [
   ...MINUTES.map((n) => ({ key: `${n}` as View, label: `${n}분` })),
@@ -62,11 +93,11 @@ export function tickRound(v: number, market: string): number {
 
 const md = (day: string) => `${Number(day.slice(5, 7))}.${Number(day.slice(8, 10))}`;
 const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
-const compact = (v: number) => (v >= 1e12 ? `${(v / 1e12).toFixed(1)}조` : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v.toLocaleString("ko-KR"));
+const compact = (v: number): string => (v < 0 ? `−${compact(-v)}` : v >= 1e12 ? `${(v / 1e12).toFixed(1)}조` : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v.toLocaleString("ko-KR"));
 
-export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles, statements = [], shares = null }: {
+export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles, statements = [], shares = null, shapes: savedShapes = [] }: {
   ticker: string; name: string; market: string; candles: Candle[]; minutes: MinuteCandle[]; memos: Memo[]; trades: Trade[]; levels: Level[]; today: string;
-  current: number | null; marks: Mark[]; doodles: Doodle[]; statements?: StatementRow[]; shares?: number | null;
+  current: number | null; marks: Mark[]; doodles: Doodle[]; statements?: StatementRow[]; shares?: number | null; shapes?: Shape[];
 }) {
   const [mode, setMode] = useState<"price" | BandKind>("price");
   const [menu, setMenu] = useState<null | "ind" | "show">(null);
@@ -82,7 +113,33 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   const intraday = !["D", "W", "M"].includes(view);
   const period: Period = intraday ? "D" : (view as Period);
   const [range, setRange] = useState<Range>("6m");
-  const [show, setShow] = useState({ ma: true, bb: false, volume: true, rsi: false, trades: true, memos: true, levels: true });
+  const [show, setShow] = useState<Record<IndKey | "trades" | "memos" | "levels", boolean>>({
+    ma: true, bb: false, ichimoku: false, vwap: false, vp: false, volume: true, rsi: false, macd: false, stoch: false, obv: false,
+    patterns: false, divergence: false, trades: true, memos: true, levels: true,
+  });
+  const [order, setOrder] = useState<IndKey[]>([]); // 아래 칸을 켠 순서. 3번째를 켜면 가장 먼저 켠 칸이 꺼져요
+  const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  const [edit, setEdit] = useState<EditKey | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  // 켜 둔 지표와 숫자는 이 기기(브라우저)에 기억해요. 종목을 바꿔도 같아요.
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SAVE_KEY) ?? "null");
+      if (saved) {
+        const keys = INDICATORS.map((d) => d.key);
+        setShow((s) => ({ ...s, ...Object.fromEntries(keys.filter((k) => typeof saved.show?.[k] === "boolean").map((k) => [k, saved.show[k]])) }));
+        setSettings(cleanSettings(saved.settings));
+        if (Array.isArray(saved.order)) setOrder(saved.order.filter((k: IndKey) => PANES.includes(k)));
+      }
+    } catch { /* 저장 공간을 못 쓰면 기본값으로 */ }
+    setLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ show: Object.fromEntries(INDICATORS.map((d) => [d.key, show[d.key]])), settings, order }));
+    } catch { /* 무시 */ }
+  }, [show, settings, order, loaded]);
   const [big, setBig] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const [day, setDay] = useState(today);
@@ -91,6 +148,11 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   const [marks, setMarks] = useState<Mark[]>(savedMarks);
   const [doodles, setDoodles] = useState<Doodle[]>(savedDoodles);
   const [tool, setTool] = useState<Tool>("none");
+  const [lineTool, setLineTool] = useState<Tool>("line");
+  const [lineOpen, setLineOpen] = useState(false);
+  const [shapes, setShapes] = useState<Shape[]>(savedShapes);
+  const [draft, setDraft] = useState<DoodlePoint[]>([]); // 추세선·채널·피보나치·자에서 지금까지 누른 점
+  const [ruler, setRuler] = useState<{ a: DoodlePoint; b: DoodlePoint; text: string } | null>(null);
   const [pending, setPending] = useState<number | null>(null);
   const [drawShown, setDrawShown] = useState(true);
   const [magnet, setMagnet] = useState(true);
@@ -122,8 +184,16 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     return aggregate(candles, period).map((c) => ({ ...c, time: c.day as Time, key: c.day, label: c.day }));
   }, [candles, minutes, view, intraday, period, market]);
   const closes = useMemo(() => bars.map((b) => b.close), [bars]);
-  const maValues = useMemo(() => MAS.map((m) => sma(closes, m.n)), [closes]);
-  const bands = useMemo(() => bollinger(closes), [closes]);
+  const maValues = useMemo(() => settings.ma.map((n) => sma(closes, n)), [closes, settings.ma]);
+  const bands = useMemo(() => bollinger(closes, settings.bb[0], settings.bb[1]), [closes, settings.bb]);
+  const rsiValues = useMemo(() => rsi(closes, settings.rsi), [closes, settings.rsi]);
+  const macdValues = useMemo(() => macd(closes, ...settings.macd), [closes, settings.macd]);
+  const stochValues = useMemo(() => stochastic(bars, ...settings.stoch), [bars, settings.stoch]);
+  const obvValues = useMemo(() => obv(bars), [bars]);
+  const patternAt = useMemo(() => new Map(patterns(bars).map((p) => [p.i, p.key])), [bars]);
+  const divs = useMemo(() => divergences(bars, rsiValues), [bars, rsiValues]);
+  // 일·주·월봉 VWAP은 고른 기간의 첫 봉부터 쌓아요. 분봉은 날마다 새로 쌓아요.
+  const vwapFrom = useMemo(() => (show.vwap && !intraday ? rangeStart(bars, range) : 0), [show.vwap, intraday, bars, range]);
   const memosByBar = useMemo(() => {
     const map = new Map<string, Memo[]>();
     if (intraday) return map;
@@ -174,9 +244,13 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
       drawRef.current = drawings;
       syncDrawings();
 
+      const line = (color: string, pane = 0, width: 1 | 2 = 1) =>
+        chart!.addSeries(lc.LineSeries, { color, lineWidth: width, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, pane);
+      const overlay = new Overlay();
+      price.attachPrimitive(overlay);
       if (show.ma) {
-        MAS.forEach((m, k) => {
-          const s = chart!.addSeries(lc.LineSeries, { color: m.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+        settings.ma.forEach((_, k) => {
+          const s = line(MA_COLORS[k]);
           s.setData(bars.flatMap((b, i) => (maValues[k][i] === null ? [] : [{ time: b.time, value: maValues[k][i]! }])));
         });
       }
@@ -189,6 +263,25 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         }
       }
 
+      if (show.ichimoku) {
+        const k = ichimoku(bars);
+        for (const [vals, color] of [[k.tenkan, TENKAN], [k.kijun, KIJUN]] as const) {
+          line(color).setData(bars.flatMap((b, i) => (vals[i] === null ? [] : [{ time: b.time, value: vals[i]! }])));
+        }
+        overlay.set({ cloud: { a: k.spanA, b: k.spanB, shift: k.shift } });
+      }
+      if (show.vwap && bars.some((b) => b.volume)) {
+        const v = vwap(bars, intraday ? (i) => bars[i].day : () => "", vwapFrom);
+        line(VWAP, 0, 2).setData(bars.flatMap((b, i) => (v[i] === null ? [] : [{ time: b.time, value: v[i]! }])));
+      }
+      if (show.vp && bars.some((b) => b.volume)) overlay.set({ profile: bars });
+      const shownDivs = show.divergence ? divs.slice(-6) : [];
+      overlay.set({
+        segments: shownDivs.map((d) => d.kind === "bear"
+          ? { a: d.a, b: d.b, pa: bars[d.a].high, pb: bars[d.b].high, color: DIVERGE, label: "하락 다이버전스" }
+          : { a: d.a, b: d.b, pa: bars[d.a].low, pb: bars[d.b].low, color: DIVERGE, label: "상승 다이버전스" }),
+      });
+
       let pane = 1;
       if (show.volume && bars.some((b) => b.volume)) {
         const vol = chart.addSeries(lc.HistogramSeries, { priceFormat: { type: "custom", formatter: compact }, priceLineVisible: false, lastValueVisible: false }, pane);
@@ -199,15 +292,41 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         chart.panes()[pane].setStretchFactor(0.28);
         pane++;
       }
-      if (show.rsi) {
-        const r = rsi(closes);
-        const s: ISeriesApi<"Line"> = chart.addSeries(lc.LineSeries, {
-          color: GOLD, lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
-          priceFormat: { type: "custom", formatter: (v: number) => v.toFixed(0) },
-        }, pane);
-        s.setData(bars.flatMap((b, i) => (r[i] === null ? [] : [{ time: b.time, value: r[i]! }])));
-        for (const v of [30, 70]) s.createPriceLine({ price: v, color: v === 30 ? DOWN : UP, lineWidth: 1, lineStyle: lc.LineStyle.Dotted, axisLabelVisible: false, title: "" });
+      const guides = (s: ISeriesApi<"Line">, lo: number, hi: number) => {
+        for (const v of [lo, hi]) s.createPriceLine({ price: v, color: v === lo ? DOWN : UP, lineWidth: 1, lineStyle: lc.LineStyle.Dotted, axisLabelVisible: false, title: "" });
+      };
+      const whole = { type: "custom" as const, formatter: (v: number) => v.toFixed(0) };
+      for (const key of PANES) {
+        if (!show[key]) continue;
+        if (key === "rsi") {
+          const s: ISeriesApi<"Line"> = chart.addSeries(lc.LineSeries, { color: GOLD, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, priceFormat: whole }, pane);
+          s.setData(bars.flatMap((b, i) => (rsiValues[i] === null ? [] : [{ time: b.time, value: rsiValues[i]! }])));
+          guides(s, 30, 70);
+          if (shownDivs.length) {
+            const o = new Overlay();
+            s.attachPrimitive(o);
+            o.set({ segments: shownDivs.map((d) => ({ a: d.a, b: d.b, pa: rsiValues[d.a]!, pb: rsiValues[d.b]!, color: DIVERGE })) });
+          }
+        } else if (key === "macd") {
+          const hist = chart.addSeries(lc.HistogramSeries, { priceLineVisible: false, lastValueVisible: false, priceFormat: { type: "price", precision: 2, minMove: 0.01 } }, pane);
+          hist.setData(bars.flatMap((b, i) => (macdValues[i] === null ? [] : [{
+            time: b.time, value: macdValues[i]!.hist, color: macdValues[i]!.hist >= 0 ? "rgba(232,128,111,0.5)" : "rgba(134,168,230,0.5)",
+          }])));
+          for (const [k, color] of [["macd", GOLD], ["signal", SIGNAL]] as const) {
+            line(color, pane).setData(bars.flatMap((b, i) => (macdValues[i] === null ? [] : [{ time: b.time, value: macdValues[i]![k] }])));
+          }
+        } else if (key === "stoch") {
+          const k = line(GOLD, pane);
+          k.applyOptions({ priceFormat: whole });
+          k.setData(bars.flatMap((b, i) => (stochValues[i] === null ? [] : [{ time: b.time, value: stochValues[i]!.k }])));
+          line(SIGNAL, pane).setData(bars.flatMap((b, i) => (stochValues[i] === null ? [] : [{ time: b.time, value: stochValues[i]!.d }])));
+          guides(k, 20, 80);
+        } else {
+          const s = chart.addSeries(lc.LineSeries, { color: "#7fb8a4", lineWidth: 1, priceLineVisible: false, lastValueVisible: true, priceFormat: { type: "custom", formatter: compact } }, pane);
+          s.setData(bars.map((b, i) => ({ time: b.time, value: obvValues[i] })));
+        }
         chart.panes()[pane].setStretchFactor(0.28);
+        pane++;
       }
 
       if (show.levels) {
@@ -232,7 +351,16 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           if (key >= first && index.has(key)) markers.push({ time: key as Time, position: "aboveBar", shape: "circle", color: "#ece8df", size: 0.8 });
         }
       }
-      markers.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+      if (show.patterns) {
+        for (const [i, key] of patternAt) {
+          const p = PATTERNS[key];
+          markers.push({
+            time: bars[i].time, position: p.bull ? "belowBar" : "aboveBar", shape: p.bull === null ? "circle" : p.bull ? "arrowUp" : "arrowDown",
+            color: p.bull === null ? MUTED : p.bull ? UP : DOWN, text: p.name, size: 0.6,
+          });
+        }
+      }
+      markers.sort((a, b) => (typeof a.time === "number" && typeof b.time === "number" ? a.time - b.time : String(a.time).localeCompare(String(b.time))));
       lc.createSeriesMarkers(price, markers);
 
       chart.subscribeCrosshairMove((p: MouseEventParams<Time>) => setHover(p.time ? index.get(String(p.time)) ?? null : null));
@@ -263,7 +391,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     };
     // fmt·period는 bars·market과 함께 바뀌므로 의존성에서 뺍니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars, show, levels, trades, memosByBar, maValues, bands, closes, today, big, intraday, mode]);
+  }, [bars, show, levels, trades, memosByBar, maValues, bands, closes, today, big, intraday, mode, settings, rsiValues, macdValues, stochValues, obvValues, patternAt, divs, vwapFrom]);
 
   useEffect(() => {
     if (chartRef.current) applyRange(chartRef.current, bars, intraday ? "intraday" : range);
@@ -271,8 +399,23 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
 
   const strokes = useMemo<Stroke[]>(() => doodles.filter((d) => d.view === view), [doodles, view]);
   function syncDrawings() {
-    drawRef.current?.set({ marks: marksRef.current, strokes: strokesRef.current, visible: drawShownRef.current, pending: pendingRef.current });
+    drawRef.current?.set({ marks: marksRef.current, strokes: strokesRef.current, visible: drawShownRef.current, pending: pendingRef.current, shapes: shapesRef.current });
   }
+  const viewShapes = useMemo(() => shapes.filter((x) => x.view === view), [shapes, view]);
+  const shapesRef = useRef(viewShapes);
+  shapesRef.current = viewShapes;
+  useEffect(() => {
+    drawRef.current?.set({ shapes: viewShapes });
+  }, [viewShapes]);
+  useEffect(() => {
+    drawRef.current?.set({ ruler });
+  }, [ruler]);
+  // 도구를 바꾸면 그리던 점은 버려요. 자는 다른 도구를 고르면 지워져요.
+  useEffect(() => {
+    setDraft([]);
+    drawRef.current?.set({ draft: null });
+    if (tool !== "ruler") setRuler(null);
+  }, [tool, view]);
   const strokesRef = useRef(strokes);
   strokesRef.current = strokes;
   const drawShownRef = useRef(drawShown);
@@ -324,6 +467,12 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         void deleteDoodle(hit.id!);
         return;
       }
+      const sh = shapesRef.current.find((one) => shapeDistance(d, one, [x, y]) <= 8);
+      if (sh) {
+        setShapes((ss) => ss.filter((v) => v.id !== sh.id));
+        void deleteShape(sh.id);
+        return;
+      }
       const m = marksRef.current.find((mk) => {
         const top = d.y(mk.high ?? mk.low), bottom = d.y(mk.low);
         return top !== null && bottom !== null && y >= top - 6 && y <= bottom + 6;
@@ -354,6 +503,71 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     const [x, y] = [e.clientX - r.left, e.clientY - r.top];
     const at = priceRef.current?.coordinateToPrice(y) ?? null;
     if (at !== null && at > 0) drawAt(toolRef.current === "eraser" ? at : snapAt(y, x, at), x, y);
+  }
+
+  // 추세선·채널·피보나치·자: 누른 자리를 점으로(자석이 켜져 있으면 캔들 꼬리·몸통 가격에 붙여요).
+  function pointAt(e: React.PointerEvent<HTMLDivElement>): DoodlePoint | null {
+    const r = e.currentTarget.getBoundingClientRect();
+    const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+    const pt = toPoint(x, y);
+    if (!pt) return null;
+    return [pt[0], pt[1], snapAt(y, x, pt[2])];
+  }
+  function rulerText(a: DoodlePoint, b: DoodlePoint): string {
+    const at = (p: DoodlePoint) => {
+      const i = bars.findIndex((x) => x.key === p[0]);
+      return { price: p[2], index: i + p[1], day: bars[Math.max(0, i)].day };
+    };
+    return measure(at(a), at(b));
+  }
+  function hoverShape(e: React.PointerEvent<HTMLDivElement>) {
+    const t = toolRef.current;
+    if (t === "ruler") {
+      if (ruler && draft.length === 1) {
+        const b = pointAt(e);
+        if (b) drawRef.current?.set({ ruler: { a: draft[0], b, text: rulerText(draft[0], b) } });
+      }
+      return;
+    }
+    if (!draft.length) return;
+    const p = pointAt(e);
+    if (p) drawRef.current?.set({ draft: { kind: t as ShapeKind, points: [...draft, p] } });
+  }
+  async function tapShape(e: React.PointerEvent<HTMLDivElement>) {
+    const t = toolRef.current;
+    const p = pointAt(e);
+    if (!p) return;
+    if (t === "ruler") {
+      // 첫 점 → 둘째 점에서 멈춤 → 다시 누르면 새로 재기
+      if (draft.length === 1) {
+        setRuler({ a: draft[0], b: p, text: rulerText(draft[0], p) });
+        setDraft([]);
+      } else {
+        setDraft([p]);
+        setRuler({ a: p, b: p, text: rulerText(p, p) });
+      }
+      return;
+    }
+    const kind = t as ShapeKind;
+    const points = [...draft, p];
+    if (points.length < SHAPE_POINTS[kind]) {
+      setDraft(points);
+      drawRef.current?.set({ draft: { kind, points } });
+      return;
+    }
+    setDraft([]);
+    drawRef.current?.set({ draft: null });
+    setTool("none");
+    const id = await addShape({ ticker, name, view, kind, points });
+    if (id !== null) setShapes((ss) => [...ss, { id, view, kind, points, color: null, alert: false }]);
+  }
+  function changeShape(id: number, change: Partial<Pick<Shape, "alert">>) {
+    setShapes((ss) => ss.map((x) => (x.id === id ? { ...x, ...change } : x)));
+    void updateShape(id, change);
+  }
+  function removeShape(id: number) {
+    setShapes((ss) => ss.filter((x) => x.id !== id));
+    void deleteShape(id);
   }
 
   // ↕ 옮기기 모드에서 선(구간이면 위·아래 끝)을 잡고 위아래로 끌면 옮겨져요.
@@ -492,7 +706,21 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   const prev = i > 0 ? bars[i - 1] : null;
   const barMemos = bar ? memosByBar.get(bar.key) ?? [] : [];
   const near = nearest(marks, ref);
-  const toggle = (k: keyof typeof show) => setShow((s) => ({ ...s, [k]: !s[k] }));
+  function toggle(k: keyof typeof show) {
+    const on = !show[k];
+    const next = { ...show, [k]: on };
+    let ord = order.filter((p) => p !== k && next[p]);
+    if (on && PANES.includes(k as IndKey)) {
+      ord = [...ord, k as IndKey];
+      while (ord.length > MAX_PANES) next[ord.shift()!] = false;
+    }
+    setShow(next);
+    setOrder(ord);
+  }
+  const panesOn = PANES.filter((p) => show[p]).length;
+  const indOn = INDICATORS.filter((d) => show[d.key]);
+  const pattern = show.patterns ? patternAt.get(i) : undefined;
+  const div = show.divergence ? divs.find((d) => d.b === i) : undefined;
 
   return (
     <>
@@ -509,29 +737,45 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
             </>
           )}
           <div className="chart-menus">
-            {mode === "price" && ([["ind", "지표", INDICATORS], ["show", "표시", SHOWS]] as const).map(([id, label, items]) => {
-              const on = items.filter(([k]) => (k === "drawings" ? drawShown : show[k])).length;
-              return (
-                <div key={id} className="menu">
-                  <button type="button" className={on ? "chip-btn on" : "chip-btn"} aria-expanded={menu === id} onClick={() => setMenu(menu === id ? null : id)}>
-                    {label}{on > 0 && <span className="menu-count">{on}</span>} ▾
-                  </button>
-                  {menu === id && (
-                    <div className="menu-pop" role="menu">
-                      {items.map(([k, text, note]) => {
-                        const checked = k === "drawings" ? drawShown : show[k];
-                        return (
-                          <label key={k} className="menu-item">
-                            <input type="checkbox" checked={checked} onChange={() => (k === "drawings" ? setDrawShown((v) => !v) : toggle(k))} />
-                            <span>{text}{note && <em>{note}</em>}</span>
+            {mode === "price" && (
+              <div className="menu">
+                <button type="button" className={indOn.length ? "chip-btn on" : "chip-btn"} aria-expanded={menu === "ind"} onClick={() => setMenu(menu === "ind" ? null : "ind")}>
+                  지표{indOn.length > 0 && <span className="menu-count">{indOn.length}</span>} ▾
+                </button>
+                {menu === "ind" && (
+                  <div className="menu-pop ind-pop" role="menu">
+                    {GROUPS.map(([g, title]) => (
+                      <div key={g}>
+                        <div className="menu-head">{title}</div>
+                        {INDICATORS.filter((d) => d.group === g).map((d) => (
+                          <label key={d.key} className="menu-item">
+                            <input type="checkbox" checked={show[d.key]} onChange={() => toggle(d.key)} />
+                            <span>{d.name}{d.note && <em>{d.note(settings)}</em>}</span>
                           </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {mode === "price" && (
+              <div className="menu">
+                <button type="button" className="chip-btn" aria-expanded={menu === "show"} onClick={() => setMenu(menu === "show" ? null : "show")}>
+                  표시{SHOWS.filter(([k]) => (k === "drawings" ? drawShown : show[k])).length > 0 && <span className="menu-count">{SHOWS.filter(([k]) => (k === "drawings" ? drawShown : show[k])).length}</span>} ▾
+                </button>
+                {menu === "show" && (
+                  <div className="menu-pop" role="menu">
+                    {SHOWS.map(([k, text]) => (
+                      <label key={k} className="menu-item">
+                        <input type="checkbox" checked={k === "drawings" ? drawShown : show[k]} onChange={() => (k === "drawings" ? setDrawShown((v) => !v) : toggle(k))} />
+                        <span>{text}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="segment small modes" role="tablist" aria-label="차트 종류">
               {([["price", "가격"], ["per", "PER 밴드"], ["pbr", "PBR 밴드"]] as const).map(([k, label]) => (
                 <button key={k} type="button" role="tab" aria-selected={mode === k} onClick={() => { setMode(k); setMenu(null); setTool("none"); }}>{label}</button>
@@ -549,6 +793,10 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           </div>
         )}
 
+        {mode === "price" && bars.length >= 2 && (
+          <IndicatorChips items={indOn} settings={settings} edit={edit} setEdit={setEdit} onOff={toggle} onAdd={() => setMenu("ind")}
+            onSave={(k, v) => { setSettings((s) => cleanSettings({ ...s, [k]: k === "rsi" ? v[0] : v })); setEdit(null); }} />
+        )}
         {mode !== "price" ? (
           <BandChart kind={mode} candles={candles} statements={statements} shares={shares} market={market} current={current} fmt={fmt} />
         ) :         bars.length < 2 ? (
@@ -571,23 +819,53 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
               </div>
               {show.ma && (
                 <div>
-                  {MAS.map((m, k) => maValues[k][i] !== null && (
-                    <span key={m.n} style={{ color: m.color }}>{m.n}{intraday ? "봉" : "일"} {fmt(maValues[k][i]!)}</span>
+                  {settings.ma.map((n, k) => maValues[k][i] !== null && (
+                    <span key={n} style={{ color: MA_COLORS[k] }}>{n}{intraday ? "봉" : "일"} {fmt(maValues[k][i]!)}</span>
                   ))}
+                </div>
+              )}
+              {panesOn > 0 && (
+                <div>
+                  {show.rsi && rsiValues[i] !== null && <span style={{ color: GOLD }}>RSI {rsiValues[i]!.toFixed(1)}</span>}
+                  {show.macd && macdValues[i] && <span><i>MACD</i><b style={{ color: GOLD }}>{macdValues[i]!.macd.toFixed(2)}</b> <i>신호</i><b style={{ color: SIGNAL }}>{macdValues[i]!.signal.toFixed(2)}</b></span>}
+                  {show.stoch && stochValues[i] && <span><i>스토캐스틱</i><b style={{ color: GOLD }}>{stochValues[i]!.k.toFixed(0)}</b> / <b style={{ color: SIGNAL }}>{stochValues[i]!.d.toFixed(0)}</b></span>}
+                  {show.obv && <span><i>OBV</i>{compact(obvValues[i])}</span>}
+                </div>
+              )}
+              {pattern && <div className="tip-memo"><b>{PATTERNS[pattern].name}</b> · {PATTERNS[pattern].text}</div>}
+              {div && (
+                <div className="tip-memo">
+                  <b>{div.kind === "bear" ? "하락 다이버전스" : "상승 다이버전스"}</b> · {div.kind === "bear"
+                    ? "가격 고점은 높아졌는데 RSI 고점은 낮아졌어요. 오르는 힘이 약해졌다는 신호예요."
+                    : "가격 저점은 낮아졌는데 RSI 저점은 높아졌어요. 빠지는 힘이 약해졌다는 신호예요."}
                 </div>
               )}
               {show.bb && bands[i] && (
                 <div>
-                  <span style={{ color: BAND }}>볼린저(20, 2) 위 {fmt(bands[i]!.upper)} · 가운데 {fmt(bands[i]!.mid)} · 아래 {fmt(bands[i]!.lower)}</span>
+                  <span style={{ color: BAND }}>볼린저({settings.bb.join(", ")}) 위 {fmt(bands[i]!.upper)} · 가운데 {fmt(bands[i]!.mid)} · 아래 {fmt(bands[i]!.lower)}</span>
                 </div>
               )}
               {barMemos.map((m) => <div key={m.id} className="tip-memo">{md(m.day)} {m.body}</div>)}
             </div>
             <div className="chart-stage">
               <div className="draw-rail" role="toolbar" aria-label="그리기 도구">
-                {TOOLS.map((t) => (
+                <div className="rail-group">
+                  <button type="button" className={isLine(tool) ? "on more" : "more"} aria-pressed={isLine(tool)} aria-expanded={lineOpen} aria-label={`선: ${LINE_TOOLS.find((t) => t.key === lineTool)!.name}`}
+                    title="선 (가로선·추세선·평행 채널)" onClick={() => setLineOpen((v) => !v)}>{LINE_TOOLS.find((t) => t.key === lineTool)!.icon}</button>
+                  {lineOpen && (
+                    <div className="rail-fly" role="menu">
+                      {LINE_TOOLS.map((t) => (
+                        <button key={t.key} type="button" role="menuitem" className={tool === t.key ? "on" : ""}
+                          onClick={() => { setLineTool(t.key); setTool(t.key); setLineOpen(false); setDrawShown(true); }}>
+                          <span>{t.icon}</span>{t.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {TOOLS.filter((t) => !isLine(t.key)).map((t) => (
                   <button key={t.key} type="button" className={tool === t.key ? "on" : ""} aria-pressed={tool === t.key} aria-label={t.name} title={t.name}
-                    onClick={() => { setTool(tool === t.key ? "none" : t.key); setDrawShown(true); }}>{t.icon}</button>
+                    onClick={() => { setTool(tool === t.key ? "none" : t.key); setDrawShown(true); setLineOpen(false); }}><span className={t.icon === "Fib" ? "fib-ic" : ""}>{t.icon}</span></button>
                 ))}
                 <i />
                 <button type="button" className={magnet ? "on" : ""} aria-pressed={magnet} aria-label="자석" title="자석: 캔들 꼬리·몸통에 붙이기" onClick={() => setMagnet((v) => !v)}>🧲</button>
@@ -595,14 +873,18 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
                   onClick={() => setDrawShown((v) => !v)}>{drawShown ? "👁" : "🚫"}</button>
               </div>
               <div className="chart-area">
-              <div ref={box} className={show.rsi ? "chart-canvas tall" : "chart-canvas"} />
+              <div ref={box} className={panesOn === 0 ? "chart-canvas" : panesOn === 1 ? "chart-canvas tall" : "chart-canvas taller"} />
               {tool === "pen" && (
                 <div className="pen-layer" onPointerDown={penDown} onPointerMove={penMove} onPointerUp={penUp} onPointerCancel={penUp} />
               )}
               {(tool === "line" || tool === "zone" || tool === "eraser") && <div className="pen-layer" onPointerUp={tap} />}
+              {(tool === "trend" || tool === "channel" || tool === "fib" || tool === "ruler") && <div className="pen-layer" onPointerUp={tapShape} onPointerMove={hoverShape} />}
               {tool !== "none" && (
                 <div className="draw-hint">
-                  {tool === "zone" && pending !== null ? `${fmt(pending)}을 골랐어요. 이제 구간의 다른 끝을 누르세요.` : TOOLS.find((t) => t.key === tool)!.hint}
+                  {tool === "zone" && pending !== null ? `${fmt(pending)}을 골랐어요. 이제 구간의 다른 끝을 누르세요.`
+                    : (tool === "trend" || tool === "channel" || tool === "fib") && draft.length
+                      ? `${draft.length}번째 점을 찍었어요. ${tool === "channel" && draft.length === 2 ? "이제 평행선이 지나갈 자리를 누르세요." : "다음 점을 누르세요."}`
+                      : TOOLS.find((t) => t.key === tool)!.hint}
                 </div>
               )}
               </div>
@@ -614,6 +896,29 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a> Lightweight Charts
         </p>}
       </div>
+
+      {viewShapes.length > 0 && (
+        <div className="list levels-list">
+          <div className="muted levels-head">이 차트에 그린 추세선·채널·피보나치 · 일봉 추세선·채널은 🔔를 켜 두면 가격이 닿을 때 텔레그램으로 알려요</div>
+          {viewShapes.map((x) => (
+            <div key={x.id} className="list-item level-row">
+              <span className="sw line" style={{ background: x.color ?? "#e7cf9c" }} />
+              <b className="level-kind">{SHAPE_LABEL[x.kind]}</b>
+              <span className="num">
+                {x.kind === "fib"
+                  ? `${fmt(x.points[0][2])} → ${fmt(x.points[1][2])} · 50% ${fmt(fibPrices(x.points[0][2], x.points[1][2])[3].price)}`
+                  : `${x.points[0][0].slice(0, 10)} ${fmt(x.points[0][2])} → ${x.points[1][0].slice(0, 10)} ${fmt(x.points[1][2])}`}
+              </span>
+              {x.kind !== "fib" && view === "D" && (
+                <button type="button" className={x.alert ? "chip-btn on" : "chip-btn"} aria-pressed={x.alert} onClick={() => changeShape(x.id, { alert: !x.alert })}>
+                  {x.alert ? "🔔 알림 켜짐" : "🔕 알림 꺼짐"}
+                </button>
+              )}
+              <button type="button" className="ghost" onClick={() => removeShape(x.id)}>지우기</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {marks.length > 0 && (
         <div className="list levels-list">
@@ -678,6 +983,85 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         </div>
       )}
     </>
+  );
+}
+
+// 지우개: 누른 자리와 그림 사이 거리(화면 픽셀). 추세선·채널은 오른쪽으로 늘린 부분까지, 피보나치는 가로선들까지.
+function shapeDistance(d: Drawings, s: Shape, p: [number, number]): number {
+  const px = d.shapePixels(s.points);
+  if (!px) return Infinity;
+  if (s.kind === "fib") {
+    const left = Math.min(px[0][0], px[1][0]);
+    if (p[0] < left) return Infinity;
+    return Math.min(...fibPrices(s.points[0][2], s.points[1][2]).map((l) => Math.abs((d.y(l.price) ?? -1e9) - p[1])));
+  }
+  const [a, b] = px;
+  const far: [number, number] = b[0] === a[0] ? b : [a[0] + (b[0] - a[0]) * 1e3, a[1] + (b[1] - a[1]) * 1e3];
+  let best = segmentDistance(p, a, far);
+  if (s.kind === "channel" && px[2]) {
+    const off = px[2][1] - (a[1] + (b[0] === a[0] ? 0 : ((b[1] - a[1]) * (px[2][0] - a[0])) / (b[0] - a[0])));
+    best = Math.min(best, segmentDistance(p, [a[0], a[1] + off], [far[0], far[1] + off]));
+  }
+  return best;
+}
+
+// 고른 기간이 시작하는 봉 번호. 전체면 0.
+function rangeStart(bars: Bar[], range: Range): number {
+  const months = RANGES.find((r) => r.key === range)!.months;
+  if (!months || bars.length < 2) return 0;
+  const from = new Date(`${bars[bars.length - 1].day}T00:00:00Z`);
+  from.setUTCMonth(from.getUTCMonth() - months);
+  return Math.max(0, bars.findIndex((b) => b.day >= from.toISOString().slice(0, 10)));
+}
+
+// 켜 둔 지표 이름표. ⚙로 숫자를 바꾸고 ✕로 꺼요.
+function IndicatorChips({ items, settings, edit, setEdit, onOff, onAdd, onSave }: {
+  items: typeof INDICATORS; settings: Settings; edit: EditKey | null; setEdit: (k: EditKey | null) => void;
+  onOff: (k: IndKey) => void; onAdd: () => void; onSave: (k: EditKey, v: number[]) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState<string[]>([]);
+  useEffect(() => {
+    if (edit) setDraft(FIELDS[edit].map((_, k) => String(([] as number[]).concat(settings[edit])[k] ?? "")));
+  }, [edit, settings]);
+  useEffect(() => {
+    if (!edit) return;
+    const close = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) setEdit(null); };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [edit, setEdit]);
+  const target = items.find((d) => d.edit === edit);
+  return (
+    <div className="ind-chips" ref={ref}>
+      {items.map((d) => (
+        <span key={d.key} className={d.edit && edit === d.edit ? "ind-chip on" : "ind-chip"}>
+          {d.edit ? (
+            <button type="button" title="숫자 바꾸기" onClick={() => setEdit(edit === d.edit ? null : d.edit!)}>
+              {d.name}{d.note && <em>{d.note(settings)}</em>} ⚙
+            </button>
+          ) : <span>{d.name}{d.note && <em>{d.note(settings)}</em>}</span>}
+          <button type="button" className="x" aria-label={`${d.name} 끄기`} title="끄기" onClick={() => onOff(d.key)}>✕</button>
+        </span>
+      ))}
+      <button type="button" className="ind-chip add" onClick={onAdd}>＋ 지표</button>
+      {edit && target && (
+        <div className="ind-edit" role="dialog" aria-label={`${target.name} 숫자 바꾸기`}>
+          <b>{target.name} {edit === "ma" ? "기간 (비우면 빠져요)" : "숫자"}</b>
+          <div className="ind-fields">
+            {FIELDS[edit].map((label, k) => (
+              <label key={k}>
+                <span>{edit === "ma" ? <i style={{ background: MA_COLORS[k] }} /> : label}</span>
+                <input inputMode="decimal" value={draft[k] ?? ""} onChange={(e) => setDraft((d) => d.map((x, j) => (j === k ? e.target.value : x)))} />
+              </label>
+            ))}
+          </div>
+          <div className="ind-btns">
+            <button type="button" className="ghost" onClick={() => onSave(edit, ([] as number[]).concat(DEFAULTS[edit]))}>기본값으로</button>
+            <button type="button" onClick={() => onSave(edit, draft.filter((x) => x.trim() !== "").map(Number))}>저장</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

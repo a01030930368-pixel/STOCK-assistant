@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kindFor, markColor, validColor, moveEdge, nearest, snap, strokeDistance, thin, validDoodle, zone, type Mark } from "./drawings";
+import { kindFor, markColor, validColor, moveEdge, nearest, snap, strokeDistance, thin, validDoodle, zone, fibPrices, measure, validShape, type Mark } from "./drawings";
 
 const mark = (id: number, low: number, high: number | null = null): Mark => ({ id, kind: "support", low, high, memo: "", alert: false, color: null });
 
@@ -54,5 +54,19 @@ describe("drawings", () => {
     expect(validColor("#C9A96B")).toBe(true);
     expect(validColor(null)).toBe(true);
     expect(validColor("red")).toBe(false);
+  });
+});
+
+describe("shapes", () => {
+  it("validates point counts", () => {
+    expect(validShape("trend", [["2026-10-01", 0, 1], ["2026-10-02", 0, 2]])).toBe(true);
+    expect(validShape("channel", [["2026-10-01", 0, 1], ["2026-10-02", 0, 2]])).toBe(false);
+    expect(validShape("box", [["2026-10-01", 0, 1]])).toBe(false);
+  });
+  it("fib prices from start to end", () => {
+    expect(fibPrices(100, 200).map((f) => Math.round(f.price * 10) / 10)).toEqual([200, 176.4, 161.8, 150, 138.2, 121.4, 100]);
+  });
+  it("measures percent, bars and days", () => {
+    expect(measure({ price: 100, index: 3, day: "2026-10-01" }, { price: 125, index: 13, day: "2026-10-15" })).toBe("+25.00% · 10봉 · 14일");
   });
 });
