@@ -81,3 +81,17 @@ def test_shares_from_dart_and_sec():
     facts = {"facts": {"dei": {"EntityCommonStockSharesOutstanding": {"units": {"shares": [
         {"end": "2026-04-30", "val": 24300000000}, {"end": "2026-08-20", "val": 24400000000}]}}}}}
     assert statements.sec_shares(facts) == (Decimal("24400000000"), date(2026, 8, 20))
+
+
+def test_sec_prefers_tag_the_company_uses_now():
+    # 아이온큐: 2022년 Revenues에 12억 3,500만 달러가 잘못 적혀 있고, 요즘은 RevenueFromContract...로 보고해요.
+    def f(frame, val, end):
+        return {"frame": frame, "val": val, "form": "10-K", "end": end}
+    facts = {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": [f("CY2022", 1235000000, "2022-12-31")]}},
+        "RevenueFromContractWithCustomerExcludingAssessedTax": {"units": {"USD": [
+            f("CY2022", 11131000, "2022-12-31"), f("CY2025", 130016000, "2025-12-31")]}},
+    }}}
+    lines = from_sec(facts)
+    assert pick(lines, "Y", "2022", "revenue") == D(11131000)
+    assert pick(lines, "Y", "2025", "revenue") == D(130016000)

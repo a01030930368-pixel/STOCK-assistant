@@ -179,6 +179,17 @@ def test_sec_revenue_merges_old_and_new_tags():
     assert [(r.period, r.revenue) for r in rows] == [("FY2024", Decimal(43)), ("FY2023", Decimal(22))]
 
 
+def test_sec_revenue_ignores_wrong_value_in_old_tag():
+    # 아이온큐는 2022년 Revenues에 12억 3,500만 달러를 잘못 적었어요. 요즘 쓰는 태그 값(1,113만 달러)을 써야 해요.
+    facts = {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": [fact(1235000000, "2022-12-31", "2022-01-01")]}},
+        "RevenueFromContractWithCustomerExcludingAssessedTax": {"units": {"USD": [
+            fact(11131000, "2022-12-31", "2022-01-01"), fact(130016000, "2025-12-31", "2025-01-01")]}},
+    }}}
+    rows = research.parse_sec_financials("IONQ", facts)
+    assert [(r.period, r.revenue) for r in rows] == [("FY2025", Decimal(130016000)), ("FY2022", Decimal(11131000))]
+
+
 IR_DOC = """<DOCUMENT><BODY><TABLE><TR><TD>1. 개최일시</TD><TD>2026-10-29 10:00</TD></TR>
 <TR><TD>2. 개최장소</TD><TD>컨퍼런스콜</TD></TR><TR><TD>4. 개최목적</TD><TD>2026년 3분기 경영실적 설명</TD></TR></TABLE></BODY></DOCUMENT>"""
 
