@@ -149,33 +149,20 @@ def parse_kr_cash(body: dict) -> Cash:
     )
 
 
-def _usd_rows(body: dict) -> list[dict]:
-    rows = [body]
-    for value in body.values():
-        if isinstance(value, list):
-            rows += [r for r in value if isinstance(r, dict) and str(r.get("crnc_code", "USD")).strip().upper() == "USD"]
-    return rows
-
-
-def _first(rows: list[dict], words: tuple[str, ...]) -> Decimal | None:
-    for row in rows:
-        for key, value in row.items():
-            if any(w in key for w in words) and not isinstance(value, (list, dict)):
-                return parse_number(value)
-    return None
-
-
 def parse_us_cash(body: dict) -> Cash:
-    """ust21110 해외주식 예수금. 응답 항목 이름이 공개 문서로 확인되지 않아 이름 패턴으로 찾습니다.
+    """ust21110 해외주식 예수금. 달러 금액은 result_list의 USD 줄에 있습니다.
 
-    못 찾으면 항목 이름(값 제외)을 담아 오류를 내서, 로그를 보고 고칠 수 있게 합니다.
+    맨 위 krw_entra는 원화 예수금이라 쓰면 안 됩니다(예전에 원화 1,003원이 $1,003으로 보였어요).
+    USD 줄이 없으면 항목 이름(값 제외)을 담아 오류를 냅니다.
     """
-    rows = _usd_rows(body)
-    deposit = _first(rows, ("entr", "dpst", "dps"))
-    if deposit is None:
-        keys = sorted({k for row in rows for k in row})
-        raise ValueError(f"미국 예수금 항목을 찾지 못했습니다. 응답 항목: {', '.join(keys)}")
-    return Cash(currency="USD", deposit=deposit, d2_deposit=None, orderable=_first(rows, ("ord_alow", "ord_psbl", "orderable")))
+    rows = [r for r in body.get("result_list") or [] if isinstance(r, dict)]
+    usd = next((r for r in rows if str(r.get("crnc_code", "")).strip().upper() == "USD"), None)
+    if usd is None or "fc_entra" not in usd:
+        keys = sorted({k for r in [body, *rows] for k in r})
+        raise ValueError(f"미국 예수금(USD 줄)을 찾지 못했습니다. 응답 항목: {', '.join(keys)}")
+    orderable = usd.get("fc_ord_alowa")
+    return Cash(currency="USD", deposit=parse_number(usd["fc_entra"]), d2_deposit=None,
+                orderable=None if orderable is None else parse_number(orderable))
 
 
 class KiwoomClient:

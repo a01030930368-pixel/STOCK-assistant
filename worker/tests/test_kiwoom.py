@@ -154,18 +154,24 @@ def test_parse_kr_cash():
     assert cash.orderable == Decimal(1180000)
 
 
-def test_parse_us_cash_finds_usd_row():
-    body = {"list": [{"crnc_code": "JPY", "entr": "500"}, {"crnc_code": "USD", "entr": "412.35", "ord_alow_amt": "400.00"}], "return_code": 0}
+def test_parse_us_cash_reads_usd_row_not_krw_deposit():
+    # 공식 응답 모양: 맨 위 krw_entra는 원화, 달러는 result_list의 USD 줄
+    body = {"krw_entra": "000000000001003", "ch_uncla": "000000000000000", "result_list": [
+        {"crnc_code": "GBP", "fc_entra": "0.00", "fc_ord_alowa": "150.00"},
+        {"crnc_code": "USD", "crnc_nm": "미국달러", "fc_entra": "423.28", "fc_pymn_alowa": "423.28",
+         "fc_booka": "000000000042328", "fc_ord_alowa": "200.78"},
+    ], "return_code": 0}
     cash = parse_us_cash(body)
     assert cash.currency == "USD"
-    assert cash.deposit == Decimal("412.35")
-    assert cash.orderable == Decimal("400.00")
+    assert cash.deposit == Decimal("423.28")
+    assert cash.d2_deposit is None
+    assert cash.orderable == Decimal("200.78")
 
 
 def test_parse_us_cash_reports_key_names_only():
     with pytest.raises(ValueError) as err:
-        parse_us_cash({"unknown_amt": "123.45", "return_code": 0})
-    assert "unknown_amt" in str(err.value)
+        parse_us_cash({"krw_entra": "123.45", "result_list": [{"crnc_code": "JPY", "fc_entra": "9"}], "return_code": 0})
+    assert "krw_entra" in str(err.value)
     assert "123.45" not in str(err.value)
 
 
@@ -176,7 +182,7 @@ def test_cash_calls_kt00001_and_ust21110():
         if request.url.path == "/oauth2/token":
             return httpx.Response(200, json={"token": "t", "expires_dt": "20991231235959", "return_code": 0})
         seen.append((request.url.path, request.headers["api-id"]))
-        return httpx.Response(200, json={"entr": "1000", "return_code": 0})
+        return httpx.Response(200, json={"entr": "1000", "result_list": [{"crnc_code": "USD", "fc_entra": "1000"}], "return_code": 0})
 
     client = KiwoomClient("https://api.kiwoom.com", "k", "s", httpx.Client(transport=httpx.MockTransport(handler)))
     assert client.kr_cash().deposit == Decimal(1000)

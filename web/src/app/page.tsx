@@ -119,8 +119,8 @@ function AccountCard({ title, market, scope, summary, cash, fmt, rate }: {
       )}
       {cash && (
         <div className="foot">
-          D+2 기준 · 오늘 예수금 {fmt(cash.deposit)}
-          {cash.orderable !== null && ` · 주문가능 ${fmt(cash.orderable)}`}
+          {cash.d2_deposit !== null && `D+2 기준 · 오늘 예수금 ${fmt(cash.deposit)}`}
+          {cash.orderable !== null && `${cash.d2_deposit !== null ? " · " : ""}주문가능 ${fmt(cash.orderable)}`}
         </div>
       )}
     </div>
