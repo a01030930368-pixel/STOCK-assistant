@@ -251,6 +251,7 @@ h1 + .summary-line { font-size: 0.95rem; margin: -6px 0 18px; }
 .chart-box { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 0 0; }
 .chart-canvas { height: 460px; }
 .chart-canvas.tall { height: 580px; }
+.chart-canvas.taller { height: 680px; }
 .chart-legend { position: absolute; top: 8px; left: 12px; right: 90px; z-index: 2; pointer-events: none; font-size: 0.8rem; font-family: var(--mono); display: flex; flex-direction: column; gap: 2px; }
 .chart-legend > div { display: flex; flex-wrap: wrap; gap: 2px 12px; }
 .chart-legend i { font-style: normal; color: var(--muted); margin-right: 4px; }
@@ -265,6 +266,7 @@ h1 + .summary-line { font-size: 0.95rem; margin: -6px 0 18px; }
 @media (max-width: 720px) {
   .chart-canvas { height: 380px; }
   .chart-canvas.tall { height: 480px; }
+  .chart-canvas.taller { height: 560px; }
   .chart-legend { position: static; padding: 2px 10px 6px; font-size: 0.74rem; }
   .chart-legend > div { gap: 0 8px; }
   .chart-toggles { flex-wrap: nowrap; overflow-x: auto; width: 100%; scrollbar-width: none; }
@@ -884,3 +886,27 @@ a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-d
 .ext-tag.pre { background: #1d2a3a; color: #8fb8e8; }
 .ext-tag.post { background: #2a1f33; color: #c3a4e6; }
 .ext-note { margin-left: 10px; font-size: 0.78rem; font-weight: 400; }
+
+/* 지표 메뉴 묶음 제목, 켜 둔 지표 이름표, 숫자 바꾸기 */
+.menu-head { font-size: 0.72rem; color: var(--muted); padding: 8px 10px 2px; }
+.ind-pop { min-width: 250px; max-height: 70vh; overflow-y: auto; }
+.ind-chips { position: relative; display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.ind-chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 0.78rem; color: var(--sub); }
+.ind-chip > button, .ind-chip > span { background: transparent; border: 0; color: inherit; padding: 3px 4px 3px 9px; font: inherit; }
+.ind-chip em { font-style: normal; color: var(--muted); margin-left: 5px; }
+.ind-chip .x { padding: 3px 8px 3px 4px; color: var(--muted); }
+.ind-chip.on { border-color: var(--accent); color: var(--accent); }
+.ind-chip.add { border-style: dashed; color: var(--accent); padding: 3px 10px; background: transparent; }
+.ind-edit { position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column; gap: 10px; min-width: 240px; font-size: 0.86rem; }
+.ind-fields { display: flex; gap: 8px; }
+.ind-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 0.72rem; color: var(--muted); }
+.ind-fields label i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; }
+.ind-fields input { width: 58px; text-align: center; padding: 6px; }
+.ind-btns { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+.ind-btns button { width: auto; flex: 0 0 auto; padding: 6px 14px; margin: 0; }
+@media (max-width: 700px) {
+  .ind-chips { gap: 4px; margin: 2px 0 6px; }
+  .ind-chip { font-size: 0.7rem; }
+  .ind-chip > button, .ind-chip > span { padding: 2px 3px 2px 7px; }
+  .ind-chip .x { padding: 2px 6px 2px 3px; }
+}
