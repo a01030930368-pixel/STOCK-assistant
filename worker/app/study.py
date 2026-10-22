@@ -26,6 +26,7 @@ log = logging.getLogger("worker")
 KST = ZoneInfo("Asia/Seoul")
 POLL_SECONDS = 4
 TOP = 15  # 흐름 좋은 순으로 이만큼 추린 뒤
+FRESH_TOP = 40  # "안 해 본 쪽에서"는 더 넓게 보고, 이미 공부한 업종은 빼요
 SAMPLE = 6  # 그중 무작위로 이만큼을 AI에게 보여 줘요
 REMIND_HOUR = 9
 VERDICT = {"buy": "산다", "wait": "기다린다", "pass": "안 산다"}
@@ -120,14 +121,31 @@ def valid_ticker(ticker: str, market: str) -> bool:
     return bool(re.fullmatch(r"[0-9]{6}", ticker)) if market == "KR" else bool(re.fullmatch(r"[A-Z][A-Z.]{0,5}", ticker))
 
 
-def pick_prompt(sample: list[Candidate], hot_themes: list[str]) -> str:
+FRESH_RULE = """
+이번에는 사용자가 아직 안 해 본 쪽을 공부하고 싶어 해. 아래 "이미 공부한 업종"과 다른 업종이고,
+"아직 안 해 본 유형"에 가까운 회사를 골라. why 첫 줄에 이 회사가 지금까지 공부한 회사들과 무엇이 다른지 써."""
+
+
+def pick_prompt(sample: list[Candidate], hot_themes: list[str], coverage: dict | None = None, sectors: dict[str, str] | None = None) -> str:
     lines = ["후보:"]
     for c in sample:
         theme = f", 테마: {', '.join(c.themes[:3])}" if c.themes else ""
-        lines.append(f"- {c.ticker} {c.name} ({'국내' if c.market == 'KR' else '미국'}) {describe(c)}{theme}")
+        sector = f", 업종: {sectors[c.ticker]}" if sectors and sectors.get(c.ticker) else ""
+        lines.append(f"- {c.ticker} {c.name} ({'국내' if c.market == 'KR' else '미국'}) {describe(c)}{sector}{theme}")
     if hot_themes:
         lines.append("요즘 국내에서 강한 테마: " + ", ".join(hot_themes))
+    if coverage is not None:
+        done = coverage.get("sectors") or {}
+        lines.append("이미 공부한 업종: " + (", ".join(f"{k} {v}곳" for k, v in sorted(done.items(), key=lambda x: -x[1])) or "없음"))
+        styles = coverage.get("styles") or {}
+        lines.append("아직 안 해 본 유형: " + (", ".join(st for st in STYLES if not styles.get(st)) or "없음"))
     return "\n".join(lines)
+
+
+def fresh_pool(top: list[Candidate], sectors: dict[str, str], done: set[str]) -> list[Candidate]:
+    """이미 공부한 업종으로 알려진 후보는 빼요. 빼고 나서 3개보다 적으면 그대로 둬요."""
+    left = [c for c in top if sectors.get(c.ticker, "") not in done]
+    return left if len(left) >= 3 else top
 
 
 def parse_pick(text: str, sample: list[Candidate]) -> tuple[Candidate, list[str], list[str], list[dict]]:
@@ -285,7 +303,13 @@ class StudyWorker:
             c = flow_of(ticker, name, mk, closes)
             if c:
                 cands.append(c)
-        top = rank(cands)
+        fresh = bool(req.get("fresh"))
+        top = sorted(cands, key=score, reverse=True)[:FRESH_TOP] if fresh else rank(cands)
+        coverage = sectors = None
+        if fresh and top:
+            coverage = db.study_coverage(conn)
+            sectors = db.sectors_of(conn, [c.ticker for c in top])
+            top = fresh_pool(top, sectors, set(coverage.get("names") or coverage["sectors"]))
         if not top:
             db.set_setting(conn, "study_pick", {**req, "status": "error", "error": "흐름을 볼 일봉이 아직 모자라요. 워커가 연습용 종목 일봉을 받는 중이에요."})
             return
@@ -295,14 +319,14 @@ class StudyWorker:
         model = None
         if self.ask:
             try:
-                chosen, why, first, peers = parse_pick(self.ask(PICK_SYSTEM, pick_prompt(sample, db.hot_themes(conn)), self.key, self.model, self.http, 1024), sample)
+                chosen, why, first, peers = parse_pick(self.ask(PICK_SYSTEM + (FRESH_RULE if fresh else ""), pick_prompt(sample, db.hot_themes(conn), coverage, sectors), self.key, self.model, self.http, 1024), sample)
                 model = self.model
             except Exception as e:
                 log.warning("기업 공부 AI 추천 실패, 무작위로 골라요: %s", e)
                 chosen, why, first, peers = fallback_pick(sample, self.rand)
         else:
             chosen, why, first, peers = fallback_pick(sample, self.rand)
-        pick = {"why": why, "first": first, "flow": describe(chosen), "model": model, "at": datetime.now(timezone.utc).isoformat()}
+        pick = {"why": why, "first": first, "flow": describe(chosen), "model": model, "at": datetime.now(timezone.utc).isoformat(), "fresh": fresh}
         db.create_ai_study(conn, chosen.ticker, chosen.name, chosen.market, pick, peers, draft=bool(self.ask))
         db.set_setting(conn, "study_pick", {**req, "status": "done", "ticker": chosen.ticker})
         log.info("기업 공부 추천: %s", chosen.name)

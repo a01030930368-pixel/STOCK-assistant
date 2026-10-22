@@ -1635,6 +1635,28 @@ def study_universe(conn: psycopg.Connection, market: str | None) -> list[tuple[s
     return [(t, n, m, [float(c) for c in closes]) for t, n, m, closes in rows]
 
 
+def study_coverage(conn: psycopg.Connection) -> dict:
+    """지금까지 공부한 업종·주식 유형별 노트 수(탈락 빼고). 업종을 안 적었으면 증권사 업종 분류로 세요."""
+    sectors: dict[str, int] = {}
+    styles: dict[str, int] = {}
+    names: set[str] = set()  # 노트에 적은 업종과 증권사 업종 이름 둘 다(후보 업종과 맞춰 볼 때 써요)
+    for fields, known in conn.execute(
+        """SELECT s.fields, x.sector FROM study_notes s LEFT JOIN stock_sectors x ON x.ticker = s.ticker WHERE s.status <> '탈락'""",
+    ):
+        f = fields or {}
+        sector = str(f.get("sector") or known or "").strip()
+        if sector:
+            sectors[sector] = sectors.get(sector, 0) + 1
+        names |= {x for x in (sector, str(known or "").strip()) if x}
+        for st in f.get("styles") or []:
+            styles[str(st)] = styles.get(str(st), 0) + 1
+    return {"sectors": sectors, "styles": styles, "names": sorted(names)}
+
+
+def sectors_of(conn: psycopg.Connection, tickers: list[str]) -> dict[str, str]:
+    return dict(conn.execute("SELECT ticker, sector FROM stock_sectors WHERE ticker = ANY(%s) AND sector <> ''", (tickers,)).fetchall())
+
+
 def study_themes(conn: psycopg.Connection, tickers: list[str]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for t, name in conn.execute("SELECT ticker, name FROM stock_themes WHERE ticker = ANY(%s) ORDER BY name", (tickers,)):

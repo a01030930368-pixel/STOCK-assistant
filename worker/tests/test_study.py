@@ -147,3 +147,27 @@ def test_compare_writes_ai_line_or_error():
         db.study_compare_context.return_value = [{"name": "x"}]
         w.compare(mock.Mock(), req)
         assert db.set_setting.call_args.args[2]["status"] == "error"
+
+
+def test_fresh_pick_skips_sectors_already_studied_and_tells_ai():
+    cfg = mock.Mock(gemini_api_key="", anthropic_api_key="")
+    w = study.StudyWorker(cfg, mock.Mock(), random.Random(3))
+    w.ask, w.key, w.model = mock.Mock(return_value='{"ticker": "KO", "why": ["처음 보는 음료 회사예요"]}'), "k", "m"
+    up = lambda k: [100 + i * k for i in range(120)]
+    with mock.patch.object(study, "db") as db:
+        db.study_universe.return_value = [("MU", "Micron", "US", up(0.9)), ("KO", "Coca-Cola", "US", up(0.2)), ("JPM", "JPMorgan", "US", up(0.3)), ("XOM", "Exxon", "US", up(0.25))]
+        db.study_themes.return_value = {}
+        db.hot_themes.return_value = []
+        db.study_coverage.return_value = {"sectors": {"반도체": 2}, "styles": {"기술주": 2}}
+        db.sectors_of.return_value = {"MU": "반도체", "KO": "음료"}
+        w.pick(mock.Mock(), {"id": "r", "market": "US", "status": "pending", "fresh": True})
+    system, prompt = w.ask.call_args.args[:2]
+    assert "아직 안 해 본 쪽" in system and "MU" not in prompt
+    assert "이미 공부한 업종: 반도체 2곳" in prompt and "배당주" in prompt and "업종: 음료" in prompt
+    assert db.create_ai_study.call_args.args[1] == "KO" and db.create_ai_study.call_args.args[4]["fresh"] is True
+
+
+def test_fresh_pool_keeps_everything_when_too_few_left():
+    cs = [cand("A"), cand("B"), cand("C")]
+    assert study.fresh_pool(cs, {"A": "반도체"}, {"반도체"}) == cs
+    assert [c.ticker for c in study.fresh_pool(cs + [cand("D")], {"A": "반도체"}, {"반도체"})] == ["B", "C", "D"]
