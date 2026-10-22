@@ -9,6 +9,7 @@ import { averageBefore, averagePrice, holdingDays, marketOf as tickerMarket, rem
 import type { Book } from "@/lib/books";
 import { loadBook } from "@/lib/booksData";
 import { buildCells, type Cell } from "@/lib/brief";
+import { decodeGame, score, STEPS, type Decision } from "@/lib/practice";
 import { loadBriefInput } from "@/lib/briefData";
 import { KIND_LABEL, validColor, validDoodle, validShape, type DoodlePoint, type LevelKind, type ShapeKind } from "@/lib/drawings";
 
@@ -676,4 +677,33 @@ export async function readBrief(ticker: string) {
     "SELECT cells, one_line, good, bad, pending, error, made_at FROM stock_briefs WHERE ticker = $1", [t],
   ).catch(() => []);
   return row ?? null;
+}
+
+// 관심종목 › 연습하기 기록. 점수는 화면이 보낸 값 대신 저장된 일봉으로 다시 셈해요.
+export async function savePractice(input: { game: string; steps: number; decisions: Decision[] }): Promise<number | null> {
+  const game = decodeGame(input.game);
+  if (!game || !Number.isInteger(input.steps) || input.steps < 0 || input.steps > STEPS || !Array.isArray(input.decisions)) return null;
+  const rows = await query<{ day: string; close: string }>(
+    "SELECT to_char(day, 'YYYY-MM-DD') AS day, close FROM price_history WHERE ticker = $1 ORDER BY day", [game.ticker],
+  );
+  const start = rows.findIndex((r) => r.day === game.start);
+  if (start < 0) return null;
+  const end = Math.min(rows.length - 1, start + input.steps);
+  // 화면은 시작 봉에서 몇 번째 봉인지(i)로 보내요.
+  const decisions = input.decisions.slice(0, 200)
+    .filter((d) => Number.isInteger(d?.i) && (d.side === "buy" || d.side === "sell"))
+    .map((d) => ({ i: start + d.i, side: d.side }));
+  const r = score(rows.map((x) => Number(x.close)), start, end, decisions);
+  const [named] = await query<{ name: string }>(
+    `SELECT name FROM (SELECT name, 1 AS k FROM practice_pool WHERE ticker = $1 UNION ALL SELECT name, 2 FROM watchlist WHERE ticker = $1
+       UNION ALL SELECT name, 3 FROM holdings WHERE ticker = $1) t WHERE name <> '' ORDER BY k LIMIT 1`, [game.ticker],
+  ).catch(() => []);
+  const [row] = await query<{ id: number }>(
+    `INSERT INTO practice_sessions (ticker, name, start_day, end_day, blind, trades, return_pct, hold_pct, calls, hits)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+    [game.ticker, named?.name ?? "", game.start, rows[end].day, game.blind,
+      JSON.stringify(r.trades.map((t) => ({ day: rows[t.i].day, side: t.side, price: t.price }))), r.returnPct, r.holdPct, r.calls, r.hits],
+  );
+  revalidatePath("/watch/practice");
+  return row.id;
 }

@@ -95,10 +95,15 @@ const md = (day: string) => `${Number(day.slice(5, 7))}.${Number(day.slice(8, 10
 const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
 const compact = (v: number): string => (v < 0 ? `−${compact(-v)}` : v >= 1e12 ? `${(v / 1e12).toFixed(1)}조` : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v.toLocaleString("ko-KR"));
 
-export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles, statements = [], shares = null, shapes: savedShapes = [] }: {
+export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles, statements = [], shares = null, shapes: savedShapes = [], practice }: {
   ticker: string; name: string; market: string; candles: Candle[]; minutes: MinuteCandle[]; memos: Memo[]; trades: Trade[]; levels: Level[]; today: string;
   current: number | null; marks: Mark[]; doodles: Doodle[]; statements?: StatementRow[]; shares?: number | null; shapes?: Shape[];
+  // 연습하기: 그린 것은 저장하지 않고 이 화면에서만 써요. blind면 날짜·가격대를 가려요.
+  practice?: { blind: boolean };
 }) {
+  const local = useRef(-1); // 연습하기에서 그린 것의 임시 번호
+  const nextLocal = () => local.current--;
+  const tickMarket = practice?.blind ? "US" : market;
   const [mode, setMode] = useState<"price" | BandKind>("price");
   const [menu, setMenu] = useState<null | "ind" | "show">(null);
   const toolsRef = useRef<HTMLDivElement>(null);
@@ -173,7 +178,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   const rangeRef = useRef<Range>(range);
   rangeRef.current = range;
 
-  const fmt = (v: number) => (market === "US" ? `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : Math.round(v).toLocaleString("ko-KR"));
+  const fmt = (v: number) => (practice?.blind ? v.toFixed(2) : market === "US" ? `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : Math.round(v).toLocaleString("ko-KR"));
   const bars = useMemo<Bar[]>(() => {
     if (intraday) {
       const openSec = market === "US" ? 9.5 * 3600 : 9 * 3600;
@@ -228,8 +233,9 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         },
         rightPriceScale: { borderColor: "#26262b", scaleMargins: { top: 0.16, bottom: 0.06 } },
         timeScale: { borderColor: "#26262b", rightOffset: 4, minBarSpacing: 2, timeVisible: intraday, secondsVisible: false },
-        localization: { locale: "ko-KR", dateFormat: "yyyy-MM-dd" },
+        localization: { locale: "ko-KR", dateFormat: "yyyy-MM-dd", ...(practice?.blind ? { timeFormatter: () => "" } : {}) },
       });
+      if (practice?.blind) chart.applyOptions({ timeScale: { tickMarkFormatter: () => "" } });
       chartRef.current = chart;
 
       const price = chart.addSeries(lc.CandlestickSeries, {
@@ -374,16 +380,23 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         // 누른 높이의 가격을 알림 가격 칸에 넣습니다. 현재가보다 높으면 "위로", 낮으면 "아래로".
         const at = p.point ? price.coordinateToPrice(p.point.y) : null;
         if (at !== null && at > 0) {
-          const v = tickRound(at, market);
+          const v = tickRound(at, tickMarket);
           setPick(String(v));
           const ref = current ?? bars[bars.length - 1].close;
           setWay(v >= ref ? "above" : "below");
         }
       });
-      applyRange(chart, bars, intraday ? "intraday" : rangeRef.current);
+      const kept = keep.current;
+      if (practice && kept && kept.view === view) {
+        // 연습하기: 봉이 하나 늘 때마다 차트를 새로 그리는데, 보던 자리는 그대로 두고 오른쪽 끝을 보고 있었으면 한 칸 따라가요.
+        const shift = kept.range.to >= kept.len - 1 ? bars.length - kept.len : 0;
+        chart.timeScale().setVisibleLogicalRange({ from: kept.range.from + shift, to: kept.range.to + shift });
+      } else applyRange(chart, bars, intraday ? "intraday" : rangeRef.current);
     })();
     return () => {
       disposed = true;
+      const r = chart?.timeScale().getVisibleLogicalRange();
+      if (r) keep.current = { range: { from: r.from, to: r.to }, len: bars.length, view };
       chart?.remove();
       chartRef.current = null;
       drawRef.current = null;
@@ -393,8 +406,14 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bars, show, levels, trades, memosByBar, maValues, bands, closes, today, big, intraday, mode, settings, rsiValues, macdValues, stochValues, obvValues, patternAt, divs, vwapFrom]);
 
+  const keep = useRef<{ range: { from: number; to: number }; len: number; view: View } | null>(null);
+  const lastRange = useRef(range);
   useEffect(() => {
+    // 연습하기에서는 봉이 늘어도 보던 자리를 지켜요. 기간 단추를 눌렀을 때만 맞춰요.
+    if (practice && lastRange.current === range) return;
+    lastRange.current = range;
     if (chartRef.current) applyRange(chartRef.current, bars, intraday ? "intraday" : range);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, bars, intraday]);
 
   const strokes = useMemo<Stroke[]>(() => doodles.filter((d) => d.view === view), [doodles, view]);
@@ -433,16 +452,16 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   refPrice.current = ref;
   async function saveMark(low: number, high: number | null) {
     const kind = kindFor(low, high, ref);
-    const id = await addLevel({ ticker, name, kind, low, high });
+    const id = practice ? nextLocal() : await addLevel({ ticker, name, kind, low, high });
     if (id !== null) setMarks((m) => [...m, { id, kind, low, high, memo: "", alert: false, color: null }]);
   }
   function changeMark(id: number, change: Partial<Pick<Mark, "memo" | "alert" | "kind" | "color">>) {
     setMarks((ms) => ms.map((m) => (m.id === id ? { ...m, ...change } : m)));
-    void updateLevel(id, change);
+    if (!practice) void updateLevel(id, change);
   }
   function removeMark(id: number) {
     setMarks((ms) => ms.filter((m) => m.id !== id));
-    void deleteLevel(id);
+    if (!practice) void deleteLevel(id);
   }
   // 선·구간·지우개 도구로 차트를 눌렀을 때
   function drawAt(v: number, x: number, y: number) {
@@ -464,13 +483,13 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
       const hit = strokesRef.current.find((s) => s.id !== null && strokeDistance([x, y], d.pixels(s.points)) <= 10);
       if (hit) {
         setDoodles((ds) => ds.filter((s) => s.id !== hit.id));
-        void deleteDoodle(hit.id!);
+        if (!practice) void deleteDoodle(hit.id!);
         return;
       }
       const sh = shapesRef.current.find((one) => shapeDistance(d, one, [x, y]) <= 8);
       if (sh) {
         setShapes((ss) => ss.filter((v) => v.id !== sh.id));
-        void deleteShape(sh.id);
+        if (!practice) void deleteShape(sh.id);
         return;
       }
       const m = marksRef.current.find((mk) => {
@@ -484,7 +503,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   // near가 있으면 그 봉 양옆 한 개씩을 먼저(넉넉하게), 없으면 화면에 보이는 봉 전체를(좁게) 봐요.
   function snapAt(y: number, x: number | null, raw: number): number {
     const chart = chartRef.current, price = priceRef.current;
-    if (!magnetRef.current || !chart || !price || !bars.length) return tickRound(raw, market);
+    if (!magnetRef.current || !chart || !price || !bars.length) return tickRound(raw, tickMarket);
     const toY = (v: number) => price.priceToCoordinate(v);
     const ohlc = (from: number, to: number) => bars.slice(Math.max(0, from), Math.min(bars.length, to + 1)).flatMap((b) => [b.open, b.high, b.low, b.close]);
     const logical = x === null ? null : chart.timeScale().coordinateToLogical(x);
@@ -495,7 +514,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     }
     const range = chart.timeScale().getVisibleLogicalRange();
     const hit = range ? snap(y, ohlc(Math.floor(range.from), Math.ceil(range.to)), toY, 6) : null;
-    return hit ?? tickRound(raw, market);
+    return hit ?? tickRound(raw, tickMarket);
   }
   // 도구를 고른 동안은 차트 위에 얇은 막을 덮어 누른 자리를 직접 받아요(차트는 빠른 두 번 누름을 놓쳐서).
   function tap(e: React.PointerEvent<HTMLDivElement>) {
@@ -558,16 +577,16 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     setDraft([]);
     drawRef.current?.set({ draft: null });
     setTool("none");
-    const id = await addShape({ ticker, name, view, kind, points });
+    const id = practice ? nextLocal() : await addShape({ ticker, name, view, kind, points });
     if (id !== null) setShapes((ss) => [...ss, { id, view, kind, points, color: null, alert: false }]);
   }
   function changeShape(id: number, change: Partial<Pick<Shape, "alert">>) {
     setShapes((ss) => ss.map((x) => (x.id === id ? { ...x, ...change } : x)));
-    void updateShape(id, change);
+    if (!practice) void updateShape(id, change);
   }
   function removeShape(id: number) {
     setShapes((ss) => ss.filter((x) => x.id !== id));
-    void deleteShape(id);
+    if (!practice) void deleteShape(id);
   }
 
   // ↕ 옮기기 모드에서 선(구간이면 위·아래 끝)을 잡고 위아래로 끌면 옮겨져요.
@@ -638,7 +657,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
       setTimeout(() => (dragged.current = false), 400);
       chartRef.current?.applyOptions({ handleScroll: true, handleScale: true });
       setMarks((ms) => ms.map((x) => (x.id === fixed.id ? { ...fixed, kind } : x)));
-      void updateLevel(fixed.id, { low: fixed.low, high: fixed.high, kind });
+      if (!practice) void updateLevel(fixed.id, { low: fixed.low, high: fixed.high, kind });
     };
     // 폰에서 끄는 동안 화면이 같이 스크롤되지 않게
     const touch = (e: TouchEvent) => drag && e.preventDefault();
@@ -689,7 +708,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     live.current = null;
     if (!cur || !cur.pts.length) return;
     const points = thin(cur.px).map((i) => cur.pts[i]);
-    const id = await addDoodle({ ticker, view, color: PEN, points });
+    const id = practice ? nextLocal() : await addDoodle({ ticker, view, color: PEN, points });
     if (id !== null) setDoodles((ds) => [...ds, { id, view, color: PEN, points }]);
     else syncDrawings();
   }
@@ -729,7 +748,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           {mode === "price" && (
             <>
               <div className="segment small views">
-                {VIEWS.map((v) => <button key={v.key} type="button" aria-selected={view === v.key} onClick={() => setView(v.key)}>{v.label}</button>)}
+                {VIEWS.filter((v) => !practice || ["D", "W", "M"].includes(v.key)).map((v) => <button key={v.key} type="button" aria-selected={view === v.key} onClick={() => setView(v.key)}>{v.label}</button>)}
               </div>
               <div className={intraday ? "segment small hidden" : "segment small"}>
                 {RANGES.map((r) => <button key={r.key} type="button" aria-selected={range === r.key} onClick={() => setRange(r.key)}>{r.label}</button>)}
@@ -766,7 +785,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
                 </button>
                 {menu === "show" && (
                   <div className="menu-pop" role="menu">
-                    {SHOWS.map(([k, text]) => (
+                    {SHOWS.filter(([k]) => !practice || k === "trades" || k === "drawings").map(([k, text]) => (
                       <label key={k} className="menu-item">
                         <input type="checkbox" checked={k === "drawings" ? drawShown : show[k]} onChange={() => (k === "drawings" ? setDrawShown((v) => !v) : toggle(k))} />
                         <span>{text}</span>
@@ -776,11 +795,11 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
                 )}
               </div>
             )}
-            <div className="segment small modes" role="tablist" aria-label="차트 종류">
+            {!practice && <div className="segment small modes" role="tablist" aria-label="차트 종류">
               {([["price", "가격"], ["per", "PER 밴드"], ["pbr", "PBR 밴드"]] as const).map(([k, label]) => (
                 <button key={k} type="button" role="tab" aria-selected={mode === k} onClick={() => { setMode(k); setMenu(null); setTool("none"); }}>{label}</button>
               ))}
-            </div>
+            </div>}
             {mode === "price" && (
               <button type="button" className="chip-btn icon" aria-label={big ? "크게 보기 닫기" : "크게 보기"} title={big ? "닫기" : "크게 보기"} onClick={() => setBig((b) => !b)}>{big ? "✕" : "⛶"}</button>
             )}
@@ -809,7 +828,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           <div className="chart-box">
             <div className="chart-legend">
               <div>
-                <span className="muted">{bar.label}{view === "W" ? " 주" : view === "M" ? " 월" : ""}</span>
+                {!practice?.blind && <span className="muted">{bar.label}{view === "W" ? " 주" : view === "M" ? " 월" : ""}</span>}
                 <span><i>시</i>{fmt(bar.open)}</span>
                 <span><i>고</i><b className="up">{fmt(bar.high)}</b></span>
                 <span><i>저</i><b className="down">{fmt(bar.low)}</b></span>
@@ -891,7 +910,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
             </div>
           </div>
         )}
-        {mode === "price" && <p className="chart-foot">
+        {mode === "price" && !practice && <p className="chart-foot">
           휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 지지·저항은 모든 차트에, 낙서는 그린 차트에만 보여요. 선·구간은 ↕ 옮기기를 켜고 잡아 끌면 옮겨지고, 🧲 자석이 켜져 있으면 캔들 꼬리·몸통에 붙어요. 차트:{" "}
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a> Lightweight Charts
         </p>}
@@ -899,7 +918,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
 
       {viewShapes.length > 0 && (
         <div className="list levels-list">
-          <div className="muted levels-head">이 차트에 그린 추세선·채널·피보나치 · 일봉 추세선·채널은 🔔를 켜 두면 가격이 닿을 때 텔레그램으로 알려요</div>
+          <div className="muted levels-head">{practice ? "이 연습에서 그린 추세선·채널·피보나치 · 저장되지 않아요" : "이 차트에 그린 추세선·채널·피보나치 · 일봉 추세선·채널은 🔔를 켜 두면 가격이 닿을 때 텔레그램으로 알려요"}</div>
           {viewShapes.map((x) => (
             <div key={x.id} className="list-item level-row">
               <span className="sw line" style={{ background: x.color ?? "#e7cf9c" }} />
@@ -907,9 +926,10 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
               <span className="num">
                 {x.kind === "fib"
                   ? `${fmt(x.points[0][2])} → ${fmt(x.points[1][2])} · 50% ${fmt(fibPrices(x.points[0][2], x.points[1][2])[3].price)}`
-                  : `${x.points[0][0].slice(0, 10)} ${fmt(x.points[0][2])} → ${x.points[1][0].slice(0, 10)} ${fmt(x.points[1][2])}`}
+                  : practice?.blind ? `${fmt(x.points[0][2])} → ${fmt(x.points[1][2])}`
+                    : `${x.points[0][0].slice(0, 10)} ${fmt(x.points[0][2])} → ${x.points[1][0].slice(0, 10)} ${fmt(x.points[1][2])}`}
               </span>
-              {x.kind !== "fib" && view === "D" && (
+              {x.kind !== "fib" && view === "D" && !practice && (
                 <button type="button" className={x.alert ? "chip-btn on" : "chip-btn"} aria-pressed={x.alert} onClick={() => changeShape(x.id, { alert: !x.alert })}>
                   {x.alert ? "🔔 알림 켜짐" : "🔕 알림 꺼짐"}
                 </button>
@@ -922,7 +942,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
 
       {marks.length > 0 && (
         <div className="list levels-list">
-          <div className="muted levels-head">내가 그린 지지·저항 · 🔔를 켜 두면 가격이 닿을 때 텔레그램으로 알려요</div>
+          <div className="muted levels-head">{practice ? "이 연습에서 그린 지지·저항 · 저장되지 않아요" : "내가 그린 지지·저항 · 🔔를 켜 두면 가격이 닿을 때 텔레그램으로 알려요"}</div>
           {[...marks].sort((a, b) => (b.high ?? b.low) - (a.high ?? a.low)).map((m) => (
             <div key={m.id} className="list-item level-row">
               <span className={m.high === null ? "sw line" : "sw"} style={{ background: markColor(m) }} />
@@ -938,16 +958,18 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
               </span>
               <input className="level-memo" defaultValue={m.memo} placeholder="메모 (예: 전고점)" maxLength={100}
                 onBlur={(e) => e.target.value.trim() !== m.memo && changeMark(m.id, { memo: e.target.value.trim() })} />
-              <button type="button" className={m.alert ? "chip-btn on" : "chip-btn"} aria-pressed={m.alert} onClick={() => changeMark(m.id, { alert: !m.alert })}>
-                {m.alert ? "🔔 알림 켜짐" : "🔕 알림 꺼짐"}
-              </button>
+              {!practice && (
+                <button type="button" className={m.alert ? "chip-btn on" : "chip-btn"} aria-pressed={m.alert} onClick={() => changeMark(m.id, { alert: !m.alert })}>
+                  {m.alert ? "🔔 알림 켜짐" : "🔕 알림 꺼짐"}
+                </button>
+              )}
               <button type="button" className="ghost" onClick={() => removeMark(m.id)}>지우기</button>
             </div>
           ))}
         </div>
       )}
 
-      <form action={addAlert} className="memo-form alert-form" onSubmit={() => setTimeout(() => setPick(""), 0)}>
+      {!practice && <form action={addAlert} className="memo-form alert-form" onSubmit={() => setTimeout(() => setPick(""), 0)}>
         <input type="hidden" name="ticker" value={ticker} />
         <input type="hidden" name="name" value={name} />
         <div className="segment" role="radiogroup" aria-label="알림 방향">
@@ -961,16 +983,16 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         <input name="price" inputMode="decimal" placeholder="알림 가격 (차트를 눌러도 돼요)" value={pick} onChange={(e) => setPick(e.target.value)} required />
         <input name="memo" placeholder="메모 (선택)" maxLength={200} />
         <button type="submit">텔레그램 알림 만들기</button>
-      </form>
+      </form>}
 
-      <form action={addChartMemo} className="row memo-form">
+      {!practice && <form action={addChartMemo} className="row memo-form">
         <input type="hidden" name="ticker" value={ticker} />
         <input type="date" name="day" value={day} max={today} onChange={(e) => setDay(e.target.value)} required />
         <input name="body" placeholder="이 날 무슨 생각을 했나요? (예: 실적 발표 후 급락, 분할매수 시작)" maxLength={500} required />
         <button type="submit">메모 남기기</button>
-      </form>
+      </form>}
 
-      {memos.length > 0 && (
+      {!practice && memos.length > 0 && (
         <div className="list">
           {memos.map((m) => (
             <form key={m.id} action={deleteChartMemo} className="list-item">
