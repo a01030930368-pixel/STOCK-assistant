@@ -412,6 +412,29 @@ CREATE TABLE chart_shapes (
 );
 CREATE INDEX chart_shapes_ticker_idx ON chart_shapes (ticker, view);
 
+-- 관심종목 › 연습하기: 연습용으로 일봉을 받아 둘 큰 종목들(워커가 채워요), 연습 기록
+CREATE TABLE practice_pool (
+  ticker      TEXT PRIMARY KEY,
+  name        TEXT NOT NULL DEFAULT '',
+  market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
+  fetched_at  TIMESTAMPTZ,
+  error       TEXT
+);
+CREATE TABLE practice_sessions (
+  id          SERIAL PRIMARY KEY,
+  ticker      TEXT NOT NULL,
+  name        TEXT NOT NULL DEFAULT '',
+  start_day   DATE NOT NULL,
+  end_day     DATE NOT NULL,
+  blind       BOOLEAN NOT NULL DEFAULT true,
+  trades      JSONB NOT NULL DEFAULT '[]',
+  return_pct  NUMERIC(10, 2) NOT NULL,
+  hold_pct    NUMERIC(10, 2) NOT NULL,
+  calls       INTEGER NOT NULL DEFAULT 0,
+  hits        INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- 날짜 계산(CURRENT_DATE)을 한국 날짜로 합니다.
 DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET timezone TO %L', current_database(), 'Asia/Seoul'); END $$;
 

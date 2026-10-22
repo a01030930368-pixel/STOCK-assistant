@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import AskHistory from "@/app/_components/AskHistory";
 import ReturnChart from "@/app/_components/ReturnChart";
+import WatchTabs from "@/app/watch/WatchTabs";
 import { COLORS, daysBefore, leader, MAX, PERIODS, rebase, ROWS, type Close, type Metrics, type PeriodKey } from "@/lib/compare";
 import { times } from "@/lib/bands";
 import { money } from "@/lib/flows";
@@ -58,7 +59,7 @@ export default function CompareView({ stocks, period, today, options, pending, e
 
   return (
     <div className="compare">
-      <div className="page-head"><h1>종목 비교</h1></div>
+      <div className="board-head"><h1>관심종목</h1><WatchTabs on="compare" /></div>
       <div className="compare-bar">
         {stocks.map((s, k) => (
           <span key={s.ticker} className="compare-pick">

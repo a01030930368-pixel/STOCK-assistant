@@ -918,3 +918,28 @@ a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-d
 .draw-rail .rail-fly button { width: auto; height: auto; display: flex; gap: 10px; align-items: center; padding: 7px 12px; white-space: nowrap; font-size: 0.84rem; }
 .rail-fly button span { width: 16px; text-align: center; }
 .fib-ic { font-size: 0.62rem; font-weight: 700; letter-spacing: -0.02em; }
+
+/* 관심종목 › 연습하기 */
+.practice-start h2, .practice-past h2 { margin-top: 0; }
+.practice-dice { font-size: 1.05rem; padding: 12px 22px; margin: 6px 0 4px; }
+.practice-pick { flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.practice-pick input[name="t"] { min-width: 220px; }
+.practice-small { font-size: 0.82rem; }
+.practice-warn { color: var(--up); }
+.practice-bar { display: grid; gap: 12px; margin-bottom: 14px; }
+.practice-title { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+.practice-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.practice-acts button { min-width: 92px; }
+.practice-acts button.buy { background: var(--up); color: #1a0d0b; }
+.practice-acts button.sell { background: var(--down); color: #0b111c; }
+.practice-acts button.soft { background: var(--accent-soft); color: var(--accent); }
+.practice-acts button:disabled { opacity: 0.35; cursor: default; filter: none; }
+.practice-play { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.practice-play .segment.small { margin: 0; }
+.practice-score { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.practice-name { font-size: 1.1rem; margin: 0; }
+.practice-trades { margin: 0; padding-left: 18px; display: grid; gap: 2px; font-size: 0.88rem; }
+.practice-row { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+@media (max-width: 720px) {
+  .practice-acts button { flex: 1; min-width: 0; }
+}
