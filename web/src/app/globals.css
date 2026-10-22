@@ -972,3 +972,13 @@ a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-d
   .chart-cell-right form { flex: 1; min-width: 0; display: flex; }
   .chart-cell-right input { width: 100%; }
 }
+
+.chart-sub { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 12px; }
+.chart-sub .ind-chips { flex: 1; min-width: 0; }
+.chart-sub .chart-near { margin: 4px 0 8px auto; }
+/* 전체화면: 위 막대를 얇게, 글자는 크게 */
+.chart-wrap.big .chart-tools { margin: 0 0 6px; }
+.chart-wrap.big .chart-box .chart-legend { font-size: 0.92rem; }
+@media (max-width: 720px) {
+  .chart-sub .chart-near { order: -1; width: 100%; margin: 0 0 4px; }
+}

@@ -221,7 +221,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         autoSize: true,
         layout: {
           background: { type: lc.ColorType.Solid, color: "transparent" },
-          textColor: MUTED, fontSize: 11, fontFamily: "'Pretendard Variable', Pretendard, sans-serif",
+          textColor: MUTED, fontSize: big ? 13 : 11, fontFamily: "'Pretendard Variable', Pretendard, sans-serif",
           attributionLogo: false,
           panes: { separatorColor: "#26262b", separatorHoverColor: "#2a2418" },
         },
@@ -231,7 +231,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           vertLine: { color: MUTED, labelBackgroundColor: "#2a2418" },
           horzLine: { color: MUTED, labelBackgroundColor: "#2a2418" },
         },
-        rightPriceScale: { borderColor: "#26262b", scaleMargins: { top: 0.16, bottom: 0.06 } },
+        rightPriceScale: { borderColor: "#26262b", scaleMargins: { top: big ? 0.1 : 0.16, bottom: 0.04 } },
         timeScale: { borderColor: "#26262b", rightOffset: 4, minBarSpacing: 2, timeVisible: intraday, secondsVisible: false },
         localization: { locale: "ko-KR", dateFormat: "yyyy-MM-dd", ...(practice?.blind ? { timeFormatter: () => "" } : {}) },
       });
@@ -295,7 +295,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           time: b.time, value: b.volume ?? 0,
           color: (i === 0 ? b.close >= b.open : b.close >= bars[i - 1].close) ? "rgba(232,128,111,0.55)" : "rgba(134,168,230,0.55)",
         })));
-        chart.panes()[pane].setStretchFactor(0.28);
+        chart.panes()[pane].setStretchFactor(big ? 0.18 : 0.28);
         pane++;
       }
       const guides = (s: ISeriesApi<"Line">, lo: number, hi: number) => {
@@ -805,16 +805,20 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
             )}
           </div>
         </div>
-        {mode === "price" && (near.above || near.below) && (
-          <div className="chart-near">
-            {near.above && <span className="near" style={{ color: RESIST, borderColor: RESIST }}>🔔 저항 {fmt(near.above.mark.low)}까지 {signed(near.above.pct)}</span>}
-            {near.below && <span className="near" style={{ color: SUPPORT, borderColor: SUPPORT }}>🔔 지지 {fmt(near.below.mark.high ?? near.below.mark.low)}까지 {signed(near.below.pct)}</span>}
+        {mode === "price" && (
+          // 켠 지표 이름표와 가까운 지지·저항 안내를 한 줄에 둬서 차트 칸을 넓혀요.
+          <div className="chart-sub">
+            {bars.length >= 2 && (
+              <IndicatorChips items={indOn} settings={settings} edit={edit} setEdit={setEdit} onOff={toggle} onAdd={() => setMenu("ind")}
+                onSave={(k, v) => { setSettings((s) => cleanSettings({ ...s, [k]: k === "rsi" ? v[0] : v })); setEdit(null); }} />
+            )}
+            {(near.above || near.below) && (
+              <div className="chart-near">
+                {near.above && <span className="near" style={{ color: RESIST, borderColor: RESIST }}>🔔 저항 {fmt(near.above.mark.low)}까지 {signed(near.above.pct)}</span>}
+                {near.below && <span className="near" style={{ color: SUPPORT, borderColor: SUPPORT }}>🔔 지지 {fmt(near.below.mark.high ?? near.below.mark.low)}까지 {signed(near.below.pct)}</span>}
+              </div>
+            )}
           </div>
-        )}
-
-        {mode === "price" && bars.length >= 2 && (
-          <IndicatorChips items={indOn} settings={settings} edit={edit} setEdit={setEdit} onOff={toggle} onAdd={() => setMenu("ind")}
-            onSave={(k, v) => { setSettings((s) => cleanSettings({ ...s, [k]: k === "rsi" ? v[0] : v })); setEdit(null); }} />
         )}
         {mode !== "price" ? (
           <BandChart kind={mode} candles={candles} statements={statements} shares={shares} market={market} current={current} fmt={fmt} />
@@ -910,7 +914,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
             </div>
           </div>
         )}
-        {mode === "price" && !practice && <p className="chart-foot">
+        {mode === "price" && !practice && !big && <p className="chart-foot">
           휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 지지·저항은 모든 차트에, 낙서는 그린 차트에만 보여요. 선·구간은 ↕ 옮기기를 켜고 잡아 끌면 옮겨지고, 🧲 자석이 켜져 있으면 캔들 꼬리·몸통에 붙어요. 차트:{" "}
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a> Lightweight Charts
         </p>}
