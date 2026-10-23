@@ -101,8 +101,19 @@ RETRY_STATUS = {404, 429, 500, 503}
 
 
 # 긴 답(기업 공부 노트 전체 등)은 1분 넘게 걸리기도 해요.
+LONG = 2048
+
+
 def wait_for(max_tokens: int) -> int:
-    return 60 if max_tokens <= 2048 else 150
+    return 60 if max_tokens <= LONG else 240
+
+
+# 다음에 써 볼 모델. 긴 답(기업 공부 노트)은 질이 떨어지는 lite 모델로 넘어가지 않아요.
+def gemini_chain(model: str, max_tokens: int) -> tuple[str, ...]:
+    chain = (model, *GEMINI_FALLBACKS)
+    if max_tokens > LONG:
+        chain = tuple(m for m in chain if "lite" not in m or m == model)
+    return tuple(dict.fromkeys(chain))
 
 
 # Gemini는 생각(thinking)에 쓴 글자도 답 길이 한도에 셉니다. 짧은 답을 바라도 한도는 넉넉히 둬야 답이 비거나 잘리지 않아요.
@@ -115,7 +126,7 @@ def gemini_text(system: str, prompt: str, key: str, model: str, http: httpx.Clie
     # JSON으로 답하라는 지시가 있는 곳에서만 JSON 형식을 강제합니다. "티커|문장" 같은 글로 답할 곳까지 막으면 답이 깨져요.
     if "JSON" in system:
         config["responseMimeType"] = "application/json"
-    for m in dict.fromkeys((model, *GEMINI_FALLBACKS)):
+    for m in gemini_chain(model, max_tokens):
         # 키는 주소가 아니라 헤더로 보내서 오류 메시지·로그에 남지 않게 합니다.
         # 너무 오래 걸리면(시간 초과) 더 빠른 다음 모델로 넘어가요.
         try:
@@ -149,7 +160,7 @@ def gemini_text(system: str, prompt: str, key: str, model: str, http: httpx.Clie
 def _gemini_search(system: str, prompt: str, key: str, model: str, http: httpx.Client, max_tokens: int) -> tuple[str, list[dict]]:
     # 구글 검색을 켜면 JSON 형식 강제를 같이 못 써요. 글에서 JSON을 찾아 읽습니다.
     errors = []
-    for m in dict.fromkeys((model, *GEMINI_FALLBACKS)):
+    for m in gemini_chain(model, max_tokens):
         try:
             res = http.post(
                 f"{GEMINI_API}{m}:generateContent",
@@ -160,7 +171,7 @@ def _gemini_search(system: str, prompt: str, key: str, model: str, http: httpx.C
                     "tools": [{"google_search": {}}],
                     "generationConfig": {"maxOutputTokens": max(max_tokens, GEMINI_MIN_TOKENS)},
                 },
-                timeout=180,
+                timeout=300,
             )
         except httpx.TimeoutException:
             errors.append(f"{m} 시간 초과")
