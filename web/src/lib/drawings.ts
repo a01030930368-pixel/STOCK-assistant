@@ -14,6 +14,8 @@ export const COLORS: { value: string | null; label: string }[] = [
   { value: "#b48ead", label: "보라" }, { value: "#e0a458", label: "주황" }, { value: "#ece8df", label: "흰색" },
   { value: "#e8806f", label: "빨강" }, { value: "#86a8e6", label: "파랑" },
 ];
+// 차트 위 선 이름: 내가 이름을 붙였으면 그 이름만, 아니면 지지·저항
+export const markLabel = (m: Pick<Mark, "kind" | "memo" | "alert">) => `${m.memo || KIND_LABEL[m.kind]}${m.alert ? " 🔔" : ""}`;
 export const markColor = (m: Pick<Mark, "kind" | "color">) => m.color ?? (m.kind === "support" ? SUPPORT : RESIST);
 export const validColor = (c: unknown): c is string | null => c === null || (typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c));
 
