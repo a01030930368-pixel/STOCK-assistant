@@ -189,3 +189,19 @@ def test_drops_events_that_already_happened():
     d = study.parse_draft(json.dumps({"events": [{"when": "2025년 4월 말", "text": "3분기 실적"}, {"when": "2027년 1월 말", "text": "2분기 실적"}]}), today=today)
     assert [e["text"] for e in d["events"]] == ["2분기 실적"]
     assert study.draft_prompt("마이크로소프트", "US", {}, today).startswith("오늘 날짜: 2026-10-23")
+
+
+def test_busy_gemini_retries_the_note_later_instead_of_failing():
+    cfg = mock.Mock(gemini_api_key="k", anthropic_api_key="", ai_model="")
+    w = study.StudyWorker(cfg, mock.Mock())
+    w.search = mock.Mock(side_effect=study.ai.AiBusy("busy"))
+    w.ask = mock.Mock(side_effect=study.ai.AiBusy("busy"))
+    with mock.patch.object(study, "db") as db:
+        db.study_context.return_value = {}
+        db.retry_study_draft.return_value = "19:10"
+        w.draft(mock.Mock(), "MSFT", "Microsoft", "US", "t0")
+        db.retry_study_draft.assert_called_once_with(mock.ANY, "MSFT", "t0", 10, 6)
+        db.finish_study_draft.assert_not_called()
+        db.retry_study_draft.return_value = None
+        w.draft(mock.Mock(), "MSFT", "Microsoft", "US", "t0")
+        assert db.finish_study_draft.call_args.args[3] == "error"

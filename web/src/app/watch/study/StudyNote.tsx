@@ -129,7 +129,7 @@ function AiBar({ status, error, has, fill, searched, searchError, onAsk }: {
   return (
     <div className="study-aibar">
       {status === "pending" ? (
-        <span className="muted">{fill ? "🤖 AI가 검색해서 노트 전체를 채우는 중이에요… 길면 5분쯤 걸려요. 다른 화면에 가도 돼요." : "✨ AI가 검색해 보고 초안을 쓰는 중이에요…"}</span>
+        <span className="muted">{error ? `⏳ ${error}` : fill ? "🤖 AI가 검색해서 노트 전체를 채우는 중이에요… 길면 5분쯤 걸려요. 다른 화면에 가도 돼요." : "✨ AI가 검색해 보고 초안을 쓰는 중이에요…"}</span>
       ) : (
         <>
           <button type="button" onClick={() => onAsk(true)}>🤖 AI가 전부 채우기</button>

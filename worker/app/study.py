@@ -276,6 +276,9 @@ def draft_prompt(name: str, market: str, ctx: dict, today: date | None = None) -
     return "\n".join(lines)
 
 
+RETRY_MINUTES, RETRY_TRIES = 10, 6  # 붐비면 10분 뒤, 최대 6번(1시간)
+
+
 class StudyWorker:
     def __init__(self, cfg: Config, http: httpx.Client, rand: random.Random | None = None):
         self.http = http
@@ -375,6 +378,12 @@ class StudyWorker:
             db.finish_study_draft(conn, ticker, out, "done", None, asked_at)
             db.add_study_peers(conn, ticker, out["peers"])
             log.info("%s 기업 공부 AI 초안을 썼습니다", name)
+        except ai.AiBusy as e:
+            # 질 낮은 가벼운 모델로 쓰는 대신, 조금 뒤 같은 모델로 다시 써 봐요.
+            if at := db.retry_study_draft(conn, ticker, asked_at, RETRY_MINUTES, RETRY_TRIES):
+                log.info("%s 기업 공부 초안: Gemini가 붐벼 %s에 다시 써요", name, at)
+                return
+            db.finish_study_draft(conn, ticker, None, "error", f"Gemini가 계속 붐벼요. 나중에 다시 눌러 보세요. ({e})"[:200], asked_at)
         except Exception as e:
             msg = "AI 답이 너무 오래 걸려 끊겼어요. 잠시 뒤 다시 눌러 보세요." if isinstance(e, httpx.TimeoutException) else str(e)
             db.finish_study_draft(conn, ticker, None, "error", msg[:200], asked_at)

@@ -457,6 +457,8 @@ CREATE TABLE study_notes (
   ai_error     TEXT,
   ai_asked_at  TIMESTAMPTZ,
   ai_fill      BOOLEAN NOT NULL DEFAULT false,
+  ai_retry_at  TIMESTAMPTZ,   -- Gemini가 붐비면 이때 다시 써 봐요
+  ai_tries     INTEGER NOT NULL DEFAULT 0,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );

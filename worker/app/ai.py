@@ -5,6 +5,7 @@ GEMINI_API_KEY(구글 무료 키)가 있으면 Gemini를, 없고 ANTHROPIC_API_K
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -96,8 +97,32 @@ def ask(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
 
 
 # 고른 모델이 붐비거나(503) 한도에 걸리면(429) 다음 무료 모델로 넘어갑니다.
-GEMINI_FALLBACKS = ("gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite")
+# -latest 이름은 구글이 새 버전으로 알아서 바꿔 줘서 없어지지(404) 않아요.
+GEMINI_FALLBACKS = ("gemini-pro-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite")
 RETRY_STATUS = {404, 429, 500, 503}
+BUSY_STATUS = {429, 500, 503}
+BUSY_WAIT = 8  # 붐빔(503) 답을 받으면 이만큼(초) 쉬고 같은 모델에 한 번 더 물어요
+
+
+class AiBusy(RuntimeError):
+    """모든 모델이 붐비거나(503·429) 너무 오래 걸렸어요. 조금 뒤 다시 하면 될 때가 많아요."""
+
+
+def _post_gemini(http: httpx.Client, model: str, key: str, body: dict, timeout: int) -> httpx.Response:
+    url = f"{GEMINI_API}{model}:generateContent"
+    # 키는 주소가 아니라 헤더로 보내서 오류 메시지·로그에 남지 않게 합니다.
+    headers = {"x-goog-api-key": key, "content-type": "application/json"}
+    res = http.post(url, headers=headers, json=body, timeout=timeout)
+    if res.status_code in (500, 503):
+        time.sleep(BUSY_WAIT)
+        res = http.post(url, headers=headers, json=body, timeout=timeout)
+    return res
+
+
+def _gave_up(errors: list[tuple[str, int | None]]) -> RuntimeError:
+    text = ", ".join(f"{m} {'시간 초과' if code is None else code}" for m, code in errors)
+    busy = any(code is None or code in BUSY_STATUS for _, code in errors)
+    return (AiBusy if busy else RuntimeError)("Gemini가 붐비거나 너무 오래 걸려 다음에 다시 시도합니다: " + text)
 
 
 # 긴 답(기업 공부 노트 전체 등)은 1분 넘게 걸리기도 해요.
@@ -127,24 +152,18 @@ def gemini_text(system: str, prompt: str, key: str, model: str, http: httpx.Clie
     if "JSON" in system:
         config["responseMimeType"] = "application/json"
     for m in gemini_chain(model, max_tokens):
-        # 키는 주소가 아니라 헤더로 보내서 오류 메시지·로그에 남지 않게 합니다.
-        # 너무 오래 걸리면(시간 초과) 더 빠른 다음 모델로 넘어가요.
+        # 너무 오래 걸리면(시간 초과) 다음 모델로 넘어가요.
         try:
-            res = http.post(
-                f"{GEMINI_API}{m}:generateContent",
-                headers={"x-goog-api-key": key, "content-type": "application/json"},
-                json={
-                    "systemInstruction": {"parts": [{"text": system}]},
-                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": config,
-                },
-                timeout=wait_for(max_tokens),
-            )
+            res = _post_gemini(http, m, key, {
+                "systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": config,
+            }, wait_for(max_tokens))
         except httpx.TimeoutException:
-            errors.append(f"{m} 시간 초과")
+            errors.append((m, None))
             continue
         if res.status_code in RETRY_STATUS:
-            errors.append(f"{m} {res.status_code}")
+            errors.append((m, res.status_code))
             continue
         if res.status_code >= 400:
             raise RuntimeError(f"Gemini API 오류 {res.status_code}: {res.text[:160]}")
@@ -154,7 +173,7 @@ def gemini_text(system: str, prompt: str, key: str, model: str, http: httpx.Clie
         if cands and cands[0].get("finishReason") == "MAX_TOKENS":
             log.warning("Gemini 답이 길이 한도에서 잘렸어요 (%s)", m)
         return text
-    raise RuntimeError("Gemini가 붐비거나 너무 오래 걸려 다음에 다시 시도합니다: " + ", ".join(errors))
+    raise _gave_up(errors)
 
 
 def _gemini_search(system: str, prompt: str, key: str, model: str, http: httpx.Client, max_tokens: int) -> tuple[str, list[dict]]:
@@ -162,22 +181,17 @@ def _gemini_search(system: str, prompt: str, key: str, model: str, http: httpx.C
     errors = []
     for m in gemini_chain(model, max_tokens):
         try:
-            res = http.post(
-                f"{GEMINI_API}{m}:generateContent",
-                headers={"x-goog-api-key": key, "content-type": "application/json"},
-                json={
-                    "systemInstruction": {"parts": [{"text": system}]},
-                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "tools": [{"google_search": {}}],
-                    "generationConfig": {"maxOutputTokens": max(max_tokens, GEMINI_MIN_TOKENS)},
-                },
-                timeout=300,
-            )
+            res = _post_gemini(http, m, key, {
+                "systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "tools": [{"google_search": {}}],
+                "generationConfig": {"maxOutputTokens": max(max_tokens, GEMINI_MIN_TOKENS)},
+            }, 300)
         except httpx.TimeoutException:
-            errors.append(f"{m} 시간 초과")
+            errors.append((m, None))
             continue
         if res.status_code in RETRY_STATUS:
-            errors.append(f"{m} {res.status_code}")
+            errors.append((m, res.status_code))
             continue
         if res.status_code >= 400:
             raise RuntimeError(f"Gemini 검색 오류 {res.status_code}: {res.text[:160]}")
@@ -188,7 +202,7 @@ def _gemini_search(system: str, prompt: str, key: str, model: str, http: httpx.C
         chunks = (cands[0].get("groundingMetadata") or {}).get("groundingChunks") or []
         sources = [{"title": (c.get("web") or {}).get("title", ""), "url": (c.get("web") or {}).get("uri", "")} for c in chunks if c.get("web")]
         return "".join(p.get("text", "") for p in parts if not p.get("thought")), sources
-    raise RuntimeError("Gemini가 붐비거나 너무 오래 걸려 다음에 다시 시도합니다: " + ", ".join(errors))
+    raise _gave_up(errors)
 
 
 def _claude_search(system: str, prompt: str, key: str, model: str, http: httpx.Client, max_tokens: int) -> tuple[str, list[dict]]:

@@ -849,7 +849,7 @@ export async function readStudyCompare(id: string): Promise<{ status: string; te
 export async function requestStudyDraft(ticker: string, fill = false) {
   const t = String(ticker ?? "").toUpperCase();
   if (!STUDY_TICKER.test(t)) return;
-  await query("UPDATE study_notes SET ai_status = 'pending', ai_error = NULL, ai_asked_at = now(), ai_fill = $2 WHERE ticker = $1", [t, Boolean(fill)]);
+  await query("UPDATE study_notes SET ai_status = 'pending', ai_error = NULL, ai_asked_at = now(), ai_fill = $2, ai_retry_at = NULL, ai_tries = 0 WHERE ticker = $1", [t, Boolean(fill)]);
 }
 
 // 🤖 전부 채우기를 부탁했고 초안이 왔으면 한 번만 채워요. 화면을 열 때와 기다리는 중에 불러요.

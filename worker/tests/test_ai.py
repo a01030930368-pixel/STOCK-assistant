@@ -118,7 +118,8 @@ def test_ask_gemini_falls_back_when_model_is_busy():
         return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": '{"tone": "중립", "comment": "ok"}'}]}}]})
 
     c = ai.ask_gemini("p", "k", "gemini-flash-latest", httpx.Client(transport=httpx.MockTransport(handler)))
-    assert c.body == "ok" and tried == ["gemini-flash-latest", ai.GEMINI_FALLBACKS[0]]
+    # 붐비면 같은 모델에 한 번 더 묻고, 그래도 붐비면 다음 모델로
+    assert c.body == "ok" and tried == ["gemini-flash-latest", "gemini-flash-latest", ai.GEMINI_FALLBACKS[0]]
 
 
 def test_ask_gemini_gives_up_after_all_models_busy():
@@ -203,13 +204,34 @@ def test_gemini_moves_to_faster_model_when_one_times_out():
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
     assert ai.gemini_text("s", "p", "k", "slow-model", http, 4096) == "답"
-    assert seen[0] == ("slow-model:generateContent", 240) and seen[1][0] == "gemini-2.5-flash:generateContent"
+    assert seen[0] == ("slow-model:generateContent", 240) and seen[1][0] == "gemini-pro-latest:generateContent"
     seen.clear()
     assert ai._gemini_search("s", "p", "k", "slow-model", http, 4096) == ("답", [])
     assert len(seen) == 2
 
 
 def test_long_answers_never_fall_back_to_lite_models():
-    assert ai.gemini_chain("gemini-flash-latest", 4096) == ("gemini-flash-latest", "gemini-2.5-flash")
+    assert ai.gemini_chain("gemini-flash-latest", 4096) == ("gemini-flash-latest", "gemini-pro-latest", "gemini-2.5-flash")
     assert "gemini-flash-lite-latest" in ai.gemini_chain("gemini-flash-latest", 400)
     assert ai.gemini_chain("gemini-flash-lite-latest", 4096)[0] == "gemini-flash-lite-latest"
+
+
+def test_gemini_asks_a_busy_model_once_more_then_reports_busy():
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path.rsplit("/", 1)[-1])
+        return httpx.Response(503 if "flash-latest" in calls[-1] else 404)
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(ai.AiBusy):
+        ai.gemini_text("s", "p", "k", "gemini-flash-latest", http, 4096)
+    assert calls[:3] == ["gemini-flash-latest:generateContent", "gemini-flash-latest:generateContent", "gemini-pro-latest:generateContent"]
+    assert not any("lite" in c for c in calls)
+
+
+def test_only_missing_models_is_not_busy():
+    http = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+    with pytest.raises(RuntimeError) as e:
+        ai.gemini_text("s", "p", "k", "gone-model", http, 400)
+    assert not isinstance(e.value, ai.AiBusy)
