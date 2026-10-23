@@ -513,6 +513,9 @@ MIGRATIONS = [
     # 일기장 '수정순' 정렬: 일지를 고친 때
     "ALTER TABLE buy_entries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
     "ALTER TABLE sell_entries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+    # Gemini가 붐비면 노트 초안을 조금 뒤 다시 써 봐요
+    "ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS ai_retry_at TIMESTAMPTZ",
+    "ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS ai_tries INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -1692,7 +1695,8 @@ def create_ai_study(conn: psycopg.Connection, ticker: str, name: str, market: st
 def pending_study_draft(conn: psycopg.Connection):
     """(ticker, name, market, ai_asked_at) 가장 먼저 부탁받은 AI 초안 하나."""
     return conn.execute(
-        "SELECT ticker, name, market, ai_asked_at FROM study_notes WHERE ai_status = 'pending' ORDER BY ai_asked_at NULLS FIRST LIMIT 1"
+        """SELECT ticker, name, market, ai_asked_at FROM study_notes
+           WHERE ai_status = 'pending' AND (ai_retry_at IS NULL OR ai_retry_at <= now()) ORDER BY ai_asked_at NULLS FIRST LIMIT 1"""
     ).fetchone()
 
 
@@ -1703,6 +1707,21 @@ def finish_study_draft(conn: psycopg.Connection, ticker: str, draft: dict | None
            WHERE ticker = %s AND ai_asked_at IS NOT DISTINCT FROM %s""",
         (Jsonb(draft) if draft is not None else None, status, error, ticker, asked_at),
     )
+
+
+def retry_study_draft(conn: psycopg.Connection, ticker: str, asked_at, minutes: int, max_tries: int) -> str | None:
+    """붐벼서 못 썼을 때 minutes분 뒤 다시 하게 미뤄요. 다시 할 시각(HH:MM)을, 이미 max_tries번 미뤘으면 None을 돌려줘요."""
+    row = conn.execute(
+        """UPDATE study_notes SET ai_retry_at = now() + make_interval(mins => %s), ai_tries = ai_tries + 1
+           WHERE ticker = %s AND ai_asked_at IS NOT DISTINCT FROM %s AND ai_tries < %s
+           RETURNING to_char(ai_retry_at AT TIME ZONE 'Asia/Seoul', 'HH24:MI'), ai_tries""",
+        (minutes, ticker, asked_at, max_tries),
+    ).fetchone()
+    if not row:
+        return None
+    conn.execute("UPDATE study_notes SET ai_error = %s WHERE ticker = %s",
+                 (f"Gemini가 붐벼서 {row[0]}에 다시 써 볼게요 ({row[1]}/{max_tries}번째). 그대로 두셔도 돼요.", ticker))
+    return row[0]
 
 
 def study_context(conn: psycopg.Connection, ticker: str, market: str) -> dict:
