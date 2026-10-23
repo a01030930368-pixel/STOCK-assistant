@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kindFor, markColor, validColor, moveEdge, nearest, snap, strokeDistance, thin, validDoodle, zone, fibPrices, measure, validShape, type Mark } from "./drawings";
+import { kindFor, markColor, markLabel, validColor, moveEdge, nearest, snap, strokeDistance, thin, validDoodle, zone, fibPrices, measure, validShape, type Mark } from "./drawings";
 
 const mark = (id: number, low: number, high: number | null = null): Mark => ({ id, kind: "support", low, high, memo: "", alert: false, color: null });
 
@@ -68,5 +68,12 @@ describe("shapes", () => {
   });
   it("measures percent, bars and days", () => {
     expect(measure({ price: 100, index: 3, day: "2026-10-01" }, { price: 125, index: 13, day: "2026-10-15" })).toBe("+25.00% · 10봉 · 14일");
+  });
+});
+
+describe("markLabel", () => {
+  it("shows my own name instead of 지지·저항 once I name the line", () => {
+    expect(markLabel({ kind: "resistance", memo: "", alert: false })).toBe("저항");
+    expect(markLabel({ kind: "resistance", memo: "1차 저항", alert: true })).toBe("1차 저항 🔔");
   });
 });

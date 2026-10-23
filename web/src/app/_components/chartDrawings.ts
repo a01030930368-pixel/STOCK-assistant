@@ -4,7 +4,7 @@ import type {
   IChartApi, IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, ISeriesPrimitiveAxisView,
   PrimitivePaneViewZOrder, SeriesAttachedParameter, Time,
 } from "lightweight-charts";
-import { fibPrices, KIND_LABEL, markColor, SHAPE_LABEL, type DoodlePoint, type Mark, type Shape } from "@/lib/drawings";
+import { fibPrices, markColor, markLabel, SHAPE_LABEL, type DoodlePoint, type Mark, type Shape } from "@/lib/drawings";
 
 type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
@@ -110,8 +110,7 @@ export class Drawings implements ISeriesPrimitive<Time> {
             if (m.high === null) {
               c.fillRect(0, Math.round(yv) - (m.id === selected ? 1 : 0.5), mediaSize.width, m.id === selected ? 2 : 1.5);
             }
-            const label = `${KIND_LABEL[m.kind]}${m.memo ? ` · ${m.memo}` : ""}${m.alert ? " 🔔" : ""}`;
-            c.fillText(label, 8, yv - 5);
+            c.fillText(markLabel(m), 8, yv - 5);
           }
         }
         for (const s of strokes) {
