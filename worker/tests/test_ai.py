@@ -203,7 +203,13 @@ def test_gemini_moves_to_faster_model_when_one_times_out():
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
     assert ai.gemini_text("s", "p", "k", "slow-model", http, 4096) == "답"
-    assert seen[0] == ("slow-model:generateContent", 150) and seen[1][0] == "gemini-flash-lite-latest:generateContent"
+    assert seen[0] == ("slow-model:generateContent", 240) and seen[1][0] == "gemini-2.5-flash:generateContent"
     seen.clear()
     assert ai._gemini_search("s", "p", "k", "slow-model", http, 4096) == ("답", [])
     assert len(seen) == 2
+
+
+def test_long_answers_never_fall_back_to_lite_models():
+    assert ai.gemini_chain("gemini-flash-latest", 4096) == ("gemini-flash-latest", "gemini-2.5-flash")
+    assert "gemini-flash-lite-latest" in ai.gemini_chain("gemini-flash-latest", 400)
+    assert ai.gemini_chain("gemini-flash-lite-latest", 4096)[0] == "gemini-flash-lite-latest"
