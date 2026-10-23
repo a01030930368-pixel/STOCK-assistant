@@ -179,3 +179,13 @@ def test_parse_draft_keeps_peers_but_not_itself():
         {"ticker": "CSCO", "name": "시스코", "market": "US"}, {"ticker": "ERIC", "name": "에릭슨", "market": "US"}]}), own="NOK")
     assert [p["ticker"] for p in d["peers"]] == ["ERIC", "CSCO"]
     assert study.parse_draft("{}")["peers"] == []
+
+
+def test_drops_events_that_already_happened():
+    from datetime import date
+    today = date(2026, 10, 23)
+    assert study.already_past("2025년 4월 말", today) and study.already_past("2026.07", today) and study.already_past("2026년 9월", today)
+    assert not study.already_past("2026년 10월 말", today) and not study.already_past("2027년 1월 27일", today) and not study.already_past("내년 초", today)
+    d = study.parse_draft(json.dumps({"events": [{"when": "2025년 4월 말", "text": "3분기 실적"}, {"when": "2027년 1월 말", "text": "2분기 실적"}]}), today=today)
+    assert [e["text"] for e in d["events"]] == ["2분기 실적"]
+    assert study.draft_prompt("마이크로소프트", "US", {}, today).startswith("오늘 날짜: 2026-10-23")
