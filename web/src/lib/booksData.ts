@@ -1,5 +1,5 @@
 import { query } from "./db";
-import { attachEntries, buildBooks, findBook, type Book, type EntryRow, type FillRow, type Holding, type Market } from "./books";
+import { attachEntries, buildBooks, findBook, isBookSort, type Book, type BookSort, type EntryRow, type FillRow, type Holding, type Market } from "./books";
 import { today } from "./format";
 import { marketOf } from "./journal";
 
@@ -87,14 +87,38 @@ async function moveToBook(positionId: number, book: Book): Promise<void> {
   }
 }
 
-export type Review = { stars: number | null; followed_rules: boolean | null; thesis: string; plan: string; exit_timing: string; lesson: string; updated: string };
+export type Review = { stars: number | null; followed_rules: boolean | null; thesis: string; plan: string; exit_timing: string; lesson: string; updated: string; edited: string };
 
 export async function loadReviews(): Promise<Map<string, Review>> {
   const rows = await query<Review & { book_key: string }>(
-    `SELECT book_key, stars, followed_rules, thesis, plan, exit_timing, lesson, to_char(updated_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS updated
+    `SELECT book_key, stars, followed_rules, thesis, plan, exit_timing, lesson, to_char(updated_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS updated,
+       to_char(updated_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD"T"HH24:MI:SS') AS edited
      FROM book_reviews`,
   ).catch(() => []);
   return new Map(rows.map((r) => [r.book_key, r]));
+}
+
+// 일지(매수·매도)를 쓰거나 고친 때. 키는 "buy:12"처럼 종류:번호예요.
+export async function loadEdits(): Promise<Map<string, string>> {
+  const rows = await query<{ key: string; at: string }>(
+    `SELECT 'buy:' || id AS key, to_char(GREATEST(created_at, updated_at) AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD"T"HH24:MI:SS') AS at FROM buy_entries
+     UNION ALL
+     SELECT 'sell:' || id, to_char(GREATEST(created_at, updated_at) AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD"T"HH24:MI:SS') FROM sell_entries`,
+  ).catch(() => []);
+  return new Map(rows.map((r) => [r.key, r.at]));
+}
+
+// 책장 정렬: 한 번 고르면 다시 고를 때까지 그대로(폰·PC 같이)
+export async function loadBookSort(): Promise<BookSort> {
+  const [row] = await query<{ value: unknown }>("SELECT value FROM app_settings WHERE key = 'books_sort'").catch(() => []);
+  return isBookSort(row?.value) ? row.value : "recent";
+}
+
+export async function saveBookSort(sort: BookSort): Promise<void> {
+  await query(
+    "INSERT INTO app_settings (key, value) VALUES ('books_sort', to_jsonb($1::text)) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+    [sort],
+  );
 }
 
 type BuyPlan = { id: number; reason: string; scenario: string; stop_price: string; target_price: string };

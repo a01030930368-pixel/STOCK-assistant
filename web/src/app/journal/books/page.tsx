@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { saveReview } from "@/app/actions";
-import { findBook, onShelf, shortDay, type Book, type Page, type Shelf } from "@/lib/books";
-import { buyPlans, loadBooks, loadReviews, type Review } from "@/lib/booksData";
+import { BOOK_SORTS, findBook, isBookSort, onShelf, shortDay, sortBooks, type Book, type Page, type Shelf } from "@/lib/books";
+import { buyPlans, loadBooks, loadBookSort, loadEdits, loadReviews, saveBookSort, type Review } from "@/lib/booksData";
 import { signClass, today, usd, won } from "@/lib/format";
 import JournalTabs from "../JournalTabs";
 
@@ -17,17 +17,26 @@ const pct = (v: number | null) => (v === null ? "-" : `${v > 0 ? "+" : ""}${v.to
 const qty = (v: number) => won(v, 4);
 const stars = (n: number) => "★".repeat(n) + "☆".repeat(5 - n);
 
-export default async function BooksPage({ searchParams }: { searchParams: Promise<{ b?: string; s?: string; edit?: string }> }) {
+export default async function BooksPage({ searchParams }: { searchParams: Promise<{ b?: string; s?: string; edit?: string; o?: string }> }) {
   const params = await searchParams;
   const shelf = SHELVES.find((x) => x.key === params.s)?.key ?? "all";
-  const [books, reviews] = await Promise.all([loadBooks(), loadReviews()]);
+  const [books, reviews, edits, saved] = await Promise.all([loadBooks(), loadReviews(), loadEdits(), loadBookSort()]);
+  // 정렬을 누르면 그 순서를 저장해 두고, 다음에 열 때도 그대로 써요.
+  const sort = isBookSort(params.o) ? params.o : saved;
+  if (sort !== saved) await saveBookSort(sort).catch(() => undefined);
   const day = today();
-  const shown = books.filter((b) => onShelf(b, shelf, (k) => reviews.has(k)));
+  const edited = (b: Book) => {
+    const times = b.pages.filter((p) => p.entryId !== null).map((p) => edits.get(`${p.side}:${p.entryId}`) ?? "");
+    const r = reviews.get(b.key)?.edited;
+    return [...times, r ?? ""].reduce((a, x) => (x > a ? x : a), "") || null;
+  };
+  const shown = sortBooks(books.filter((b) => onShelf(b, shelf, (k) => reviews.has(k))), sort, { stars: (k) => reviews.get(k)?.stars ?? null, edited });
   const open = findBook(books, params.b);
-  const href = (q: { b?: string; s?: Shelf }) => {
+  const href = (q: { b?: string; s?: Shelf; o?: string }) => {
     const sp = new URLSearchParams();
     if (q.b) sp.set("b", q.b);
     if (q.s && q.s !== "all") sp.set("s", q.s);
+    if (q.o) sp.set("o", q.o);
     return `/journal/books${sp.size ? `?${sp}` : ""}`;
   };
 
@@ -44,6 +53,11 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
       </div>
       <div className={open ? "shelf-wrap has-book" : "shelf-wrap"}>
         <div className="shelf">
+          <nav className="segment small shelf-sort" aria-label="정렬">
+            {BOOK_SORTS.map((x) => (
+              <Link key={x.key} aria-current={x.key === sort ? "page" : undefined} href={href({ b: open?.key, s: shelf, o: x.key })}>{x.label}</Link>
+            ))}
+          </nav>
           {shown.length === 0 && <p className="muted">{books.length ? "여기에 해당하는 일기장이 없어요." : "아직 일기장이 없어요. 키움 체결을 받아 오면 종목마다 한 권씩 생겨요."}</p>}
           {shown.map((b) => (
             <Link key={b.key} href={href({ b: b.key, s: shelf })} className={`book${b.end ? "" : " open"}${b.key === open?.key ? " on" : ""}`}>

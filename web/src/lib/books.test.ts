@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachEntries, buildBooks, findBook, onShelf, shortDay, type BookEvent, type EntryRow, type FillRow, type Holding } from "./books";
+import { attachEntries, sortBooks, type Book, buildBooks, findBook, onShelf, shortDay, type BookEvent, type EntryRow, type FillRow, type Holding } from "./books";
 
 let n = 0;
 const ev = (day: string, side: "buy" | "sell", quantity: number, price: number, over: Partial<BookEvent> = {}): BookEvent => ({
@@ -130,5 +130,22 @@ describe("findBook", () => {
     const books = buildBooks([ev("2026-10-01", "buy", 1, 100), ev("2026-10-05", "sell", 1, 110)], [], "2026-10-20");
     expect(findBook(books, "KR:000660:open")?.key).toBe("KR:000660:2026-10-05");
     expect(findBook(books, "KR:000660:2026-09-01")).toBeUndefined();
+  });
+});
+
+describe("sortBooks", () => {
+  const mk = (key: string, start: string, end: string | null, returnPct: number | null): Book => ({
+    key, market: "KR", ticker: key, name: key, start, end, startedBefore: false, pages: [], days: null, buys: 1, sells: 0, maxHeld: 1,
+    realized: null, fees: 0, returnPct, avgCost: null, held: end ? 0 : 1,
+  });
+  const books = [mk("A", "2026-01-01", "2026-03-01", 10), mk("B", "2026-02-01", null, -5), mk("C", "2026-01-15", "2026-09-01", null)];
+  const stars = (k: string) => ({ A: 3, C: 5 } as Record<string, number>)[k] ?? null;
+  const keys = (sort: Parameters<typeof sortBooks>[1], edited: (b: Book) => string | null = () => null) => sortBooks(books, sort, { stars, edited }).map((b) => b.key);
+  it("sorts by latest trade, edit time, stars, return and oldest", () => {
+    expect(keys("recent")).toEqual(["C", "A", "B"]);
+    expect(keys("edited", (b) => (b.key === "A" ? "2026-10-20T10:00:00" : null))).toEqual(["A", "C", "B"]);
+    expect(keys("stars")).toEqual(["C", "A", "B"]);
+    expect(keys("return")).toEqual(["A", "B", "C"]);
+    expect(keys("old")).toEqual(["A", "C", "B"]);
   });
 });

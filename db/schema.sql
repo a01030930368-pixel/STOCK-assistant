@@ -59,6 +59,7 @@ CREATE TABLE buy_entries (
   context            JSONB,  -- 매수일 기준 매크로 값(워커가 채움)
   chart_png          TEXT,   -- 매수일까지의 차트 그림(data:image/png)
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ,  -- 고친 때(일기장 수정순)
   CHECK (stop_price < price AND price < target_price)
 );
 
@@ -80,7 +81,8 @@ CREATE TABLE sell_entries (
   fill_key           TEXT,
   context            JSONB,  -- 매도일 기준 매크로 값(워커가 채움)
   chart_png          TEXT,   -- 매도일까지의 차트 그림(data:image/png)
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ   -- 고친 때(일기장 수정순)
 );
 
 -- 가격 알림. 매수 기록 저장 시 손절·익절 알림이 자동 생성됨.

@@ -168,7 +168,7 @@ async function updateBuy(id: number, input: BuyInput, bookKey: string): Promise<
        weight_pct = $10, stop_price = $11, target_price = $12, target_basis = $13,
        -- 날짜·가격이 바뀌었을 수 있어 당시 차트와 매크로를 다시 남깁니다.
        chart_png = CASE WHEN trade_date = $2 AND price = $4 AND stop_price = $11 AND target_price = $12 THEN chart_png END,
-       context = CASE WHEN trade_date = $2 THEN context END
+       context = CASE WHEN trade_date = $2 THEN context END, updated_at = now()
      WHERE id = $1 RETURNING position_id`,
     [id, input.tradeDate, input.quantity, input.price, input.reason, input.scenario, ...input.risks,
       input.weightPct, input.stopPrice, input.targetPrice, input.targetBasis],
@@ -317,7 +317,7 @@ async function updateSell(id: number, input: SellInput, bookKey: string, values:
        return_pct = ROUND(($4 - avg_buy_price) / NULLIF(avg_buy_price, 0) * 100, 2), reason_type = $5, reason_detail = $6, lesson = $7,
        followed_rules = $8,
        chart_png = CASE WHEN trade_date = $2 AND price = $4 THEN chart_png END,
-       context = CASE WHEN trade_date = $2 THEN context END
+       context = CASE WHEN trade_date = $2 THEN context END, updated_at = now()
      WHERE id = $1 RETURNING position_id, avg_buy_price`,
     [id, input.tradeDate, input.quantity, input.price, input.reasonType, input.reasonDetail, input.lesson, input.followed === "yes"],
   );

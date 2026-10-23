@@ -510,6 +510,9 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS study_versions_ticker ON study_versions (ticker, saved_at)",
     # 🤖 AI가 전부 채우기: 초안이 오면 화면이 빈 칸에 다 넣고 한 장 노트로 마쳐요
     "ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS ai_fill BOOLEAN NOT NULL DEFAULT false",
+    # 일기장 '수정순' 정렬: 일지를 고친 때
+    "ALTER TABLE buy_entries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+    "ALTER TABLE sell_entries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
 ]
 
 

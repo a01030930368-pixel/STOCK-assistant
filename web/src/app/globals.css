@@ -408,6 +408,8 @@ h2 .muted { font-weight: 400; font-size: 0.8rem; margin-left: 8px; }
 .shelf-filter { display: flex; flex-wrap: wrap; gap: 6px; }
 .shelf-wrap { display: grid; grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .shelf { display: grid; gap: 10px; }
+.shelf-sort { margin: 0; }
+.shelf-sort a { flex: 1; justify-content: center; padding: 6px 4px; font-size: 0.85rem; white-space: nowrap; }
 .book { display: grid; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 12px 14px; color: var(--fg); }
 .book:hover { text-decoration: none; border-top-color: var(--line-2); border-right-color: var(--line-2); border-bottom-color: var(--line-2); }
 .book.open { border-left-color: var(--line-2); border-left-style: dashed; }

@@ -212,3 +212,30 @@ export function onShelf(b: Book, shelf: Shelf, reviewed: (key: string) => boolea
 export function shortDay(day: string, today: string): string {
   return day.slice(0, 4) === today.slice(0, 4) ? day.slice(5) : day.replaceAll("-", ".");
 }
+
+// 책장 정렬. 고른 순서는 app_settings 'books_sort'에 남아서 다시 고를 때까지 그대로예요.
+export type BookSort = "recent" | "edited" | "stars" | "return" | "old";
+export const BOOK_SORTS: { key: BookSort; label: string }[] = [
+  { key: "recent", label: "최신순" }, { key: "edited", label: "수정순" }, { key: "stars", label: "별점순" },
+  { key: "return", label: "수익률순" }, { key: "old", label: "오래된순" },
+];
+export const isBookSort = (v: unknown): v is BookSort => BOOK_SORTS.some((x) => x.key === v);
+// 마지막으로 사고판 날
+export const lastDay = (b: Book) => b.end ?? b.pages.at(-1)?.day ?? b.start ?? "";
+
+// edited: 그 권에서 마지막으로 글을 쓰거나 고친 때(ISO). 없으면 마지막 매매일로 봐요.
+export function sortBooks(books: Book[], sort: BookSort, info: { stars: (key: string) => number | null; edited: (b: Book) => string | null }): Book[] {
+  const recent = (a: Book, b: Book) => (lastDay(a) < lastDay(b) ? 1 : lastDay(a) > lastDay(b) ? -1 : a.name.localeCompare(b.name, "ko"));
+  const desc = (x: number | null, y: number | null) => (x === null ? (y === null ? 0 : 1) : y === null ? -1 : y - x);
+  const by: Record<BookSort, (a: Book, b: Book) => number> = {
+    recent,
+    edited: (a, b) => {
+      const ea = info.edited(a) ?? lastDay(a), eb = info.edited(b) ?? lastDay(b);
+      return ea < eb ? 1 : ea > eb ? -1 : recent(a, b);
+    },
+    stars: (a, b) => desc(info.stars(a.key), info.stars(b.key)) || recent(a, b),
+    return: (a, b) => desc(a.returnPct, b.returnPct) || recent(a, b),
+    old: (a, b) => ((a.start ?? "") < (b.start ?? "") ? -1 : (a.start ?? "") > (b.start ?? "") ? 1 : a.name.localeCompare(b.name, "ko")),
+  };
+  return [...books].sort(by[sort]);
+}
