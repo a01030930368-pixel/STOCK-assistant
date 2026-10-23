@@ -93,7 +93,7 @@ export default function StudyNote({ note }: { note: NoteData }) {
 
       <KindRow f={fields} known={note.knownSector} draft={ai.draft} onSave={async (next) => { setFields(next); await save(next); }} />
       {note.pick && <PickCard pick={note.pick} />}
-      <AiBar status={ai.status} error={ai.error} has={Boolean(ai.draft)} fill={ai.fill} searched={ai.draft?.searched} onAsk={askAi} />
+      <AiBar status={ai.status} error={ai.error} has={Boolean(ai.draft)} fill={ai.fill} searched={ai.draft?.searched} searchError={ai.draft?.searchError} onAsk={askAi} />
 
       {note.done ? (
         <OnePage note={note} fields={fields} setFields={setFields} save={save} draft={ai.draft} money_={money_} />
@@ -122,8 +122,8 @@ function PickCard({ pick }: { pick: Pick }) {
   );
 }
 
-function AiBar({ status, error, has, fill, searched, onAsk }: {
-  status: string | null; error: string | null; has: boolean; fill: boolean; searched?: boolean; onAsk: (fill?: boolean) => void;
+function AiBar({ status, error, has, fill, searched, searchError, onAsk }: {
+  status: string | null; error: string | null; has: boolean; fill: boolean; searched?: boolean; searchError?: string; onAsk: (fill?: boolean) => void;
 }) {
   if (status === "none") return null;
   return (
@@ -139,7 +139,7 @@ function AiBar({ status, error, has, fill, searched, onAsk }: {
       {status === "error" && <span className="practice-warn practice-small">초안을 못 받았어요{error ? `: ${error}` : ""}</span>}
       {status !== "pending" && (
         <span className="muted practice-small">
-          {has ? `초안은 칸마다 ✨로 보여요${searched === false ? " (이번엔 웹 검색 없이 썼어요)" : ""}. ` : ""}
+          {has ? `초안은 칸마다 ✨로 보여요${searched === false ? ` (이번엔 웹 검색 없이 썼어요${searchError ? `, 검색 실패: ${searchError}` : ""})` : ""}. ` : ""}
           전부 채우기는 빈 칸에만 넣고, 판단(산다·기다린다·안 산다)은 직접 골라요. AI 글은 틀릴 수 있어요.
         </span>
       )}

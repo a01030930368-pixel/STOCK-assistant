@@ -85,6 +85,7 @@ STYLES = ("기술주", "성장주", "가치주", "배당주", "경기민감주",
 DRAFT_SYSTEM = """너는 한국 개인투자자의 기업 공부 노트를 대신 채워 주는 조사 도우미야.
 웹 검색으로 사업보고서·실적 발표·IR 자료·믿을 만한 기사를 찾아보고, 아래 자료와 함께 노트 전체를 채워.
 사용자가 나중에 확인할 수 있게, 확실하지 않은 건 "확인 필요"라고 붙여.
+"앞으로 일어날 일"은 자료에 적힌 오늘 날짜보다 뒤의 일만 써. 지난 일은 넣지 마.
 숫자는 자료나 검색 결과에서 확인한 것만 쓰고, 대략 아는 건 "약"을 붙여. 모르면 빈칸("")이나 빈 목록으로 둬.
 "사세요", "파세요" 같은 매수·매도 권유는 절대 쓰지 마. 가격 생각은 PER·PBR 같은 근거로 "이 정도면 싸다고 볼 만하다" 수준으로만 써.
 쉬운 한국어 존댓말(~예요, ~어요)로, 짧게 써.
@@ -183,7 +184,19 @@ def _price(v) -> float | None:
     return round(n, 2) if n > 0 else None
 
 
-def parse_draft(text: str, sources: list[dict] | None = None, own: str = "") -> dict:
+# "2025년 4월 말", "2026.07" 같은 글에서 연·월을 읽어, 오늘보다 앞선 일이면 True
+def already_past(when: str, today: date) -> bool:
+    y = re.search(r"(20\d\d)", when or "")
+    if not y:
+        return False
+    year = int(y.group(1))
+    m = re.search(r"20\d\d\s*(?:년\s*|[.\-/]\s*)(\d{1,2})(?!\d)", when)
+    month = int(m.group(1)) if m and 1 <= int(m.group(1)) <= 12 else None
+    return year < today.year or (year == today.year and month is not None and month < today.month)
+
+
+def parse_draft(text: str, sources: list[dict] | None = None, own: str = "", today: date | None = None) -> dict:
+    today = today or date.today()
     d = _json(text)
     out: dict = {
         "sector": _s(d.get("sector"), 30),
@@ -206,7 +219,8 @@ def parse_draft(text: str, sources: list[dict] | None = None, own: str = "") -> 
     promises = d.get("promises")
     out["promises"] = [{"when": _s(x.get("when"), 20), "said": _s(x.get("said"), 120)}
                        for x in promises if isinstance(x, dict) and _s(x.get("said"), 120)][:3] if isinstance(promises, list) else []
-    out["events"] = [{"when": _s(x.get("when"), 30), "text": _s(x.get("text"), 80)} for x in d.get("events") or [] if isinstance(x, dict) and _s(x.get("text"), 80)][:3]
+    out["events"] = [{"when": _s(x.get("when"), 30), "text": _s(x.get("text"), 80)} for x in d.get("events") or []
+                     if isinstance(x, dict) and _s(x.get("text"), 80) and not already_past(str(x.get("when") or ""), today)][:3]
     out["risks"] = [{"text": _s(x.get("text"), 80), "signal": _s(x.get("signal"), 80)} for x in d.get("risks") or [] if isinstance(x, dict) and _s(x.get("text"), 80)][:3]
     out["peers"] = parse_peers(d.get("peers"), own)
     out["questions"] = [_s(x, 80) for x in d.get("questions") or [] if _s(x, 80)][:3]
@@ -237,8 +251,8 @@ def compare_prompt(sector: str, rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def draft_prompt(name: str, market: str, ctx: dict) -> str:
-    lines = [f"회사: {name} ({'국내' if market == 'KR' else '미국'})"]
+def draft_prompt(name: str, market: str, ctx: dict, today: date | None = None) -> str:
+    lines = [f"오늘 날짜: {(today or date.today()).isoformat()}", f"회사: {name} ({'국내' if market == 'KR' else '미국'})"]
     if ctx.get("pick"):
         lines.append("요즘 주가 흐름: " + " / ".join(ctx["pick"]))
     if ctx.get("price"):
@@ -343,16 +357,19 @@ class StudyWorker:
             return
         try:
             prompt = draft_prompt(name, market, db.study_context(conn, ticker, market))
-            out = None
+            out, why = None, ""
             if self.search:
                 try:
                     out = parse_draft(*self.search(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096), own=ticker)
                     out["searched"] = True
                 except Exception as e:
                     log.warning("%s 기업 공부 검색 초안 실패, 검색 없이 다시 써요: %s", name, e)
+                    why = "시간 초과" if isinstance(e, httpx.TimeoutException) else str(e)[:100]
             if out is None:
                 out = parse_draft(self.ask(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096), own=ticker)
                 out["searched"] = False
+                if why:
+                    out["searchError"] = why
             out["model"] = self.model
             out["at"] = datetime.now(timezone.utc).isoformat()
             db.finish_study_draft(conn, ticker, out, "done", None, asked_at)
