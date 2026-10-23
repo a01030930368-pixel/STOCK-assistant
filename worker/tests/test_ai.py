@@ -123,7 +123,7 @@ def test_ask_gemini_falls_back_when_model_is_busy():
 
 def test_ask_gemini_gives_up_after_all_models_busy():
     client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(503)))
-    with pytest.raises(RuntimeError, match="붐벼"):
+    with pytest.raises(RuntimeError, match="붐비"):
         ai.ask_gemini("p", "k", "gemini-flash-latest", client)
 
 
@@ -190,3 +190,20 @@ def test_claude_search_collects_result_links():
 
     text, sources = ai._claude_search("s", "p", "k", "m", httpx.Client(transport=httpx.MockTransport(handler)), 100)
     assert text == '{"one": "b"}' and sources == [{"title": "A", "url": "https://a.com"}]
+
+
+def test_gemini_moves_to_faster_model_when_one_times_out():
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.path.rsplit("/", 1)[-1], request.extensions["timeout"]["read"]))
+        if len(seen) == 1:
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "답"}]}, "finishReason": "STOP"}]})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    assert ai.gemini_text("s", "p", "k", "slow-model", http, 4096) == "답"
+    assert seen[0] == ("slow-model:generateContent", 150) and seen[1][0] == "gemini-flash-lite-latest:generateContent"
+    seen.clear()
+    assert ai._gemini_search("s", "p", "k", "slow-model", http, 4096) == ("답", [])
+    assert len(seen) == 2
