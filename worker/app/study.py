@@ -359,7 +359,8 @@ class StudyWorker:
             db.add_study_peers(conn, ticker, out["peers"])
             log.info("%s 기업 공부 AI 초안을 썼습니다", name)
         except Exception as e:
-            db.finish_study_draft(conn, ticker, None, "error", str(e)[:200], asked_at)
+            msg = "AI 답이 너무 오래 걸려 끊겼어요. 잠시 뒤 다시 눌러 보세요." if isinstance(e, httpx.TimeoutException) else str(e)
+            db.finish_study_draft(conn, ticker, None, "error", msg[:200], asked_at)
             log.warning("%s 기업 공부 AI 초안 실패: %s", name, e)
 
 
