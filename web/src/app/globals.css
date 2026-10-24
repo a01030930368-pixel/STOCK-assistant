@@ -945,12 +945,14 @@ a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-d
 .practice-head { margin-bottom: 10px; }
 .practice-progress { width: 160px; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; align-self: center; }
 .practice-progress i { display: block; height: 100%; background: var(--accent); transition: width 0.2s; }
-/* 연습 버튼 줄: 차트를 어디까지 내려 봐도 화면 맨 아래에 붙어 있고, 크게 보기에서도 차트 아래에 보여요. */
+/* 연습 버튼 줄: 차트 바로 아래에 있고, 크게 보기에서도 차트 아래에 보여요. */
 .practice-dock {
-  position: sticky; bottom: 0; z-index: 6; margin: 10px -2px 0; padding: 10px 14px;
+  margin: 10px -2px 0; padding: 10px 14px;
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 -8px 20px #0007;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
 }
+/* 차트 높이는 PracticeView가 화면 높이에 맞춰 정해요. */
+.practice .chart-wrap:not(.big) .chart-canvas { height: var(--practice-h, 460px); }
 .practice-dock .practice-score { gap: 4px 12px; }
 .practice-dock .practice-acts button { min-width: 96px; font-weight: 700; }
 .practice-dock .practice-play { gap: 6px; }
@@ -959,10 +961,13 @@ a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-d
   font: 600 0.68rem/16px inherit; background: #ffffff22; display: inline-block; text-align: center;
 }
 .practice-dock .soft kbd, .practice-dock .chip-btn kbd { border-color: var(--line); background: var(--bg); color: var(--muted); }
-.chart-wrap.big .practice-dock { position: static; margin: 8px 0 0; box-shadow: none; }
+.chart-wrap.big .practice-dock { margin: 8px 0 0; }
 @media (max-width: 720px) {
   .practice-acts button { flex: 1; min-width: 0; }
-  .practice-dock { bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); padding: 8px 10px; }
+  /* 폰은 화면이 좁아 다 못 넣으니, 버튼 줄이 아래 메뉴 바로 위에 붙어 따라와요. */
+  .practice .chart-wrap:not(.big) .chart-canvas { height: 380px; }
+  .practice-dock { position: sticky; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); z-index: 6; padding: 8px 10px; box-shadow: 0 -8px 20px #0007; }
+  .chart-wrap.big .practice-dock { position: static; box-shadow: none; }
   .practice-dock .practice-acts { order: -1; width: 100%; }
   .practice-dock .practice-acts button { min-width: 0; }
   .practice-dock kbd { display: none; }
