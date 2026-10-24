@@ -50,7 +50,7 @@ export type Draft = {
   events?: { when: string; text: string }[]; risks?: { text: string; signal: string }[];
   promises?: { when: string; said: string }[] | string; // 예전 초안은 "찾을 곳" 한 줄(string)
   cheap?: number | null; pricey?: number | null; priceWhy?: string; conclusion?: string; sources?: { title: string; url: string }[];
-  questions?: string[]; model?: string; searched?: boolean; searchError?: string;
+  questions?: string[]; model?: string; searched?: boolean; news?: number; searchError?: string;
 };
 export type Pick = { why: string[]; first: string[]; flow: string; model: string | null; at: string; fresh?: boolean };
 

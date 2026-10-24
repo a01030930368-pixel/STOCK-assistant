@@ -97,8 +97,8 @@ def ask(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
 
 
 # 고른 모델이 붐비거나(503) 한도에 걸리면(429) 다음 무료 모델로 넘어갑니다.
-# -latest 이름은 구글이 새 버전으로 알아서 바꿔 줘서 없어지지(404) 않아요.
-GEMINI_FALLBACKS = ("gemini-pro-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite")
+# -latest 이름은 구글이 새 버전으로 알아서 바꿔 줘서 없어지지(404) 않아요. (gemini-2.5-* 는 없어져서 뺐어요.)
+GEMINI_FALLBACKS = ("gemini-pro-latest", "gemini-flash-lite-latest")
 RETRY_STATUS = {404, 429, 500, 503}
 BUSY_STATUS = {429, 500, 503}
 BUSY_WAIT = 8  # 붐빔(503) 답을 받으면 이만큼(초) 쉬고 같은 모델에 한 번 더 물어요
@@ -106,6 +106,10 @@ BUSY_WAIT = 8  # 붐빔(503) 답을 받으면 이만큼(초) 쉬고 같은 모�
 
 class AiBusy(RuntimeError):
     """모든 모델이 붐비거나(503·429) 너무 오래 걸렸어요. 조금 뒤 다시 하면 될 때가 많아요."""
+
+
+class NoSearch(RuntimeError):
+    """이 키로는 구글 검색을 쓸 수 없어요. 무료 Gemini 키에는 검색(Grounding with Google Search)이 없어서 늘 429가 와요."""
 
 
 def _post_gemini(http: httpx.Client, model: str, key: str, body: dict, timeout: int) -> httpx.Response:
@@ -202,6 +206,9 @@ def _gemini_search(system: str, prompt: str, key: str, model: str, http: httpx.C
         chunks = (cands[0].get("groundingMetadata") or {}).get("groundingChunks") or []
         sources = [{"title": (c.get("web") or {}).get("title", ""), "url": (c.get("web") or {}).get("uri", "")} for c in chunks if c.get("web")]
         return "".join(p.get("text", "") for p in parts if not p.get("thought")), sources
+    # 모든 모델이 한도(429)나 없음(404)으로 거절하면 붐빈 게 아니라 이 키에 검색이 없는 거예요.
+    if errors and all(code in (404, 429) for _, code in errors):
+        raise NoSearch("무료 Gemini 키에는 구글 검색이 없어요 (" + ", ".join(f"{m} {code}" for m, code in errors) + ")")
     raise _gave_up(errors)
 
 

@@ -3,7 +3,7 @@ import random
 from datetime import date, datetime, timezone
 from unittest import mock
 
-from app import study
+from app import ai, study
 
 UP = [100 + i * 0.5 for i in range(120)]  # 꾸준히 오르는 차트
 DOWN = [200 - i * 0.5 for i in range(120)]
@@ -205,3 +205,21 @@ def test_busy_gemini_retries_the_note_later_instead_of_failing():
         db.retry_study_draft.return_value = None
         w.draft(mock.Mock(), "MSFT", "Microsoft", "US", "t0")
         assert db.finish_study_draft.call_args.args[3] == "error"
+
+
+def test_draft_reads_google_news_when_key_has_no_search():
+    w = study.StudyWorker(mock.Mock(gemini_api_key="", anthropic_api_key=""), mock.Mock())
+    w.ask, w.key, w.model = mock.Mock(return_value='{"one": "뉴스로 씀"}'), "k", "m"
+    w.search = mock.Mock(side_effect=ai.NoSearch("무료 키"))
+    news = [{"day": date(2026, 10, 22), "title": "Microsoft beats estimates", "source": "Reuters", "url": "https://r.com/a"}]
+    with mock.patch.object(study, "db") as db, mock.patch.object(study.research, "headlines", return_value=news) as heads:
+        db.study_context.return_value = {}
+        w.draft(mock.Mock(), "MSFT", "Microsoft", "US", "t0")
+        out = db.finish_study_draft.call_args.args[2]
+        assert out["one"] == "뉴스로 씀" and out["searched"] is False and out["news"] == 1 and "searchError" not in out
+        assert out["sources"] == [{"title": "Microsoft beats estimates", "url": "https://r.com/a"}]
+        assert "2026.10.22 Microsoft beats estimates (Reuters)" in w.ask.call_args.args[1]
+        assert heads.call_args.args[1] is True  # 영어 이름이면 미국 뉴스
+        # 하루 동안은 검색을 다시 묻지 않아요.
+        w.draft(mock.Mock(), "MSFT", "Microsoft", "US", "t1")
+        assert w.search.call_count == 1
