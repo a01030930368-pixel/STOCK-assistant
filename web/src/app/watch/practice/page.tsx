@@ -3,8 +3,8 @@ import { redirect } from "next/navigation";
 import { query } from "@/lib/db";
 import { marketOf } from "@/lib/journal";
 import { BEFORE, decodeGame, encodeGame, randomStart, STEPS } from "@/lib/practice";
-import { signClass } from "@/lib/format";
 import WatchTabs from "../WatchTabs";
+import PracticeTabs from "./PracticeTabs";
 import PracticeView from "./PracticeView";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,6 @@ const HISTORY = 250; // 시작 전에 넘겨 주는 봉(1년 기간·120일선�
 const MIN_BEFORE = 30; // 직접 고를 때는 앞에 이만큼만 있어도 돼요
 
 type Row = { day: string; open: string | null; high: string | null; low: string | null; close: string; volume: string | null };
-type Past = { id: number; ticker: string; name: string; start_day: string; end_day: string; blind: boolean; return_pct: string; hold_pct: string; calls: number; hits: number };
 
 async function nameOf(ticker: string): Promise<string> {
   const [row] = await safe<{ name: string }>(
@@ -60,10 +59,7 @@ export default async function PracticePage({ searchParams }: { searchParams: Pro
   const [pool] = await safe<{ ready: string; total: string }>(
     "SELECT count(*) FILTER (WHERE fetched_at IS NOT NULL AND error IS NULL) AS ready, count(*) AS total FROM practice_pool",
   );
-  const past = await safe<Past>(
-    `SELECT id, ticker, name, to_char(start_day, 'YYYY-MM-DD') AS start_day, to_char(end_day, 'YYYY-MM-DD') AS end_day, blind, return_pct, hold_pct, calls, hits
-     FROM practice_sessions ORDER BY created_at DESC LIMIT 10`,
-  );
+  const [played] = await safe<{ n: string }>("SELECT count(*) AS n FROM practice_sessions");
   const names = await safe<{ ticker: string; name: string }>(
     `SELECT DISTINCT ON (ticker) ticker, name FROM (SELECT ticker, name, 1 AS k FROM watchlist UNION ALL SELECT ticker, name, 2 FROM holdings
        UNION ALL SELECT ticker, name, 3 FROM practice_pool WHERE fetched_at IS NOT NULL AND error IS NULL) t WHERE name <> '' ORDER BY ticker, k`,
@@ -86,7 +82,6 @@ export default async function PracticePage({ searchParams }: { searchParams: Pro
     }
   }
 
-  const wins = past.filter((p) => Number(p.return_pct) > Number(p.hold_pct)).length;
   return (
     <>
       <div className="board-head">
@@ -97,6 +92,8 @@ export default async function PracticePage({ searchParams }: { searchParams: Pro
       {game && view ? (
         <PracticeView key={sp.g} game={sp.g!} blind={game.blind} ticker={game.ticker} name={view.name} market={view.market} candles={view.candles} start={view.start} />
       ) : (
+        <>
+        <PracticeTabs on="play" count={Number(played?.n ?? 0)} />
         <section className="panel practice-start">
           <h2>차트 보는 눈 연습</h2>
           <p className="muted">
@@ -118,22 +115,7 @@ export default async function PracticePage({ searchParams }: { searchParams: Pro
           <p className="muted practice-small">직접 고르면 이름과 날짜가 보여요. 날짜를 비우면 {STEPS}봉 전부터 시작해요.</p>
           {pickError && <p className="practice-warn">{pickError}</p>}
         </section>
-      )}
-
-      {past.length > 0 && (
-        <section className="panel practice-past">
-          <h2>지난 연습 <span className="muted practice-small">최근 {past.length}번 중 그냥 들고 있기보다 잘한 판 {wins}번</span></h2>
-          <div className="list">
-            {past.map((p) => (
-              <div key={p.id} className="list-item practice-row">
-                <span>{p.blind ? "🎲 " : ""}<b>{p.name || p.ticker}</b> <span className="muted">{p.ticker} · {p.start_day} ~ {p.end_day}</span></span>
-                <span>내 수익 <b className={signClass(Number(p.return_pct))}>{Number(p.return_pct) > 0 ? "+" : ""}{Number(p.return_pct).toFixed(2)}%</b></span>
-                <span className="muted">들고만 있었으면 {Number(p.hold_pct) > 0 ? "+" : ""}{Number(p.hold_pct).toFixed(2)}%</span>
-                <span className="muted">맞힘 {p.hits}/{p.calls}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+        </>
       )}
     </>
   );
