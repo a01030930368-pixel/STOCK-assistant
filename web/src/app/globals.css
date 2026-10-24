@@ -1201,3 +1201,37 @@ p .study-lab, span.study-lab { display: inline; margin-right: 6px; }
 .tl-note-form textarea { width: 100%; resize: vertical; }
 .tl-note-foot { display: flex; align-items: center; gap: 14px; }
 .tl-note-foot .danger-link { margin-left: auto; background: none; border: 0; padding: 0; color: var(--warn); font-size: 0.85rem; cursor: pointer; }
+
+/* 연습하기 › 기록 */
+.practice-tabs { margin: 0 0 14px; }
+.practice-tabs .muted { margin-left: 6px; font-weight: 400; }
+.practice-filter .segment a { white-space: nowrap; }
+.practice-filter { flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.practice-filter .segment { margin: 0; }
+.practice-habits { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 14px; margin: 14px 0; align-items: start; }
+.practice-habits h2, .practice-insights h2, .practice-log h2 { margin-top: 0; font-size: 1rem; }
+.habit { padding: 10px 0; border-top: 1px solid var(--line); display: grid; gap: 5px; }
+.habit-head { display: flex; flex-wrap: wrap; gap: 4px 10px; justify-content: space-between; font-size: 0.92rem; }
+.habit-head .gold { font-size: 0.84rem; }
+.habit-bar { display: grid; grid-template-columns: 130px minmax(0, 1fr) 44px; gap: 10px; align-items: center; font-size: 0.82rem; }
+.habit-track { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.habit-track i { display: block; height: 100%; background: #55524b; border-radius: 4px; }
+.habit-bar.lead .habit-track i { background: var(--accent); }
+.habit-pct { text-align: right; }
+.habit-bar:not(.lead) .habit-pct { color: var(--muted); }
+.practice-insights { display: grid; gap: 10px; }
+.insight { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 12px; font-size: 0.9rem; line-height: 1.6; }
+.practice-log .practice-row { align-items: baseline; }
+.log-day { width: 40px; }
+.log-name { min-width: 170px; }
+.log-res { margin-left: auto; }
+.log-res.win { color: #7fb8a0; }
+.log-again { font-size: 0.8rem; color: var(--accent); border: 1px solid #4a3f28; border-radius: 6px; padding: 1px 8px; }
+.log-again:hover { text-decoration: none; background: var(--accent-soft); }
+.log-more { text-align: center; margin: 10px 0 0; }
+@media (max-width: 700px) {
+  .practice-habits { grid-template-columns: 1fr; }
+  .habit-bar { grid-template-columns: 96px minmax(0, 1fr) 40px; }
+  .log-name { min-width: 0; }
+  .practice-filter .segment a { padding: 6px 8px; font-size: 0.84rem; }
+}
