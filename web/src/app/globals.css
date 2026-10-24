@@ -1030,6 +1030,7 @@ a.chip-btn { display: inline-flex; align-items: center; margin-left: 6px; text-d
 .study-tag { font-size: 0.72rem; padding: 1px 7px; border-radius: 5px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; margin-left: 6px; }
 .study-item .study-tag { margin-left: 0; justify-self: end; }
 .study-tag.s-눈여겨봄 { color: #b9d48a; border-color: #3a4526; }
+.study-tag.s-관망 { color: #cfc9bd; border-color: #3a3a40; border-style: dashed; }
 .study-tag.s-관심 { color: var(--accent); border-color: #4a3f28; }
 .study-tag.s-보유 { color: var(--div); border-color: #24453a; }
 .study-tag.s-탈락 { color: var(--muted); text-decoration: line-through; }

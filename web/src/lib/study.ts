@@ -1,8 +1,8 @@
 // 관심종목 › 기업 공부: 회사마다 노트 한 장. 처음엔 6단계로 따라 적고(B), 다 적으면 한 장 노트(A)에서 보고 고쳐요.
 import { tableOf, type StatementRow } from "./statements";
 
-// 눈여겨봄: 공부해 보니 괜찮아서(ㅇㅋ) 가끔 지켜보는 정도. 관심은 살지 고민하는 단계예요.
-export const STATUSES = ["공부 중", "눈여겨봄", "관심", "보유", "보류", "탈락"] as const;
+// 눈여겨봄: 공부해 보니 괜찮아서(ㅇㅋ) 가끔 지켜보는 정도. 관심은 살지 고민하는 단계예요. 관망: 살 만한지 더 지켜보며 기다리는 중.
+export const STATUSES = ["공부 중", "눈여겨봄", "관심", "관망", "보유", "보류", "탈락"] as const;
 export type Status = (typeof STATUSES)[number];
 export type Verdict = "buy" | "wait" | "pass" | "";
 export const VERDICTS: { key: Exclude<Verdict, "">; label: string }[] = [

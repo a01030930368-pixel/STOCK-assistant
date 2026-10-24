@@ -47,6 +47,7 @@ export default async function StockPage({ params, searchParams }: { params: Prom
        SELECT ticker, name, market, 1 AS rank FROM holdings WHERE ticker = $1
        UNION ALL SELECT ticker, name, market, 2 FROM positions WHERE ticker = $1
        UNION ALL SELECT ticker, name, market, 3 FROM watchlist WHERE ticker = $1
+       UNION ALL SELECT ticker, name, market, 4 FROM study_notes WHERE ticker = $1
      ) s LEFT JOIN positions p ON p.ticker = s.ticker AND p.status = 'open'
      ORDER BY s.rank LIMIT 1`,
     [ticker],
