@@ -346,6 +346,28 @@ export async function saveReview(form: FormData) {
   redirect(bookHref(key));
 }
 
+// 종목 일기장 타임라인에 내가 적는 사건 메모. 시장·종목은 일기장 키(시장:종목:끝난 날)에서 읽어요.
+const NOTE_MAX = 2000;
+export async function saveBookNote(form: FormData) {
+  const key = text(form, "bookKey");
+  const [market, ticker] = key.split(":");
+  const day = text(form, "day");
+  const body = text(form, "body").slice(0, NOTE_MAX);
+  const id = num(form, "noteId");
+  if ((market !== "KR" && market !== "US") || !ticker || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !body) redirect(bookHref(key));
+  const [row] = id > 0
+    ? await query<{ id: number }>("UPDATE book_notes SET day = $2, body = $3, updated_at = now() WHERE id = $1 RETURNING id", [id, day, body])
+    : await query<{ id: number }>("INSERT INTO book_notes (market, ticker, day, body) VALUES ($1, $2, $3, $4) RETURNING id", [market, ticker, day, body]);
+  revalidatePath("/journal/books");
+  redirect(`${bookHref(key)}${row ? `#note-${row.id}` : ""}`);
+}
+
+export async function deleteBookNote(form: FormData) {
+  await query("DELETE FROM book_notes WHERE id = $1", [num(form, "noteId")]);
+  revalidatePath("/journal/books");
+  redirect(bookHref(text(form, "bookKey")));
+}
+
 // 일지에 남기지 않을 체결(예: 단타 테스트)은 목록에서 숨깁니다.
 export async function hideFill(form: FormData) {
   await query("UPDATE trade_fills SET hidden = true WHERE fill_key = $1", [text(form, "key")]);

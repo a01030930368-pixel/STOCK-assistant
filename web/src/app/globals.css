@@ -1189,3 +1189,15 @@ p .study-lab, span.study-lab { display: inline; margin-right: 6px; }
   .study-line .study-when { flex-basis: 112px; }
   .study-nav button:last-child { flex: 1; }
 }
+
+/* 종목 일기장: 내가 적는 사건 메모 */
+.tl-dot.note { background: var(--accent); border-radius: 3px; transform: rotate(45deg); }
+.tl-note { background: transparent; border-style: dashed; border-color: #4a3f28; }
+.tl-note-body { white-space: pre-wrap; color: var(--fg); }
+.tl-note-edit { margin-left: auto; font-size: 0.82rem; color: var(--muted); }
+.tl-note-form form { display: grid; gap: 8px; }
+.tl-note-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.tl-note-top input[type="date"] { width: auto; }
+.tl-note-form textarea { width: 100%; resize: vertical; }
+.tl-note-foot { display: flex; align-items: center; gap: 14px; }
+.tl-note-foot .danger-link { margin-left: auto; background: none; border: 0; padding: 0; color: var(--warn); font-size: 0.85rem; cursor: pointer; }

@@ -363,6 +363,18 @@ CREATE TABLE book_reviews (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 종목 일기장에 내가 직접 적는 사건 메모. 날짜로 그 권(첫 매수~전부 판 날) 타임라인에 끼워요.
+CREATE TABLE book_notes (
+  id          SERIAL PRIMARY KEY,
+  market      TEXT NOT NULL,
+  ticker      TEXT NOT NULL,
+  day         DATE NOT NULL,
+  body        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX book_notes_stock ON book_notes (market, ticker, day);
+
 -- 날마다 내 돈 전체(원화 환산). 주간 성적표에서 지난주와 비교할 때 써요.
 CREATE TABLE asset_history (
   day    DATE PRIMARY KEY,

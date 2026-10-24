@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachEntries, sortBooks, type Book, buildBooks, findBook, onShelf, shortDay, type BookEvent, type EntryRow, type FillRow, type Holding } from "./books";
+import { attachEntries, notesOf, sortBooks, timeline, type BookNote, type Book, buildBooks, findBook, onShelf, shortDay, type BookEvent, type EntryRow, type FillRow, type Holding } from "./books";
 
 let n = 0;
 const ev = (day: string, side: "buy" | "sell", quantity: number, price: number, over: Partial<BookEvent> = {}): BookEvent => ({
@@ -147,5 +147,29 @@ describe("sortBooks", () => {
     expect(keys("stars")).toEqual(["C", "A", "B"]);
     expect(keys("return")).toEqual(["A", "B", "C"]);
     expect(keys("old")).toEqual(["A", "C", "B"]);
+  });
+});
+
+describe("book notes", () => {
+  const note = (id: number, day: string, over: Partial<BookNote> = {}): BookNote => ({
+    id, market: "KR", ticker: "000660", day, body: `메모 ${id}`, edited: `${day}T09:00:00`, ...over,
+  });
+  const books = buildBooks([
+    ev("2026-08-04", "buy", 10, 168000),
+    ev("2026-09-15", "sell", 10, 214000),
+    ev("2026-10-17", "buy", 2, 260000),
+  ], [{ market: "KR", ticker: "000660", name: "SK하이닉스", quantity: 2, avgPrice: 260000, pnlPct: 1.5 }], "2026-10-20");
+  const notes = [note(1, "2026-08-20"), note(2, "2026-09-30"), note(3, "2026-10-19"), note(4, "2026-08-20", { ticker: "005930" }), note(5, "2026-09-15")];
+
+  it("puts each note in the book whose dates cover it", () => {
+    const [done, open] = books;
+    expect(notesOf(done, notes).map((n) => n.id)).toEqual([1, 5]);
+    expect(notesOf(open, notes).map((n) => n.id)).toEqual([3]);
+  });
+
+  it("mixes notes into the trades by day, after the trades of the same day", () => {
+    const [done] = books;
+    const items = timeline(done.pages, notesOf(done, notes));
+    expect(items.map((x) => (x.kind === "note" ? `n${x.note.id}` : x.page.label))).toEqual(["첫 매수", "n1", "전량 매도", "n5"]);
   });
 });
