@@ -13,7 +13,8 @@ def test_pool_has_both_markets_without_duplicates():
     assert ("005930", "삼성전자", "KR") in rows and ("035900", "JYP Ent.", "KR") in rows
     assert ("AAPL", "Apple", "US") in rows
     assert all(r[2] == "KR" for r in rows if r[0].isdigit()) and all(r[2] == "US" for r in rows if not r[0].isdigit())
-    assert sum(r[2] == "KR" for r in rows) >= 100 and sum(r[2] == "US" for r in rows) >= 100
+    assert sum(r[2] == "KR" for r in rows) >= 250 and sum(r[2] == "US" for r in rows) >= 250
+    assert all(len(r[0]) == 6 for r in rows if r[2] == "KR")
 
 
 def test_job_fetches_due_tickers_and_records_errors():

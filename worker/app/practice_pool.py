@@ -51,11 +51,60 @@ BMY Bristol-Myers,GILD Gilead,AMGN Amgen,MRNA Moderna,ISRG Intuitive Surgical,TM
 UNP Union Pacific,F Ford,GM General Motors,RIVN Rivian,COIN Coinbase,HOOD Robinhood,SOFI SoFi,ROKU Roku,ZM Zoom,
 SPOT Spotify,TGT Target,LOW Lowe's,TJX TJX,PM Philip Morris,MO Altria"""
 
+# 더 늘린 것: 코스피 중형주와 코스닥 큰 종목
+KR_MORE = """000080 하이트진로,000120 CJ대한통운,000210 DL,375500 DL이앤씨,001120 LX인터내셔널,001440 대한전선,001680 대상,
+001740 SK네트웍스,002790 아모레퍼시픽홀딩스,003230 삼양식품,003410 쌍용C&E,003620 KG모빌리티,004000 롯데정밀화학,004170 신세계,
+004800 효성,005070 코스모신소재,005250 녹십자홀딩스,005420 코스모화학,006360 GS건설,006650 대한유화,007070 GS리테일,
+007310 오뚜기,008930 한미사이언스,009240 한샘,009420 한올바이오파마,009970 영원무역홀딩스,111770 영원무역,010060 OCI홀딩스,
+010620 HD현대미포,011210 현대위아,011780 금호석유화학,012750 에스원,014680 한솔케미칼,017800 현대엘리베이터,018880 한온시스템,
+020150 롯데에너지머티리얼즈,022100 포스코DX,026960 동서,028050 삼성E&A,028670 팬오션,034230 파라다이스,039130 하나투어,
+042670 HD현대인프라코어,047040 대우건설,051600 한전KPS,052690 한전기술,064960 SNT모티브,069620 대웅제약,073240 금호타이어,
+078340 컴투스,081660 미스토홀딩스,088350 한화생명,093370 후성,097230 HJ중공업,100090 SK오션플랜트,103140 풍산,105630 한세실업,
+108670 LX하우시스,112610 씨에스윈드,114090 GKL,138930 BNK금융지주,139130 iM금융지주,175330 JB금융지주,180640 한진칼,
+192820 코스맥스,204320 HL만도,214320 이노션,229640 LS에코에너지,248070 솔루엠,280360 롯데웰푸드,285130 SK케미칼,
+294870 HDC현대산업개발,298020 효성티앤씨,298040 효성중공업,298050 HS효성첨단소재,302440 SK바이오사이언스,307950 현대오토에버,
+336260 두산퓨얼셀,361610 SK아이이테크놀로지,383220 F&F,402340 SK스퀘어,450080 에코프로머티,454910 두산로보틱스,
+457190 이수스페셜티케미컬,001800 오리온홀딩스,003090 대웅,012630 HDC,069260 TKG휴켐스,001060 JW중외제약,005850 에스엘,
+007660 이수페타시스,017960 한국카본,075580 세진중공업,001570 금양,005180 빙그레,089590 제주항공,272450 진에어,002350 넥센타이어,
+066970 엘앤에프,039030 이오테크닉스,403870 HPSP,277810 레인보우로보틱스,214150 클래시스,214450 파마리서치,141080 리가켐바이오,
+095340 ISC,067310 하나마이크론,031980 피에스케이홀딩스,319660 피에스케이,036540 SFA반도체,005290 동진쎄미켐,064760 티씨케이,
+101490 에스앤에스텍,222800 심텍,140860 파크시스템스,089030 테크윙,232140 와이씨,348370 엔켐,121600 나노신소재,078600 대주전자재료,
+278280 천보,393890 더블유씨피,365340 성일하이텍,086450 동국제약,237690 에스티팜,085660 차바이오텍,068760 셀트리온제약,
+298380 에이비엘바이오,950160 코오롱티슈진,310210 보로노이,328130 루닛,338220 뷰노,122870 와이지엔터테인먼트,253450 스튜디오드래곤,
+192080 더블유게임즈,194480 데브시스터즈,225570 넥슨게임즈,060250 NHN KCP,181710 NHN,053800 안랩,272290 이녹스첨단소재,
+090460 비에이치,213420 덕산네오룩스,042000 카페24,383310 에코프로에이치엔,018290 브이티,257720 실리콘투,237880 클리오,
+200130 콜마비앤에이치,161890 한국콜마,033640 네패스,082920 비츠로셀,039200 오스코텍,087010 펩트론,096530 씨젠,376300 디어유,
+195940 HK이노엔"""
+
+US_MORE = """ACN Accenture,LIN Linde,NEE NextEra Energy,DHR Danaher,SPGI S&P Global,ADP ADP,MDT Medtronic,SYK Stryker,
+BKNG Booking,CB Chubb,MMC Marsh McLennan,PLD Prologis,AMT American Tower,CI Cigna,ELV Elevance Health,CVS CVS Health,
+SO Southern Company,DUK Duke Energy,ZTS Zoetis,VRTX Vertex,REGN Regeneron,BSX Boston Scientific,ICE Intercontinental Exchange,
+CME CME Group,MCO Moody's,ITW Illinois Tool Works,EMR Emerson,ETN Eaton,PH Parker-Hannifin,NOC Northrop Grumman,
+GD General Dynamics,LHX L3Harris,TDG TransDigm,CSX CSX,NSC Norfolk Southern,WM Waste Management,RSG Republic Services,
+ECL Ecolab,SHW Sherwin-Williams,APD Air Products,FCX Freeport-McMoRan,NEM Newmont,DOW Dow,DD DuPont,ADI Analog Devices,
+MRVL Marvell,NXPI NXP,MCHP Microchip,ON ON Semiconductor,MPWR Monolithic Power,CDNS Cadence,SNPS Synopsys,ANET Arista Networks,
+FTNT Fortinet,ZS Zscaler,DDOG Datadog,NET Cloudflare,MDB MongoDB,TEAM Atlassian,WDAY Workday,ADSK Autodesk,TTD The Trade Desk,
+OKTA Okta,TWLO Twilio,DOCU DocuSign,PINS Pinterest,SNAP Snap,RBLX Roblox,EA Electronic Arts,TTWO Take-Two,U Unity,
+DKNG DraftKings,MAR Marriott,HLT Hilton,CMG Chipotle,YUM Yum! Brands,DPZ Domino's,LULU Lululemon,ROST Ross Stores,
+ORLY O'Reilly,AZO AutoZone,EBAY eBay,ETSY Etsy,CHWY Chewy,BBY Best Buy,DG Dollar General,DLTR Dollar Tree,KR Kroger,
+KHC Kraft Heinz,MDLZ Mondelez,GIS General Mills,HSY Hershey,CL Colgate-Palmolive,KMB Kimberly-Clark,EL Estee Lauder,
+MNST Monster Beverage,KDP Keurig Dr Pepper,STZ Constellation Brands,BX Blackstone,KKR KKR,APO Apollo,PGR Progressive,
+TRV Travelers,AIG AIG,MET MetLife,PRU Prudential,USB U.S. Bancorp,PNC PNC,TFC Truist,COF Capital One,XYZ Block,AFRM Affirm,
+MSTR Strategy,MARA MARA Holdings,RIOT Riot Platforms,NU Nu Holdings,SE Sea,MELI MercadoLibre,BABA Alibaba,JD JD.com,
+PDD PDD Holdings,BIDU Baidu,NIO NIO,LI Li Auto,XPEV XPeng,LCID Lucid,ENPH Enphase,FSLR First Solar,PLUG Plug Power,
+CEG Constellation Energy,VST Vistra,GEV GE Vernova,OKLO Oklo,SMR NuScale,IONQ IonQ,RGTI Rigetti,QBTS D-Wave Quantum,
+SOUN SoundHound,AI C3.ai,PATH UiPath,CVNA Carvana,DASH DoorDash,LYFT Lyft,RDDT Reddit,APP AppLovin,ALAB Astera Labs,
+VRT Vertiv,HPQ HP,HPE Hewlett Packard Enterprise,WDC Western Digital,STX Seagate,NTAP NetApp,GLW Corning,TER Teradyne,
+EXPE Expedia,CCL Carnival,RCL Royal Caribbean,NCLH Norwegian Cruise,DAL Delta,UAL United Airlines,AAL American Airlines,
+LUV Southwest,CMI Cummins,PCAR PACCAR,URI United Rentals,GWW W.W. Grainger,FAST Fastenal,ODFL Old Dominion,JBHT J.B. Hunt,
+HCA HCA Healthcare,MCK McKesson,COR Cencora,CAH Cardinal Health,IDXX IDEXX,DXCM Dexcom,EW Edwards Lifesciences,
+ILMN Illumina,BIIB Biogen,HUM Humana,CNC Centene"""
+
 
 def pool() -> list[tuple[str, str, str]]:
     """(티커, 이름, 시장) 목록. 같은 티커는 한 번만."""
     out: dict[str, tuple[str, str, str]] = {}
-    for text, market in ((KR, "KR"), (US, "US")):
+    for text, market in ((KR, "KR"), (KR_MORE, "KR"), (US, "US"), (US_MORE, "US")):
         for item in text.replace("\n", "").split(","):
             ticker, _, name = item.strip().partition(" ")
             if ticker:
