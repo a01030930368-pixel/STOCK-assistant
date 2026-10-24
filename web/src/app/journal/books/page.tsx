@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { saveReview } from "@/app/actions";
-import { BOOK_SORTS, findBook, isBookSort, onShelf, shortDay, sortBooks, type Book, type Page, type Shelf } from "@/lib/books";
-import { buyPlans, loadBooks, loadBookSort, loadEdits, loadReviews, saveBookSort, type Review } from "@/lib/booksData";
+import { deleteBookNote, saveBookNote, saveReview } from "@/app/actions";
+import { BOOK_SORTS, findBook, isBookSort, noteRange, notesOf, onShelf, shortDay, sortBooks, timeline, type Book, type BookNote, type Page, type Shelf } from "@/lib/books";
+import { buyPlans, loadBookNotes, loadBooks, loadBookSort, loadEdits, loadReviews, saveBookSort, type Review } from "@/lib/booksData";
 import { signClass, today, usd, won } from "@/lib/format";
 import JournalTabs from "../JournalTabs";
 
@@ -17,10 +17,10 @@ const pct = (v: number | null) => (v === null ? "-" : `${v > 0 ? "+" : ""}${v.to
 const qty = (v: number) => won(v, 4);
 const stars = (n: number) => "★".repeat(n) + "☆".repeat(5 - n);
 
-export default async function BooksPage({ searchParams }: { searchParams: Promise<{ b?: string; s?: string; edit?: string; o?: string }> }) {
+export default async function BooksPage({ searchParams }: { searchParams: Promise<{ b?: string; s?: string; edit?: string; o?: string; note?: string }> }) {
   const params = await searchParams;
   const shelf = SHELVES.find((x) => x.key === params.s)?.key ?? "all";
-  const [books, reviews, edits, saved] = await Promise.all([loadBooks(), loadReviews(), loadEdits(), loadBookSort()]);
+  const [books, reviews, edits, saved, notes] = await Promise.all([loadBooks(), loadReviews(), loadEdits(), loadBookSort(), loadBookNotes()]);
   // 정렬을 누르면 그 순서를 저장해 두고, 다음에 열 때도 그대로 써요.
   const sort = isBookSort(params.o) ? params.o : saved;
   if (sort !== saved) await saveBookSort(sort).catch(() => undefined);
@@ -28,7 +28,7 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
   const edited = (b: Book) => {
     const times = b.pages.filter((p) => p.entryId !== null).map((p) => edits.get(`${p.side}:${p.entryId}`) ?? "");
     const r = reviews.get(b.key)?.edited;
-    return [...times, r ?? ""].reduce((a, x) => (x > a ? x : a), "") || null;
+    return [...times, ...notesOf(b, notes).map((n) => n.edited), r ?? ""].reduce((a, x) => (x > a ? x : a), "") || null;
   };
   const shown = sortBooks(books.filter((b) => onShelf(b, shelf, (k) => reviews.has(k))), sort, { stars: (k) => reviews.get(k)?.stars ?? null, edited });
   const open = findBook(books, params.b);
@@ -71,7 +71,8 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
         </div>
         <div className="book-view">
           {open ? (
-            <BookView b={open} review={reviews.get(open.key)} editing={params.edit === "review"} back={href({ s: shelf })} day={day} />
+            <BookView b={open} review={reviews.get(open.key)} editing={params.edit === "review"} back={href({ s: shelf })} day={day}
+              notes={notesOf(open, notes)} editNote={Number(params.note) || null} />
           ) : (
             <p className="muted">왼쪽 책장에서 한 권을 고르면 여기에 펼쳐져요. 한 권은 그 종목을 처음 산 날부터 전부 판 날까지예요.</p>
           )}
@@ -86,7 +87,9 @@ function period(b: Book, day: string): string {
   return `${from} → ${b.end ? shortDay(b.end, day) : "진행 중"}${b.days !== null ? ` · ${b.days}일` : ""}`;
 }
 
-async function BookView({ b, review, editing, back, day }: { b: Book; review?: Review; editing: boolean; back: string; day: string }) {
+async function BookView({ b, review, editing, back, day, notes, editNote }: {
+  b: Book; review?: Review; editing: boolean; back: string; day: string; notes: BookNote[]; editNote: number | null;
+}) {
   const entryHref = (p: Page) => `/journal/books/entry?${new URLSearchParams({ b: b.key, e: p.id })}`;
   const first = b.pages.find((p) => p.side === "buy");
   return (
@@ -113,7 +116,14 @@ async function BookView({ b, review, editing, back, day }: { b: Book; review?: R
 
       <div className="tl">
         {b.pages.length === 0 && <p className="muted">키움에서 받은 기록 안에는 이 종목 매매가 없어요.</p>}
-        {b.pages.map((p) => (
+        {timeline(b.pages, notes).map((it) => {
+          if (it.kind === "note") {
+            return it.note.id === editNote
+              ? <NoteForm key={`n${it.note.id}`} b={b} day={day} note={it.note} />
+              : <NoteItem key={`n${it.note.id}`} b={b} day={day} note={it.note} />;
+          }
+          const p = it.page;
+          return (
           <Link key={p.id} href={entryHref(p)} className="tl-item">
             <span className={`tl-dot ${p.side === "buy" ? "buy" : "sell"}`} />
             <span className="tl-row">
@@ -125,7 +135,9 @@ async function BookView({ b, review, editing, back, day }: { b: Book; review?: R
             </span>
             <span className={p.note ? "tl-memo" : "tl-memo muted"}>{p.note ?? "아직 일지를 안 적었어요 · 눌러서 적기"}</span>
           </Link>
-        ))}
+          );
+        })}
+        {!editNote && <NoteForm b={b} day={day} />}
       </div>
 
       {b.end ? (
@@ -133,6 +145,47 @@ async function BookView({ b, review, editing, back, day }: { b: Book; review?: R
       ) : (
         <p className="muted">전부 팔고 나면 여기 마지막 장에 사후강평을 써요. 다시 사면 새 일기장이 시작돼요.</p>
       )}
+    </div>
+  );
+}
+
+// 타임라인 사이에 끼는 내 메모 한 장. 고치기를 누르면 그 자리에서 고쳐요.
+function NoteItem({ b, day, note }: { b: Book; day: string; note: BookNote }) {
+  return (
+    <div id={`note-${note.id}`} className="tl-item tl-note">
+      <span className="tl-dot note" />
+      <span className="tl-row">
+        <b>{shortDay(note.day, day)}</b>
+        <span className="gold">메모</span>
+        <Link className="tl-note-edit" href={`/journal/books?${new URLSearchParams({ b: b.key, note: String(note.id) })}#note-${note.id}`}>고치기</Link>
+      </span>
+      <span className="tl-memo tl-note-body">{note.body}</span>
+    </div>
+  );
+}
+
+// 새 메모(맨 아래) 또는 고치는 메모. 날짜는 이 권 안에서만 고를 수 있어요.
+function NoteForm({ b, day, note }: { b: Book; day: string; note?: BookNote }) {
+  const { min, max } = noteRange(b);
+  const last = max && max < day ? max : day;
+  return (
+    <div id={note ? `note-${note.id}` : "note-new"} className="tl-item tl-note tl-note-form">
+      <span className="tl-dot note" />
+      <form action={saveBookNote}>
+        <input type="hidden" name="bookKey" value={b.key} />
+        {note && <input type="hidden" name="noteId" value={note.id} />}
+        <div className="tl-note-top">
+          <b>{note ? "메모 고치기" : "메모 남기기"}</b>
+          <input type="date" name="day" required defaultValue={note?.day ?? last} min={min ?? undefined} max={max ?? day} aria-label="날짜" />
+        </div>
+        <textarea name="body" required rows={note ? 4 : 2} maxLength={2000} defaultValue={note?.body ?? ""}
+          placeholder="중요한 일이 있었으면 적어 두세요. 예: 실적 발표에서 HBM 매출이 두 배, 다음 날 +8%" />
+        <div className="tl-note-foot">
+          <button type="submit">{note ? "저장" : "타임라인에 넣기"}</button>
+          {note && <Link href={`/journal/books?${new URLSearchParams({ b: b.key })}#note-${note.id}`}>취소</Link>}
+          {note && <button type="submit" formAction={deleteBookNote} formNoValidate className="danger-link">지우기</button>}
+        </div>
+      </form>
     </div>
   );
 }

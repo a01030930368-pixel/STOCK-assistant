@@ -516,6 +516,17 @@ MIGRATIONS = [
     # Gemini가 붐비면 노트 초안을 조금 뒤 다시 써 봐요
     "ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS ai_retry_at TIMESTAMPTZ",
     "ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS ai_tries INTEGER NOT NULL DEFAULT 0",
+    # 종목 일기장에 내가 직접 적는 사건 메모(날짜로 그 권 타임라인에 끼워요)
+    """CREATE TABLE IF NOT EXISTS book_notes (
+      id          SERIAL PRIMARY KEY,
+      market      TEXT NOT NULL,
+      ticker      TEXT NOT NULL,
+      day         DATE NOT NULL,
+      body        TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS book_notes_stock ON book_notes (market, ticker, day)",
 ]
 
 

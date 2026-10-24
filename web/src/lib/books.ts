@@ -239,3 +239,26 @@ export function sortBooks(books: Book[], sort: BookSort, info: { stars: (key: st
   };
   return [...books].sort(by[sort]);
 }
+
+// 내가 직접 적는 사건 메모(실적 발표, 공시, 뉴스 같은 것). 날짜로 그 권에 들어가요:
+// 첫 매수일부터 전부 판 날까지, 진행 중이면 끝 없이. 기록 전부터 갖고 있던 권은 앞쪽도 열어 둬요.
+export type BookNote = { id: number; market: Market; ticker: string; day: string; body: string; edited: string };
+
+export const noteRange = (b: Book) => ({ min: b.startedBefore ? null : b.start, max: b.end });
+
+export function notesOf(b: Book, notes: BookNote[]): BookNote[] {
+  const { min, max } = noteRange(b);
+  return notes.filter((n) => n.market === b.market && n.ticker === b.ticker && (!min || n.day >= min) && (!max || n.day <= max));
+}
+
+// 매매와 메모를 날짜순으로 섞어요. 같은 날이면 매매 다음에 메모, 메모끼리는 먼저 쓴 것부터.
+export type TimelineItem = { kind: "trade"; day: string; page: Page } | { kind: "note"; day: string; note: BookNote };
+export function timeline(pages: Page[], notes: BookNote[]): TimelineItem[] {
+  const out: TimelineItem[] = pages.map((page) => ({ kind: "trade", day: page.day, page }));
+  const sorted = [...notes].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.id - b.id));
+  for (const note of sorted) {
+    const at = out.findIndex((x) => x.day > note.day);
+    out.splice(at < 0 ? out.length : at, 0, { kind: "note", day: note.day, note });
+  }
+  return out;
+}

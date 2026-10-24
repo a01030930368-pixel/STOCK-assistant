@@ -1,5 +1,5 @@
 import { query } from "./db";
-import { attachEntries, buildBooks, findBook, isBookSort, type Book, type BookSort, type EntryRow, type FillRow, type Holding, type Market } from "./books";
+import { attachEntries, buildBooks, findBook, isBookSort, type Book, type BookNote, type BookSort, type EntryRow, type FillRow, type Holding, type Market } from "./books";
 import { today } from "./format";
 import { marketOf } from "./journal";
 
@@ -106,6 +106,15 @@ export async function loadEdits(): Promise<Map<string, string>> {
      SELECT 'sell:' || id, to_char(GREATEST(created_at, updated_at) AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD"T"HH24:MI:SS') FROM sell_entries`,
   ).catch(() => []);
   return new Map(rows.map((r) => [r.key, r.at]));
+}
+
+// 일기장에 직접 적은 사건 메모 전부(권마다 날짜로 나눠 보여 줘요)
+export async function loadBookNotes(): Promise<BookNote[]> {
+  return query<BookNote>(
+    `SELECT id, market, ticker, to_char(day, 'YYYY-MM-DD') AS day, body,
+       to_char(updated_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD"T"HH24:MI:SS') AS edited
+     FROM book_notes ORDER BY day, id`,
+  ).catch(() => []);
 }
 
 // 책장 정렬: 한 번 고르면 다시 고를 때까지 그대로(폰·PC 같이)
