@@ -11,7 +11,7 @@ describe("study notes", () => {
       cheap: "220,000", pricey: -1, verdict: "hold", sources: [{ title: "보고서", url: "javascript:alert(1)" }],
     });
     expect(f.one).toBe("메모리를 팔아요");
-    expect(f.lines).toEqual([{ name: "D램", pct: 72 }, { name: "낸드", pct: 100 }]);
+    expect(f.lines).toEqual([{ name: "D램", pct: 72.4 }, { name: "낸드", pct: 100 }]);
     expect(f.power).toBe("");
     expect(f.promises).toEqual([{ when: "2026.07", said: "HBM4 양산", result: "kept" }]);
     expect(f.events).toEqual([{ day: "2027-01-28", text: "실적" }, { day: "", text: "인증" }]);
@@ -67,6 +67,7 @@ describe("study notes", () => {
   it("splits revenue and fills drafts only into blank fields", () => {
     expect(splitOf([{ name: "D램", pct: 72 }, { name: "낸드", pct: 25 }]).at(-1)).toEqual({ name: "기타", pct: 3, other: true });
     expect(splitOf([{ name: "a", pct: 150 }, { name: "b", pct: 50 }]).map((s) => s.pct)).toEqual([75, 25]);
+    expect(splitOf([{ name: "D램", pct: 72.4 }, { name: "낸드", pct: 25.3 }]).at(-1)).toEqual({ name: "기타", pct: 2.3, other: true });
     const f = { ...emptyFields(), one: "내가 쓴 한 줄" };
     const out = applyDraft(f, { one: "AI 한 줄", customers: "엔비디아", risks: [{ text: "값 하락", signal: "고정가" }] }, ["one", "model", "risks"]);
     expect(out.one).toBe("내가 쓴 한 줄");

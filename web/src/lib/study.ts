@@ -1,7 +1,8 @@
 // 관심종목 › 기업 공부: 회사마다 노트 한 장. 처음엔 6단계로 따라 적고(B), 다 적으면 한 장 노트(A)에서 보고 고쳐요.
 import { tableOf, type StatementRow } from "./statements";
 
-export const STATUSES = ["공부 중", "관심", "보유", "보류", "탈락"] as const;
+// 눈여겨봄: 공부해 보니 괜찮아서(ㅇㅋ) 가끔 지켜보는 정도. 관심은 살지 고민하는 단계예요.
+export const STATUSES = ["공부 중", "눈여겨봄", "관심", "보유", "보류", "탈락"] as const;
 export type Status = (typeof STATUSES)[number];
 export type Verdict = "buy" | "wait" | "pass" | "";
 export const VERDICTS: { key: Exclude<Verdict, "">; label: string }[] = [
@@ -74,7 +75,7 @@ export function cleanFields(raw: unknown, keepBlank = false): Fields {
     sector: str(r.sector, 40),
     styles: (Array.isArray(r.styles) ? r.styles : []).filter((x): x is string => (STYLES as readonly unknown[]).includes(x)).filter((x, i, a) => a.indexOf(x) === i).slice(0, 3),
     one: str(r.one, 300),
-    lines: keep(list(r.lines, 8, (x) => ({ name: str(x.name, 40), pct: Math.max(0, Math.min(100, Math.round(Number(x.pct) || 0))) })), "name"),
+    lines: keep(list(r.lines, 8, (x) => ({ name: str(x.name, 40), pct: pct1(Math.max(0, Math.min(100, Number(x.pct) || 0))) })), "name"),
     customers: str(r.customers, 300),
     power: (["강함", "보통", "약함"] as const).find((p) => p === r.power) ?? "",
     powerWhy: str(r.powerWhy, 300),
@@ -191,12 +192,15 @@ export function reviewDefault(today: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+// 매출 비중은 소수점 한 자리까지 (예: 72.4%)
+export const pct1 = (v: number) => Math.round(v * 10) / 10;
+
 // 매출 비중 막대: 합이 100이 넘으면 비율대로 줄이고, 모자라면 '기타'를 붙여요.
 export function splitOf(lines: { name: string; pct: number }[]): { name: string; pct: number; other?: boolean }[] {
   const sum = lines.reduce((s, l) => s + l.pct, 0);
   if (sum <= 0) return [];
   if (sum >= 100) return lines.map((l) => ({ ...l, pct: Math.round((l.pct / sum) * 1000) / 10 }));
-  return [...lines, { name: "기타", pct: 100 - sum, other: true }];
+  return [...lines, { name: "기타", pct: pct1(100 - sum), other: true }];
 }
 
 // 초안이 채울 수 있는 칸 전부(🤖 AI가 전부 채우기). 판단(산다·기다린다·안 산다)은 내가 골라요.

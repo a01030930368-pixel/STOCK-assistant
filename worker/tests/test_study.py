@@ -43,11 +43,11 @@ def test_parse_pick_rejects_tickers_outside_sample_and_cleans_peers():
 
 def test_parse_draft_clamps_and_drops_bad_items():
     d = study.parse_draft("```json\n" + json.dumps({
-        "one": "메모리를 만들어 서버 회사에 팔아요", "power": "아주 강함", "lines": [{"name": "D램", "pct": 130}, {"name": "", "pct": 3}, {"name": "낸드", "pct": "x"}],
+        "one": "메모리를 만들어 서버 회사에 팔아요", "power": "아주 강함", "lines": [{"name": "D램", "pct": 130}, {"name": "", "pct": 3}, {"name": "낸드", "pct": "x"}, {"name": "HBM", "pct": 12.46}],
         "risks": [{"text": "메모리 값 하락", "signal": "고정가 2달 하락"}, {"text": ""}], "events": "없음", "questions": ["누가 사 가나요?"],
     }) + "\n```")
     assert d["one"].startswith("메모리") and d["power"] == ""
-    assert d["lines"] == [{"name": "D램", "pct": 100}, {"name": "낸드", "pct": 0}]
+    assert d["lines"] == [{"name": "D램", "pct": 100}, {"name": "낸드", "pct": 0}, {"name": "HBM", "pct": 12.5}]
     assert d["risks"] == [{"text": "메모리 값 하락", "signal": "고정가 2달 하락"}] and d["events"] == []
 
 
