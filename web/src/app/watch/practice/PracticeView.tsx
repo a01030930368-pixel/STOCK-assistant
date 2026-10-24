@@ -90,6 +90,26 @@ export default function PracticeView({ game, blind, ticker, name, market, candle
     return () => window.removeEventListener("keydown", on);
   }, []);
 
+  // PC: 차트 높이를 화면에 맞춰서, 맨 위로 올렸을 때 버튼 줄이 차트 바로 아래 화면 안에 오게 해요(차트를 덮지 않게). 폰은 CSS가 높이를 정해요.
+  const root = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const fit = () => {
+      const canvas = el.querySelector<HTMLElement>(".chart-wrap:not(.big) .chart-canvas");
+      const bar = el.querySelector<HTMLElement>(".practice-dock");
+      if (!canvas || !bar) return;
+      const top = canvas.getBoundingClientRect().top + window.scrollY;
+      const h = Math.round(window.innerHeight - top - bar.offsetHeight - 28);
+      el.style.setProperty("--practice-h", `${Math.max(280, Math.min(720, h))}px`);
+    };
+    fit();
+    const watch = new ResizeObserver(fit);
+    el.querySelectorAll(".chart-tools, .practice-dock, .practice-head").forEach((x) => watch.observe(x));
+    window.addEventListener("resize", fit);
+    return () => { watch.disconnect(); window.removeEventListener("resize", fit); };
+  }, [done]);
+
   const dock = (
     <div className="practice-dock">
       <div className="practice-score">
@@ -115,7 +135,7 @@ export default function PracticeView({ game, blind, ticker, name, market, candle
   );
 
   return (
-    <section className="practice">
+    <section className="practice" ref={root}>
       <div className={done ? "practice-bar panel" : "practice-head"}>
         {!done ? (
           <div className="practice-title">
