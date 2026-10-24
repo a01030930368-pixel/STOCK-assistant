@@ -13,13 +13,13 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
 import psycopg
 
-from . import ai, db, telegram
+from . import ai, db, research, telegram, translate
 from .config import Config
 
 log = logging.getLogger("worker")
@@ -277,6 +277,12 @@ def draft_prompt(name: str, market: str, ctx: dict, today: date | None = None) -
 
 
 RETRY_MINUTES, RETRY_TRIES = 10, 6  # 붐비면 10분 뒤, 최대 6번(1시간)
+NO_SEARCH_HOURS = 24  # 이 키에 검색이 없다고 나오면 하루 동안은 검색을 묻지 않고 바로 뉴스로 써요
+
+
+def news_lines(items: list[dict]) -> str:
+    return "웹에서 찾은 최근 한 달 기사 제목 (구글 뉴스, 최신순):\n" + "\n".join(
+        f"- {n['day']:%Y.%m.%d} {n['title']}" + (f" ({n['source']})" if n["source"] else "") for n in items)
 
 
 class StudyWorker:
@@ -284,6 +290,7 @@ class StudyWorker:
         self.http = http
         self.key, self.model, self.ask = ai.text_asker(cfg)
         self.search = ai.search_asker(cfg)
+        self.no_search_until: datetime | None = None
         self.rand = rand or random.Random()
 
     def run_once(self, conn: psycopg.Connection) -> bool:
@@ -361,16 +368,29 @@ class StudyWorker:
         try:
             prompt = draft_prompt(name, market, db.study_context(conn, ticker, market))
             out, why = None, ""
-            if self.search:
+            now = datetime.now(timezone.utc)
+            if self.search and not (self.no_search_until and now < self.no_search_until):
                 try:
                     out = parse_draft(*self.search(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096), own=ticker)
                     out["searched"] = True
+                except ai.NoSearch as e:
+                    log.info("%s: %s. 구글 뉴스 제목으로 대신 써요", name, e)
+                    self.no_search_until = now + timedelta(hours=NO_SEARCH_HOURS)
                 except Exception as e:
                     log.warning("%s 기업 공부 검색 초안 실패, 검색 없이 다시 써요: %s", name, e)
                     why = "시간 초과" if isinstance(e, httpx.TimeoutException) else str(e)[:100]
             if out is None:
-                out = parse_draft(self.ask(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096), own=ticker)
+                # 웹 검색 대신 구글 뉴스에서 최근 한 달 기사 제목을 모아 같이 줘요. 못 모아도 초안은 써요.
+                news = []
+                try:
+                    news = research.headlines(name, market == "US" and translate.needs_translation(name), self.http)
+                except Exception as e:
+                    log.warning("%s 구글 뉴스 제목을 못 모았어요: %s", name, e)
+                ask_prompt = prompt + ("\n" + news_lines(news) if news else "")
+                sources = [{"title": n["title"], "url": n["url"]} for n in news[:8]]
+                out = parse_draft(self.ask(DRAFT_SYSTEM, ask_prompt, self.key, self.model, self.http, 4096), sources, own=ticker)
                 out["searched"] = False
+                out["news"] = len(news)
                 if why:
                     out["searchError"] = why
             out["model"] = self.model

@@ -91,6 +91,25 @@ def google_news(ticker: str, name: str, http: httpx.Client) -> list[News]:
     return [n for n in items if n.title and n.url][:10]
 
 
+def headlines(name: str, english: bool, http: httpx.Client, days: int = 30, limit: int = 15) -> list[dict]:
+    """키 없이 쓰는 구글 뉴스 RSS로 최근 기사 제목을 모아요. 무료 Gemini 키는 웹 검색이 안 돼서 공부 노트 초안에 대신 넣어요.
+    [{"day": date, "title", "source", "url"}], 최신순."""
+    lang = {"hl": "en-US", "gl": "US", "ceid": "US:en"} if english else {"hl": "ko", "gl": "KR", "ceid": "KR:ko"}
+    res = http.get(GOOGLE_NEWS, params={"q": f'"{name}" when:{days}d', **lang})
+    res.raise_for_status()
+    out = []
+    for item in ET.fromstring(res.content).iter("item"):
+        source = (item.findtext("source") or "").strip()
+        title = html.unescape((item.findtext("title") or "").strip())
+        if source and title.endswith(f" - {source}"):
+            title = title[: -len(source) - 3]
+        url = (item.findtext("link") or "").strip()
+        if title and url.startswith("http"):
+            out.append({"day": parsedate_to_datetime(item.findtext("pubDate")).date(), "title": title, "source": source, "url": url})
+    out.sort(key=lambda n: n["day"], reverse=True)
+    return out[:limit]
+
+
 def naver_news(ticker: str, name: str, client_id: str, secret: str, http: httpx.Client) -> list[News]:
     res = http.get(
         NAVER_NEWS,

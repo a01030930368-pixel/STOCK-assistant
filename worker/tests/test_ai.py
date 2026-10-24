@@ -1,5 +1,6 @@
 import json
 from datetime import date, datetime, timedelta, timezone
+from unittest import mock
 
 import httpx
 import pytest
@@ -211,7 +212,7 @@ def test_gemini_moves_to_faster_model_when_one_times_out():
 
 
 def test_long_answers_never_fall_back_to_lite_models():
-    assert ai.gemini_chain("gemini-flash-latest", 4096) == ("gemini-flash-latest", "gemini-pro-latest", "gemini-2.5-flash")
+    assert ai.gemini_chain("gemini-flash-latest", 4096) == ("gemini-flash-latest", "gemini-pro-latest")
     assert "gemini-flash-lite-latest" in ai.gemini_chain("gemini-flash-latest", 400)
     assert ai.gemini_chain("gemini-flash-lite-latest", 4096)[0] == "gemini-flash-lite-latest"
 
@@ -235,3 +236,13 @@ def test_only_missing_models_is_not_busy():
     with pytest.raises(RuntimeError) as e:
         ai.gemini_text("s", "p", "k", "gone-model", http, 400)
     assert not isinstance(e.value, ai.AiBusy)
+
+
+def test_search_says_no_search_when_every_model_refuses_with_quota():
+    http = mock.Mock()
+    http.post.return_value = mock.Mock(status_code=429, text="limit: 0")
+    with pytest.raises(ai.NoSearch):
+        ai._gemini_search("s", "p", "k", "gemini-flash-latest", http, 4096)
+    http.post.side_effect = [mock.Mock(status_code=429, text=""), mock.Mock(status_code=503, text=""), mock.Mock(status_code=503, text="")]
+    with pytest.raises(ai.AiBusy):
+        ai._gemini_search("s", "p", "k", "gemini-flash-latest", http, 4096)
