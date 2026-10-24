@@ -1,7 +1,7 @@
 """텔레그램 알림 두 가지.
 
 - 저녁 일정 알림: 매일 저녁 8시(한국 시간)에 다음 날 일정(금리 결정·경제지표·만기·휴장·내 종목 실적)을 보냅니다.
-- 아침 브리핑: 평일 아침 8시에 밤사이 미국장, 내 미국 종목(원화 손익·뉴스·AI 한마디), 국내 종목, 오늘 일정을 한 번에 보냅니다.
+- 아침 브리핑: 평일과 토요일 아침 8시에 밤사이 미국장(토요일엔 금요일 미국장), 내 미국 종목(원화 손익·뉴스·AI 한마디), 국내 종목, 오늘 일정을 한 번에 보냅니다.
 - 실적 전날 알림: 저녁 8시에, 내일 실적을 발표하는 보유 종목마다 따로 한 통씩 보냅니다.
 - 주간 성적표: 일요일 저녁 8시에 이번 주 내 돈 변화, 보유 종목 등락, 매매, 강평 안 쓴 일기장, 다음 주 일정을 보냅니다.
 """
@@ -70,9 +70,10 @@ class Holding:
 
 
 def morning_due(now: datetime) -> date | None:
-    """평일 아침 8시~11시면 오늘 날짜를, 아니면 None을 돌려줍니다."""
+    """월~토 아침 8시~11시면 오늘 날짜를, 아니면 None을 돌려줍니다.
+    금요일 미국장은 토요일 새벽에 끝나서 토요일 아침에도 보내요."""
     local = now.astimezone(KST)
-    if local.weekday() >= 5 or not (MORNING <= local.time() < MORNING_UNTIL):
+    if local.weekday() == 6 or not (MORNING <= local.time() < MORNING_UNTIL):
         return None
     return local.date()
 
@@ -158,18 +159,19 @@ def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], it
     """텔레그램 HTML 모양(굵게·고정폭 표)으로 만들어요. 이름·뉴스 같은 글은 모두 이스케이프해요.
     term은 terms.message가 만든(이미 이스케이프한) 오늘의 용어예요."""
     e = html.escape
+    night = "금요일 밤" if day.weekday() == 5 else "밤사이"
     lines = [f"☀️ <b>좋은 아침이에요</b> · {day_label(day)}"]
     if indexes:
         rows, col = [], max(width(q.name) for q in indexes) + 1
         for q in indexes:
             tail = f"  {q.last:,.0f}원" if q.name == "원/달러" else ""
             rows.append(f"{e(pad(q.name, col))}{dot(q.change_pct)} {_pct(q.change_pct):>6}{tail}")
-        lines += ["", "🌙 <b>밤사이 미국장</b>", "<pre>" + "\n".join(rows) + "</pre>"]
+        lines += ["", f"🌙 <b>{night} 미국장</b>", "<pre>" + "\n".join(rows) + "</pre>"]
     us = us or []
     if us:
         total = us_total(us, fx, fx_prev)
         if total:
-            lines += ["", "💵 <b>밤사이 내 미국 주식</b>", f"<b>{dot(total.won)} {_signed_won(total.won)}</b>  ({_pct(total.pct)})"]
+            lines += ["", f"💵 <b>{night} 내 미국 주식</b>", f"<b>{dot(total.won)} {_signed_won(total.won)}</b>  ({_pct(total.pct)})"]
             sub = f"평가액 {_won_short(total.value)}"
             if abs(total.fx_effect) >= 10_000:
                 sub += f" · 환율 효과 {_signed_won(total.fx_effect)}"
@@ -191,6 +193,8 @@ def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], it
     rest = [h for h in holdings if h.market == "KR" or not us]
     if rest:
         title = "💼 <b>국내 종목</b>" if us else "💼 <b>내 종목</b>"
+        if day.weekday() == 5:
+            title += " <i>(금요일 마감)</i>"
         col = max(width(h.name) for h in rest) + 1
         rows = [f"{e(pad(h.name, col))}{dot(h.day_change_pct)} {_pct(h.day_change_pct):>6}  평단 {_pct(h.pnl_pct)}" for h in rest]
         lines += ["", title, "<pre>" + "\n".join(rows) + "</pre>"]
