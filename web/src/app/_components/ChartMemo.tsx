@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
 import { addAlert, addChartMemo, addDoodle, addLevel, addShape, deleteChartMemo, deleteDoodle, deleteLevel, deleteShape, updateLevel, updateShape } from "@/app/actions";
 import {
@@ -95,11 +95,13 @@ const md = (day: string) => `${Number(day.slice(5, 7))}.${Number(day.slice(8, 10
 const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
 const compact = (v: number): string => (v < 0 ? `−${compact(-v)}` : v >= 1e12 ? `${(v / 1e12).toFixed(1)}조` : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v.toLocaleString("ko-KR"));
 
-export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles, statements = [], shares = null, shapes: savedShapes = [], practice }: {
+export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles, statements = [], shares = null, shapes: savedShapes = [], practice, footer }: {
   ticker: string; name: string; market: string; candles: Candle[]; minutes: MinuteCandle[]; memos: Memo[]; trades: Trade[]; levels: Level[]; today: string;
   current: number | null; marks: Mark[]; doodles: Doodle[]; statements?: StatementRow[]; shares?: number | null; shapes?: Shape[];
   // 연습하기: 그린 것은 저장하지 않고 이 화면에서만 써요. blind면 날짜·가격대를 가려요.
   practice?: { blind: boolean };
+  // 차트 아래에 붙는 줄(연습하기 버튼). 크게 보기에서도 같이 보여요.
+  footer?: ReactNode;
 }) {
   const local = useRef(-1); // 연습하기에서 그린 것의 임시 번호
   const nextLocal = () => local.current--;
@@ -1006,6 +1008,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           휠이나 두 손가락으로 확대하고, 끌어서 옮겨요. 차트를 누르면 그 날짜는 메모 칸에, 그 높이의 가격은 알림 칸에 들어가요. 지지·저항은 모든 차트에, 낙서는 그린 차트에만 보여요. 선·구간은 ↕ 옮기기를 켜고 잡아 끌면 옮겨지고, 🧲 자석이 켜져 있으면 캔들 꼬리·몸통에 붙어요. 차트:{" "}
           <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a> Lightweight Charts
         </p>}
+        {footer}
       </div>
 
       {viewShapes.length > 0 && (
