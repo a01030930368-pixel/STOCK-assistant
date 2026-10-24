@@ -7,7 +7,7 @@ import { addStudyPeer, deleteStudy, readStudyDraft, removeStudyPeer, requestStud
 import { usd, won } from "@/lib/format";
 import { money } from "@/lib/statements";
 import {
-  applyDraft, bars, CHECKS, draftPromises, filled, pastLabel, pastSelf, RESULTS, splitOf, STATUSES, STEPS, STYLES, VERDICTS, verdictLabel,
+  applyDraft, bars, CHECKS, pct1, draftPromises, filled, pastLabel, pastSelf, RESULTS, splitOf, STATUSES, STEPS, STYLES, VERDICTS, verdictLabel,
   type Draft, type Fields, type Numbers, type PeerLine, type Pick, type Version,
 } from "@/lib/study";
 
@@ -405,7 +405,7 @@ function SplitBar({ split }: { split: { name: string; pct: number; other?: boole
         {split.map((s, i) => <i key={i} style={{ width: `${s.pct}%`, background: s.other ? "#55524b" : COLORS[i % COLORS.length] }} title={`${s.name} ${s.pct}%`} />)}
       </div>
       <div className="study-legend">{split.map((s, i) => (
-        <span key={i}><i style={{ background: s.other ? "#55524b" : COLORS[i % COLORS.length] }} />{s.name} {Math.round(s.pct)}%</span>
+        <span key={i}><i style={{ background: s.other ? "#55524b" : COLORS[i % COLORS.length] }} />{s.name} {pct1(s.pct)}%</span>
       ))}</div>
     </>
   );
@@ -503,6 +503,23 @@ function OneEd({ f, set }: { f: Fields; set: Set }) {
   );
 }
 
+// 매출 비중 % 칸: 소수점 한 자리까지. 치는 중인 "72." 같은 글자가 지워지지 않게 칸 글자를 따로 들고 있어요.
+function PctInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [text, setText] = useState(value ? String(value) : "");
+  const [prev, setPrev] = useState(value);
+  if (value !== prev) {
+    setPrev(value);
+    if ((Number(text) || 0) !== value) setText(value ? String(value) : "");
+  }
+  return (
+    <input value={text} inputMode="decimal" placeholder="%" className="study-pct" onChange={(e) => {
+      const t = (e.target.value.replace(/[^\d.]/g, "").match(/^\d{0,3}(\.\d?)?/) ?? [""])[0];
+      setText(t);
+      onChange(Math.min(100, Number(t) || 0));
+    }} />
+  );
+}
+
 function ModelEd({ f, set }: { f: Fields; set: Set }) {
   const lines = f.lines.length ? f.lines : [{ name: "", pct: 0 }];
   const put = (i: number, v: Partial<{ name: string; pct: number }>) => set({ ...f, lines: lines.map((l, k) => (k === i ? { ...l, ...v } : l)) });
@@ -513,7 +530,7 @@ function ModelEd({ f, set }: { f: Fields; set: Set }) {
       {lines.map((l, i) => (
         <div key={i} className="study-line">
           <input value={l.name} onChange={(e) => put(i, { name: e.target.value })} placeholder="사업 (예: D램)" />
-          <input value={l.pct || ""} onChange={(e) => put(i, { pct: Number(e.target.value.replace(/[^\d.]/g, "")) || 0 })} inputMode="decimal" placeholder="%" className="study-pct" />
+          <PctInput value={l.pct} onChange={(pct) => put(i, { pct })} />
           <button type="button" className="ghost" onClick={() => set({ ...f, lines: lines.filter((_, k) => k !== i) })} aria-label="줄 지우기">✕</button>
         </div>
       ))}

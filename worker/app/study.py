@@ -93,7 +93,7 @@ DRAFT_SYSTEM = """너는 한국 개인투자자의 기업 공부 노트를 대�
 {"sector": "업종 (예: 반도체, 2차전지, 인터넷, 은행)",
  "styles": ["주식 유형 1~3개, 다음 중에서만: 기술주, 성장주, 가치주, 배당주, 경기민감주, 경기방어주, 우량주, 턴어라운드, 테마주"],
  "one": "이 회사는 ___을 ___에게 팔아 돈을 번다 형식의 한 줄 (60자 안쪽)",
- "lines": [{"name": "사업 이름", "pct": 매출 비중 숫자}, ...최대 5개],
+ "lines": [{"name": "사업 이름", "pct": 매출 비중 숫자 (소수점 한 자리까지, 예: 72.4)}, ...최대 5개],
  "customers": "주요 고객 (40자 안쪽)",
  "power": "강함 또는 보통 또는 약함", "powerWhy": "가격을 올릴 힘이 그런 이유 (50자 안쪽)",
  "numbersNote": "최근 매출·이익·현금흐름 숫자를 보고 읽을 점 (100자 안쪽)",
@@ -214,7 +214,7 @@ def parse_draft(text: str, sources: list[dict] | None = None, own: str = "", tod
                 pct = max(0.0, min(100.0, float(x.get("pct"))))
             except (TypeError, ValueError):
                 pct = 0.0
-            lines.append({"name": _s(x.get("name"), 30), "pct": round(pct)})
+            lines.append({"name": _s(x.get("name"), 30), "pct": round(pct, 1)})
     out["lines"] = lines[:5]
     promises = d.get("promises")
     out["promises"] = [{"when": _s(x.get("when"), 20), "said": _s(x.get("said"), 120)}
