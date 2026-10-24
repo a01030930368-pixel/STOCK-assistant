@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ChartMemo, { type Candle, type Level, type Trade } from "@/app/_components/ChartMemo";
 import { savePractice } from "@/app/actions";
 import { JUDGE, rescale, score, STEPS, type Decision } from "@/lib/practice";
@@ -68,36 +68,61 @@ export default function PracticeView({ game, blind, ticker, name, market, candle
   }
 
   const open = holding === null ? null : (closes[now] / closes[start + holding] - 1) * 100;
+  // 단축키: B 산다 · S 판다 · Space 지켜본다 · P 자동. 글 쓰는 칸에서는 안 먹어요.
+  const keys = useRef<(e: KeyboardEvent) => void>(() => {});
+  keys.current = (e) => {
+    const t = e.target as HTMLElement | null;
+    if (done || e.ctrlKey || e.metaKey || e.altKey || t?.closest("input, textarea, select, [contenteditable]")) return;
+    const k = e.key.toLowerCase();
+    const act = k === "b" ? () => holding === null && decide("buy")
+      : k === "s" ? () => holding !== null && decide("sell")
+        : k === " " ? () => decide(null)
+          : k === "p" ? () => setPlaying((p) => !p) : null;
+    if (!act) return;
+    e.preventDefault();
+    // 버튼에 초점이 있으면 Space가 그 버튼을 한 번 더 누르지 않게 초점을 빼요.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    act();
+  };
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => keys.current(e);
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, []);
+
+  const dock = (
+    <div className="practice-dock">
+      <div className="practice-score">
+        <span className="muted">{step}/{last}봉</span>
+        <span>내 수익 <b className={tone(result.returnPct)}>{pct(result.returnPct)}</b></span>
+        {open !== null && <span>들고 있는 것 <b className={tone(open)}>{pct(open)}</b></span>}
+        <span className="muted">매매 {result.trades.length}번</span>
+      </div>
+      <div className="practice-acts">
+        <button type="button" className="buy" disabled={holding !== null} onClick={() => decide("buy")}>산다<kbd>B</kbd></button>
+        <button type="button" className="sell" disabled={holding === null} onClick={() => decide("sell")}>판다<kbd>S</kbd></button>
+        <button type="button" className="soft" onClick={() => decide(null)} title="사지도 팔지도 않고 다음 봉으로">지켜본다<kbd>Space</kbd></button>
+      </div>
+      <div className="practice-play">
+        <button type="button" className="chip-btn" onClick={() => setPlaying((p) => !p)}>{playing ? "⏸ 멈춤" : "▶ 자동"}<kbd>P</kbd></button>
+        <div className="segment small" role="radiogroup" aria-label="빠르기">
+          {SPEEDS.map((s, n) => <button key={s.label} type="button" aria-selected={speed === n} onClick={() => setSpeed(n)}>{s.label}</button>)}
+        </div>
+        <button type="button" className="chip-btn" onClick={restart} title="처음부터">⏮</button>
+        <button type="button" className="ghost" onClick={finish}>끝내기</button>
+      </div>
+    </div>
+  );
+
   return (
     <section className="practice">
-      <div className="practice-bar panel">
-        {!done && (
+      <div className={done ? "practice-bar panel" : "practice-head"}>
+        {!done ? (
           <div className="practice-title">
             {hide ? <b>🎲 어떤 종목일까요?</b> : <b>{name} <span className="muted">{ticker}</span></b>}
             <span className="muted">{hide ? `${step}/${last}봉` : `${candles[start].day} 부터 · ${step}/${last}봉`}</span>
+            <span className="practice-progress" aria-hidden><i style={{ width: `${(step / Math.max(1, last)) * 100}%` }} /></span>
           </div>
-        )}
-        {!done ? (
-          <>
-            <div className="practice-acts">
-              <button type="button" className="buy" disabled={holding !== null} onClick={() => decide("buy")}>산다</button>
-              <button type="button" className="sell" disabled={holding === null} onClick={() => decide("sell")}>판다</button>
-              <button type="button" className="soft" onClick={() => decide(null)} title="사지도 팔지도 않고 다음 봉으로">지켜본다</button>
-            </div>
-            <div className="practice-play">
-              <button type="button" className="chip-btn" onClick={() => setPlaying((p) => !p)}>{playing ? "⏸ 멈춤" : "▶ 자동"}</button>
-              <div className="segment small" role="radiogroup" aria-label="빠르기">
-                {SPEEDS.map((s, n) => <button key={s.label} type="button" aria-selected={speed === n} onClick={() => setSpeed(n)}>{s.label}</button>)}
-              </div>
-              <button type="button" className="chip-btn" onClick={restart} title="처음부터">⏮</button>
-              <button type="button" className="ghost" onClick={finish}>여기서 끝내기</button>
-            </div>
-            <div className="practice-score">
-              <span>내 수익 <b className={tone(result.returnPct)}>{pct(result.returnPct)}</b></span>
-              {open !== null && <span>지금 들고 있는 것 <b className={tone(open)}>{pct(open)}</b></span>}
-              <span className="muted">매매 {result.trades.length}번</span>
-            </div>
-          </>
         ) : (
           <div className="practice-reveal">
             <p className="practice-name">{blind && "정답: "}<b>{name}</b> <span className="muted">{ticker} · {candles[start].day} ~ {candles[now].day}</span></p>
@@ -127,7 +152,7 @@ export default function PracticeView({ game, blind, ticker, name, market, candle
         )}
       </div>
       <ChartMemo key={hide ? "blind" : "open"} ticker={ticker} name={name} market={market} candles={shown} minutes={[]} memos={[]} trades={trades} levels={levels}
-        today={shown[shown.length - 1].day} current={null} marks={[]} doodles={[]} practice={{ blind: hide }} />
+        today={shown[shown.length - 1].day} current={null} marks={[]} doodles={[]} practice={{ blind: hide }} footer={done ? undefined : dock} />
     </section>
   );
 }
