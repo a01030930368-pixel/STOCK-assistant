@@ -51,10 +51,11 @@ def test_job_sends_once_per_day(monkeypatch):
     assert len(sent) == 1
 
 
-def test_morning_due_on_weekday_mornings_only():
+def test_morning_due_monday_to_saturday_mornings():
     assert briefing.morning_due(datetime(2026, 10, 19, 23, 0, tzinfo=timezone.utc)) == date(2026, 10, 20)  # 화 08:00
     assert briefing.morning_due(datetime(2026, 10, 20, 2, 0, tzinfo=timezone.utc)) is None  # 화 11:00
-    assert briefing.morning_due(datetime(2026, 10, 23, 23, 30, tzinfo=timezone.utc)) is None  # 토 08:30
+    assert briefing.morning_due(datetime(2026, 10, 23, 23, 30, tzinfo=timezone.utc)) == date(2026, 10, 24)  # 토 08:30
+    assert briefing.morning_due(datetime(2026, 10, 24, 23, 30, tzinfo=timezone.utc)) is None  # 일 08:30
 
 
 def test_morning_message_sections():
@@ -269,3 +270,12 @@ def test_term_at_bottom_and_rotation(monkeypatch):
     assert briefing.LINE in text
     assert terms.next_index(None, lambda conn, key: len(terms.TERMS) + 2) == 2
     assert terms.next_index(None, lambda conn, key: None) == 0
+
+
+def test_saturday_morning_says_friday():
+    q = briefing.Quote("S&P 500", 6000.0, 0.5)
+    h = briefing.Holding("삼성전자", "KR", 70000.0, 1.2, 3.4)
+    text = briefing.morning_message(date(2026, 10, 24), [q], [h], [])
+    assert "금요일 밤 미국장" in text and "(금요일 마감)" in text
+    assert "밤사이" not in briefing.morning_message(date(2026, 10, 24), [q], [], [])
+    assert "밤사이 미국장" in briefing.morning_message(date(2026, 10, 26), [q], [h], [])
