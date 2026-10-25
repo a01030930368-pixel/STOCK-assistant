@@ -1235,3 +1235,48 @@ p .study-lab, span.study-lab { display: inline; margin-right: 6px; }
   .log-name { min-width: 0; }
   .practice-filter .segment a { padding: 6px 8px; font-size: 0.84rem; }
 }
+
+/* 매크로 › 국내·해외 지수 */
+.mk { scroll-margin-top: calc(var(--nav-h) + 12px); margin-bottom: 8px; }
+.mk-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 4px 0 12px; }
+.mk-hint { font-size: 0.8rem; }
+.mk-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.mk-grid.small { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.mk-card { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; padding: 10px 12px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); color: var(--fg); font-weight: 400; cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+.mk-card:hover { filter: none; border-color: #3a3a40; }
+.mk-card.on { background: var(--surface-2); }
+.mk-name { font-size: 0.8rem; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mk-val { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 0.8rem; }
+.mk-val strong { font-size: 1.15rem; font-weight: 600; }
+.mk-spark { width: 100%; height: 44px; display: block; overflow: visible; }
+.mk-spark .line { fill: none; stroke-width: 1.8; stroke-linejoin: round; vector-effect: non-scaling-stroke; stroke: var(--muted); }
+.mk-spark .line.up { stroke: var(--up); } .mk-spark .line.down { stroke: var(--down); }
+.mk-spark .ref { stroke: #4a3f28; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.mk-sub { font-size: 0.74rem; }
+.mk-small { font-size: 0.76rem; margin: 8px 2px 0; }
+.mk-grid.small .mk-spark { height: 30px; }
+.mk-grid.small .mk-val strong { font-size: 0.98rem; }
+.mk-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.mk-focus { margin-top: 0; }
+.mk-focus-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.mk-focus-val { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: 0.86rem; }
+.mk-focus-val strong { font-size: 1.6rem; font-weight: 600; }
+.mk-close { color: var(--accent); font-size: 0.86rem; white-space: nowrap; }
+.mk-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 10px 0 2px; }
+.mk-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 0.8rem; }
+.mk-chip button { background: none; border: 0; color: var(--muted); padding: 0 2px; min-height: 0; font-size: 0.8rem; }
+.mk-chip button:hover { color: var(--fg); filter: none; }
+.mk-legend .mk-small { margin: 0; }
+.mk-big { height: 320px; margin-top: 10px; }
+@media (max-width: 720px) {
+  .mk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .mk-grid.small { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .mk-grid.small .mk-card { padding: 7px 8px; }
+  .mk-grid.small .mk-sub { display: none; }
+  .mk-grid.small .mk-val span { font-size: 0.72rem; }
+  .mk-card { padding: 9px 10px; }
+  .mk-spark { height: 34px; }
+  .mk-big { height: 240px; }
+  .mk-focus-val strong { font-size: 1.3rem; }
+  .mk-tools .segment button { padding: 5px 12px; }
+}
