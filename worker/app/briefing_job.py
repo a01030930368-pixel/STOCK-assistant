@@ -92,8 +92,9 @@ class BriefingJob:
         if db.notice_sent(conn, key):
             return
         end = start + timedelta(days=6)
-        total, last_total, moves, events = db.weekly_inputs(conn, start, end)
+        total, last_total, rows, events = db.weekly_inputs(conn, start, end)
         trades, held, reviewed = db.review_inputs(conn)
+        moves = briefing.week_moves(rows, trades, start, end)
         closed_all, sold = books.replay(trades, held)
         week = [t for t in trades if start <= t.day <= end]
         realized: dict[str, float] = {}
