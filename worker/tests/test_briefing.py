@@ -245,6 +245,20 @@ def test_weekly_message_sections():
     assert "지난주 기록이 없어서 다음 주부터 비교해 드려요" in empty and "이번 주 매매 · 없었어요" in empty and "다음 주 일정 · 큰 일정은 없어요" in empty
 
 
+def test_week_moves_counts_new_buys_from_buy_price():
+    start, end = date(2026, 10, 19), date(2026, 10, 25)
+    nok = [_t("2026-10-23", "buy", 10, 6.0, ticker="NOK")]
+    nok = [type(t)("US", *[getattr(t, f) for f in ("ticker", "name", "day", "time", "side", "quantity", "price", "fee")]) for t in nok]
+    old = [_t("2026-09-01", "buy", 5, 100), _t("2026-10-21", "buy", 5, 120)]  # 지난주부터 들고 있다가 이번 주에 더 산 종목
+    rows = [("노키아 ADR", "US", "NOK", False, 10, 5.94, 6.6), ("SK하이닉스", "KR", "000660", False, 10, 110, 100),
+            ("SK하이닉스 (ISA)", "KR", "000660", True, 3, 110, 100), ("새 종목", "KR", "005930", False, 1, None, None)]
+    moves = briefing.week_moves(rows, nok + old, start, end)
+    assert [(n, round(p, 1), d) for n, p, d in moves] == [
+        ("노키아 ADR", -1.0, date(2026, 10, 23)), ("SK하이닉스", 10.0, None), ("SK하이닉스 (ISA)", 10.0, None)]
+    w = briefing.Week(start, None, None, moves, 0, 0, {}, [], 0, [])
+    assert "🔵 노키아 ADR -1.0% (금요일에 산 뒤)" in briefing.weekly_message(w).splitlines()
+
+
 def test_weekly_report_once(monkeypatch):
     sent, marked = [], set()
     monkeypatch.setattr("app.briefing_job.db.notice_sent", lambda conn, key: key in marked)

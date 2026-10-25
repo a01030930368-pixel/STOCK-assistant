@@ -1251,22 +1251,23 @@ def record_assets(conn: psycopg.Connection, day) -> None:
 
 
 def weekly_inputs(conn: psycopg.Connection, start, end):
-    """주간 성적표에 쓸 값: (지금 전체, start 전날까지 마지막 전체, 보유 종목 주간 등락, 다음 주 일정)."""
+    """주간 성적표에 쓸 값: (지금 전체, start 전날까지 마지막 전체, 보유 종목 줄, 다음 주 일정).
+    보유 종목 줄은 (이름, 시장, 종목코드, ISA인지, 수량, 이번 주 마지막 종가, 지난주 마지막 종가)예요. 등락은 briefing.week_moves가 셈해요."""
     now = conn.execute("SELECT total FROM asset_history WHERE day <= %s ORDER BY day DESC LIMIT 1", (end,)).fetchone()
     before = conn.execute("SELECT total FROM asset_history WHERE day < %s ORDER BY day DESC LIMIT 1", (start,)).fetchone()
     moves = conn.execute(
-        """SELECT h.name, (SELECT close FROM price_history p WHERE p.ticker = h.ticker AND p.day <= %s ORDER BY day DESC LIMIT 1),
+        """SELECT h.name, h.market, h.ticker, h.isa, h.quantity,
+                  (SELECT close FROM price_history p WHERE p.ticker = h.ticker AND p.day <= %s ORDER BY day DESC LIMIT 1),
                   (SELECT close FROM price_history p WHERE p.ticker = h.ticker AND p.day < %s ORDER BY day DESC LIMIT 1)
-           FROM (SELECT ticker, name FROM holdings WHERE quantity > 0
-                 UNION SELECT ticker, name || ' (ISA)' FROM isa_holdings WHERE quantity > 0) h""",
+           FROM (SELECT ticker, name, market, false AS isa, quantity FROM holdings WHERE quantity > 0
+                 UNION SELECT ticker, name || ' (ISA)', 'KR', true, quantity FROM isa_holdings WHERE quantity > 0) h""",
         (end, start),
     ).fetchall()
     events = conn.execute(
         "SELECT day, kind, title FROM calendar_events WHERE day > %s AND day <= %s + 7 ORDER BY day, kind, title", (end, end)
     ).fetchall()
     return (float(now[0]) if now else None, float(before[0]) if before else None,
-            [(n, (float(a) / float(b) - 1) * 100) for n, a, b in moves if a and b],
-            [(d, k, t) for d, k, t in events])
+            [tuple(r) for r in moves], [(d, k, t) for d, k, t in events])
 
 
 def review_inputs(conn: psycopg.Connection):

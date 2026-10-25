@@ -308,18 +308,45 @@ def _won_short(v: float) -> str:
     return f"{sign}{n:,}원"
 
 
+def week_moves(rows, trades, start: date, end: date) -> list[tuple]:
+    """보유 종목의 이번 주 등락: (이름, %, 이번 주에 처음 산 날 또는 None).
+    이번 주에 새로 산 종목은 지난주 종가가 아니라 이번 주에 산 값(체결 평균)에서부터 셈해요.
+    rows는 db.weekly_inputs의 보유 종목 줄, trades는 키움 체결(books.Trade)이에요. ISA 체결은 없어서 ISA는 주간 등락 그대로예요."""
+    out = []
+    for name, market, ticker, isa, quantity, cur, prev in rows:
+        if not cur:
+            continue
+        buys = [t for t in trades if not isa and t.market == market and t.ticker == ticker and start <= t.day <= end]
+        bought = sum(float(t.quantity) for t in buys if t.side == "buy")
+        sold = sum(float(t.quantity) for t in buys if t.side == "sell")
+        paid = [t for t in buys if t.side == "buy"]
+        if paid and float(quantity) - bought + sold <= 1e-9:
+            base = sum(float(t.quantity) * float(t.price) for t in paid) / bought
+            out.append((name, (float(cur) / base - 1) * 100, min(t.day for t in paid)))
+        elif prev:
+            out.append((name, (float(cur) / float(prev) - 1) * 100, None))
+    return out
+
+
 @dataclass(frozen=True)
 class Week:
     start: date
     total: float | None
     last_total: float | None
-    moves: list  # (이름, 주간 %)
+    moves: list  # (이름, 주간 %[, 이번 주에 산 날])
     buys: int
     sells: int
     realized: dict  # 시장 -> 판 것 손익 합(원가 모르는 매도는 빠짐)
     closed: list  # (이름, 수익률 %)
     unreviewed: int
     events: list  # (날짜, 종류, 제목)
+
+
+def _move(m) -> str:
+    text = f"{m[0]} {m[1]:+.1f}%"
+    if len(m) > 2 and m[2]:
+        text += f" ({WEEK[m[2].weekday()]}요일에 산 뒤)"
+    return text
 
 
 def weekly_message(w: Week) -> str:
@@ -336,8 +363,8 @@ def weekly_message(w: Week) -> str:
         ups = sorted((m for m in w.moves if m[1] > 0), key=lambda m: -m[1])[:3]
         downs = sorted((m for m in w.moves if m[1] < 0), key=lambda m: m[1])[:3]
         lines += ["", "💼 내 종목 이번 주"]
-        lines += [f"🔴 {n} {p:+.1f}%" for n, p in ups]
-        lines += [f"🔵 {n} {p:+.1f}%" for n, p in downs]
+        lines += [f"🔴 {_move(m)}" for m in ups]
+        lines += [f"🔵 {_move(m)}" for m in downs]
     lines.append("")
     if w.buys or w.sells:
         lines.append(f"🔁 이번 주 매매 · 매수 {w.buys}번 · 매도 {w.sells}번")
