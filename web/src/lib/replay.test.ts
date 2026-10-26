@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { afterBuy, afterSell, curve, endIndex, valueAt, verdict } from "./replay";
+import { adjustSplits, afterBuy, afterSell, curve, endIndex, splitFactor, valueAt, verdict } from "./replay";
 
 const bars = [
   { day: "2026-09-01", close: 100 }, { day: "2026-09-02", close: 110 }, { day: "2026-09-03", close: 120, high: 125, low: 118 },
@@ -43,5 +43,24 @@ describe("replay", () => {
     expect(afterSell(bars, "2026-09-04", 90)!).toEqual({ pct: expect.closeTo(44.44, 1), days: 1 });
     expect(afterSell(bars, "2026-09-07", 130)).toBe(null);
     expect(afterBuy(bars, "2026-09-01", "2026-09-04", 100)).toEqual({ down: expect.closeTo(-15, 6), up: 25 });
+  });
+
+  it("matches fills to split-adjusted closes", () => {
+    // 9.03에 10:1 분할. 일봉은 분할 뒤 기준이라 9.01 종가가 100이지만 실제로 산 값은 1000이에요.
+    const fills = [
+      { day: "2026-09-01", side: "buy" as const, quantity: 1, price: 1000, fee: 0 },
+      { day: "2026-09-04", side: "sell" as const, quantity: 5, price: 90, fee: 0 },
+    ];
+    const adj = adjustSplits(fills, bars);
+    expect(adj.split).toBe(true);
+    expect(adj.mismatch).toBe(false);
+    expect(adj.trades.map((t) => [t.price, t.quantity, t.factor])).toEqual([[100, 10, 10], [90, 5, 1]]);
+    const c = curve(adj.trades, bars, [])!;
+    expect(c.held.at(-1)).toBeCloseTo(30);  // 1000원 넣고 10주(분할 뒤) × 130
+    expect(c.mine.at(-1)).toBeCloseTo((5 * 130 + 450) / 1000 * 100 - 100);
+    expect(splitFactor(100, 98)).toBe(1);
+    expect(splitFactor(25, 100)).toBe(0.25);  // 역분할(4주를 1주로)도 맞춰요
+    expect(splitFactor(700, 100)).toBe(null);  // 어느 비율과도 안 맞으면 못 맞춰요
+    expect(adjustSplits([{ ...fills[0], price: 700 }], bars).mismatch).toBe(true);
   });
 });

@@ -84,7 +84,8 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
       "SELECT ticker, period, revenue, operating_income, liabilities, equity FROM stock_financials WHERE ticker = ANY($1)", [[t, ...peers.map((p) => p.peer_ticker)]],
     );
     const versions = (await safe<{ id: number; fields: unknown; confidence: number; price: string | null; saved_at: string }>(
-      "SELECT id, fields, confidence, price, saved_at::text FROM study_versions WHERE ticker = $1 ORDER BY saved_at", [t],
+      // ISO 8601(+09:00)로 받아요. saved_at::text("… +09")는 Safari의 new Date가 못 읽어요.
+      `SELECT id, fields, confidence, price, to_char(saved_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS saved_at FROM study_versions WHERE ticker = $1 ORDER BY saved_at`, [t],
     )).map<Version>((v) => ({ id: v.id, fields: cleanFields(v.fields), confidence: v.confidence, price: v.price === null ? null : Number(v.price), saved_at: v.saved_at }));
     const events = await safe<{ day: string; title: string }>(
       "SELECT to_char(day, 'YYYY-MM-DD') AS day, title FROM calendar_events WHERE ticker = $1 AND day >= CURRENT_DATE ORDER BY day LIMIT 4", [t],
@@ -114,6 +115,7 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
       price: input.price, numbers, knownSector: sector?.sector ?? null,
       peers: [mine, ...peers.map((p) => peerLine(p.peer_ticker, p.peer_name, fin))],
       versions, events, filings, value: value.signal === "n" ? null : value.text, alerts: alerts.map((a) => Number(a.price)), today,
+      aiKey: Boolean(process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY),
     };
   }
 

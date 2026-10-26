@@ -2,7 +2,7 @@ import Link from "next/link";
 import { query } from "@/lib/db";
 import { loadBooks } from "@/lib/booksData";
 import { skipped, type Book } from "@/lib/books";
-import { afterBuy, afterSell, AFTER_DAYS, curve, endIndex, valueAt, verdict, VERDICT, type Bar } from "@/lib/replay";
+import { adjustSplits, afterBuy, afterSell, AFTER_DAYS, curve, endIndex, valueAt, verdict, VERDICT, type Bar } from "@/lib/replay";
 import { daysBefore } from "@/lib/compare";
 import { today } from "@/lib/format";
 import ReturnChart, { type Mark } from "@/app/_components/ReturnChart";
@@ -55,7 +55,9 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
   const [pending] = await safe<{ value: { tickers?: [string, string][] } | null }>("SELECT value FROM app_settings WHERE key = 'history_request'");
 
   const trades = book.pages.map((p) => ({ day: p.day, side: p.side, quantity: p.quantity, price: p.price, fee: p.fee }));
-  const c = book.startedBefore ? null : curve(trades, bars, bench);
+  // 일봉은 주식 분할을 반영한 값이라 분할 전 체결 값을 그 기준으로 맞춰서 셈해요. 못 맞추면 선을 그리지 않아요.
+  const adj = adjustSplits(trades, bars);
+  const c = book.startedBefore || adj.mismatch ? null : curve(adj.trades, bars, bench);
   const lastBar = bars.at(-1)?.day ?? null;
   const stale = !lastBar || lastBar < daysBefore(day, 7);
   const idx = (d: string) => (c ? c.days.findIndex((x) => x >= d) : -1);
@@ -95,19 +97,23 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
               { label: "내 결과", color: COLOR.mine, values: c.mine },
               { label: benchName, color: COLOR.bench, values: c.bench, dashed: true },
             ]} />
-            <p className="chart-foot">내 결과는 남은 주식 평가액과 판 돈(수수료·세금 뺀 값)을 넣은 돈과 비교했어요. 계속 보유는 산 주식을 하나도 안 팔았을 때예요.{book.end ? " 내 결과와 지수는 다 판 날 기준이고, 들고 있었다면은 마지막 종가까지 이어서 셌어요." : ""}</p>
+            <p className="chart-foot">내 결과는 남은 주식 평가액과 판 돈(수수료·세금 뺀 값)을 넣은 돈과 비교했어요. 계속 보유는 산 주식을 하나도 안 팔았을 때예요.{book.end ? " 내 결과와 지수는 다 판 날 기준이고, 들고 있었다면은 마지막 종가까지 이어서 셌어요." : ""}
+              {adj.split ? " 그사이 주식 분할이 있어서 분할 전 체결 값은 분할 뒤 기준으로 맞춰 셌어요." : ""}</p>
           </div>
         </>
       ) : (
         <div className="panel"><p className="muted">{book.startedBefore
           ? "키움 기록보다 먼저 산 주식이 들어 있어서 수익률 선은 그리지 않았어요. 아래 매매별 복기만 보여 드려요."
-          : "산 날부터 일봉이 아직 없어요."}</p></div>
+          : adj.mismatch ? "체결 값이 그날 일봉 값과 크게 달라서(주식 분할 등) 수익률 선은 그리지 않았어요."
+            : "산 날부터 일봉이 아직 없어요."}</p></div>
       )}
 
       <div className="replay-cards">
-        {book.pages.map((p) => {
+        {book.pages.map((p, n) => {
+          // 산 뒤·판 뒤도 분할을 맞춘 값으로 일봉과 비교해요(보여 주는 값은 실제 체결 값). 못 맞춘 체결은 비교하지 않아요.
+          const at = adj.trades[n].factor === null ? 0 : adj.trades[n].price;
           if (p.side === "buy") {
-            const a = afterBuy(bars, p.day, book.end, p.price);
+            const a = afterBuy(bars, p.day, book.end, at);
             return (
               <div key={p.id} className="replay-card">
                 <span className="muted">{md(p.day)} {p.label} {money(p.price, book.market)} × {p.quantity.toLocaleString("ko-KR")}주</span>
@@ -117,7 +123,7 @@ export default async function ReplayPage({ searchParams }: { searchParams: Promi
               </div>
             );
           }
-          const a = afterSell(bars, p.day, p.price);
+          const a = afterSell(bars, p.day, at);
           const ret = p.avgCost ? (p.price / p.avgCost - 1) * 100 : null;
           const v = a && a.days >= AFTER_DAYS ? verdict(a) : null;
           return (

@@ -19,7 +19,11 @@ export default function PracticeView({ game, blind, ticker, name, market, candle
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(0);
   const [done, setDone] = useState(false);
-  const [saved, setSaved] = useState<"no" | "saving" | "yes" | "fail">("no");
+  const [saved, setSaved] = useState<"no" | "saving" | "yes" | "fail" | "skip">("no");
+  // 🎲 정답을 본 뒤 '같은 차트 다시'는 가리지 않고, 기록도 가린 연습으로 남기지 않아요.
+  const [seen, setSeen] = useState(false);
+  const blindNow = blind && !seen;
+  const round = useRef(0); // 다시 할 때마다 늘려서, 지난 판의 저장 결과가 새 판 표시를 덮지 않게 해요
 
   const now = start + step;
   const closes = useMemo(() => candles.map((c) => c.close), [candles]);
@@ -31,7 +35,7 @@ export default function PracticeView({ game, blind, ticker, name, market, candle
   const result = useMemo(() => score(closes, start, now, decisions.map((d) => ({ ...d, i: start + d.i }))), [closes, start, now, decisions]);
 
   // 가린 연습은 시작 봉 종가를 100으로 맞춰 보여 줘요. 끝나면 진짜 가격·날짜로 바꿔요.
-  const hide = blind && !done;
+  const hide = blindNow && !done;
   const base = candles[start].close;
   const shown = useMemo(() => {
     const upto = candles.slice(0, (done ? start + last : now) + 1);
@@ -57,13 +61,18 @@ export default function PracticeView({ game, blind, ticker, name, market, candle
     const id = setTimeout(() => setStep((s) => Math.min(last, s + 1)), SPEEDS[speed].ms);
     return () => clearTimeout(id);
   }, [playing, speed, done, last, step]);
-  // 끝나면 한 번만 기록해요.
+  // 끝나면 한 번만 기록해요. 한 봉도 안 넘기고 끝낸 판은 남기지 않아요.
   useEffect(() => {
     if (!done || saved !== "no") return;
+    if (step === 0) { setSaved("skip"); return; }
     setSaved("saving");
-    savePractice({ game, steps: step, decisions }).then((id) => setSaved(id === null ? "fail" : "yes"), () => setSaved("fail"));
-  }, [done, saved, game, step, decisions]);
+    const mine = round.current;
+    const set = (v: "yes" | "fail") => { if (round.current === mine) setSaved(v); };
+    savePractice({ game, steps: step, decisions, blind: blindNow }).then((id) => set(id === null ? "fail" : "yes"), () => set("fail"));
+  }, [done, saved, game, step, decisions, blindNow]);
   function restart() {
+    round.current++;
+    if (done) setSeen(true);
     setStep(0); setDecisions([]); setPlaying(false); setDone(false); setSaved("no");
   }
 
@@ -145,7 +154,7 @@ export default function PracticeView({ game, blind, ticker, name, market, candle
           </div>
         ) : (
           <div className="practice-reveal">
-            <p className="practice-name">{blind && "정답: "}<b>{name}</b> <span className="muted">{ticker} · {candles[start].day} ~ {candles[now].day}</span></p>
+            <p className="practice-name">{blindNow && "정답: "}<b>{name}</b> <span className="muted">{ticker} · {candles[start].day} ~ {candles[now].day}</span></p>
             <div className="practice-score">
               <span>내 수익 <b className={tone(result.returnPct)}>{pct(result.returnPct)}</b></span>
               <span>그냥 들고 있었으면 <b className={tone(result.holdPct)}>{pct(result.holdPct)}</b></span>

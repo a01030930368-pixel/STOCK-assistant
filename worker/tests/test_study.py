@@ -3,6 +3,8 @@ import random
 from datetime import date, datetime, timezone
 from unittest import mock
 
+import pytest
+
 from app import ai, study
 
 UP = [100 + i * 0.5 for i in range(120)]  # 꾸준히 오르는 차트
@@ -61,7 +63,7 @@ def test_pick_without_ai_chooses_from_top_and_creates_note():
     db.study_universe.assert_called_with(mock.ANY, "US")
     args = db.create_ai_study.call_args.args
     assert args[1:4] == ("AAA", "Aaa", "US") and args[4]["flow"].startswith("한 달") and db.create_ai_study.call_args.kwargs == {"draft": False}
-    assert db.set_setting.call_args.args[2] == {"id": "r1", "market": "US", "status": "done", "ticker": "AAA"}
+    assert db.finish_study_request.call_args.args[1:] == ("study_pick", "r1", {"id": "r1", "market": "US", "status": "done", "ticker": "AAA"})
 
 
 def test_pick_reports_when_no_candidates():
@@ -70,7 +72,7 @@ def test_pick_reports_when_no_candidates():
         db.study_universe.return_value = []
         w.pick(mock.Mock(), {"id": "r", "market": "ALL", "status": "pending"})
     db.study_universe.assert_called_with(mock.ANY, None)
-    assert db.set_setting.call_args.args[2]["status"] == "error"
+    assert db.finish_study_request.call_args.args[3]["status"] == "error"
     db.create_ai_study.assert_not_called()
 
 
@@ -141,12 +143,12 @@ def test_compare_writes_ai_line_or_error():
         db.pending_study_draft.return_value = None
         db.study_compare_context.return_value = [{"name": "SK하이닉스", "one": "메모리", "margin": "35%"}, {"name": "Micron", "growth": "+31%"}]
         assert w.run_once(mock.Mock())
-        saved = db.set_setting.call_args.args[2]
+        saved = db.finish_study_request.call_args.args[3]
         assert saved["status"] == "done" and saved["text"] == "하이닉스가 이익률이 더 높아요. 마이크론은 성장이 빨라요."
         assert "영업이익률 35%" in w.ask.call_args.args[1] and "업종: 반도체" in w.ask.call_args.args[1]
         db.study_compare_context.return_value = [{"name": "x"}]
         w.compare(mock.Mock(), req)
-        assert db.set_setting.call_args.args[2]["status"] == "error"
+        assert db.finish_study_request.call_args.args[3]["status"] == "error"
 
 
 def test_fresh_pick_skips_sectors_already_studied_and_tells_ai():
@@ -223,3 +225,91 @@ def test_draft_reads_google_news_when_key_has_no_search():
         # 하루 동안은 검색을 다시 묻지 않아요.
         w.draft(mock.Mock(), "MSFT", "Microsoft", "US", "t1")
         assert w.search.call_count == 1
+
+
+def test_already_past_reads_quarters_ranges_and_needs_a_month_mark():
+    today = date(2026, 10, 23)
+    for when in ("2026년 4분기", "2026년 3분기 실적 발표", "2026년 4Q", "2026 Q4", "Q4 2026", "2025년 말~2027년", "2026년 하반기", "2026년 10월"):
+        assert not study.already_past(when, today), when
+    for when in ("2026년 2분기", "2026년 1Q", "2026년 2분기 실적 발표", "2026년 상반기", "2026-09-30", "2026/7", "2025년 4분기 실적", "2024~2025년"):
+        assert study.already_past(when, today), when
+    assert not study.already_past("2026년 3", today)  # 월·구분자 없이 숫자만 있으면 달로 보지 않아요
+    assert not study.already_past("2026년 4분기 실적 발표", date(2027, 2, 1))  # 4분기 실적은 이듬해 3월쯤
+
+
+def test_json_prefers_fenced_block_and_reads_past_noise():
+    assert study._json('메모 {a} 입니다\n```json\n{"one": "펜스"}\n```\n{"one": "밖"}') == {"one": "펜스"}
+    assert study._json('검색해 보니 {이건 JSON 아님} 이래요. {"one": "본문", "lines": [{"name": "D램", "pct": 70}]} 끝') == {"one": "본문", "lines": [{"name": "D램", "pct": 70}]}
+    # 잘린 답이면 안쪽 작은 객체를 답으로 쓰지 않아요
+    with pytest.raises(ValueError):
+        study._json('{"one": "잘림", "lines": [{"name": "D램"}, {"name": "낸드", "pct": 3')
+
+
+def test_parse_draft_wraps_single_strings_and_reads_percent_text():
+    d = study.parse_draft(json.dumps({"questions": "누가 사 가나요?", "styles": "성장주", "lines": [{"name": "D램", "pct": "72.4%"}, {"name": "HBM", "pct": "약 20"}]}))
+    assert d["questions"] == ["누가 사 가나요?"] and d["styles"] == ["성장주"]
+    assert d["lines"] == [{"name": "D램", "pct": 72.4}, {"name": "HBM", "pct": 20.0}]
+
+
+def test_draft_asks_for_a_long_answer():
+    w = study.StudyWorker(mock.Mock(gemini_api_key="", anthropic_api_key=""), mock.Mock())
+    w.ask, w.key, w.model = mock.Mock(return_value='{"one": "한 줄"}'), "k", "m"
+    with mock.patch.object(study, "db") as db:
+        db.study_context.return_value = {}
+        w.draft(mock.Mock(), "000660", "SK하이닉스", "KR", "t0")
+    assert w.ask.call_args.args[5] == study.DRAFT_TOKENS >= 16384
+
+
+def test_draft_waits_once_for_the_apps_own_financials():
+    w = study.StudyWorker(mock.Mock(gemini_api_key="", anthropic_api_key=""), mock.Mock())
+    w.ask, w.key, w.model = mock.Mock(return_value='{"one": "한 줄"}'), "k", "m"
+    with mock.patch.object(study, "db") as db:
+        db.study_context.return_value = {}
+        db.study_unresearched.return_value = [("000660", "SK하이닉스", "KR")]
+        db.defer_study_draft.return_value = True
+        w.draft(mock.Mock(), "000660", "SK하이닉스", "KR", "t0")
+        db.defer_study_draft.assert_called_once_with(mock.ANY, "000660", "t0", 2)
+        w.ask.assert_not_called()
+        db.retry_study_draft.assert_not_called()  # 붐빔 재시도로 세지 않아요
+        w.draft(mock.Mock(), "000660", "SK하이닉스", "KR", "t0")  # 두 번째는 재무가 없어도 써요
+        assert w.ask.call_count == 1 and db.finish_study_draft.call_args.args[3] == "done"
+
+
+def test_pick_and_compare_only_answer_their_own_request():
+    w = study.StudyWorker(mock.Mock(gemini_api_key="", anthropic_api_key=""), mock.Mock())
+    w.ask, w.key, w.model = mock.Mock(return_value="비교 문장"), "k", "m"
+    with mock.patch.object(study, "db") as db:
+        db.study_compare_context.return_value = [{"name": "a"}, {"name": "b"}]
+        w.compare(mock.Mock(), {"id": "c1", "status": "pending"})
+        db.set_setting.assert_not_called()
+        assert db.finish_study_request.call_args.args[1:3] == ("study_compare", "c1")
+
+
+def test_a_crash_after_the_ai_call_ends_the_request_instead_of_looping():
+    w = study.StudyWorker(mock.Mock(gemini_api_key="", anthropic_api_key=""), mock.Mock())
+    w.ask, w.key, w.model = mock.Mock(return_value='{"ticker": "AAA"}'), "k", "m"
+    req = {"id": "r1", "market": "US", "status": "pending"}
+    with mock.patch.object(study, "db") as db:
+        db.get_setting.side_effect = lambda conn, key: req if key == "study_pick" else None
+        db.study_universe.return_value = [("AAA", "Aaa", "US", UP)]
+        db.study_themes.return_value = {}
+        db.hot_themes.return_value = []
+        db.create_ai_study.side_effect = RuntimeError("db down")
+        w.run_once(mock.Mock())
+        assert db.finish_study_request.call_args.args[3]["status"] == "error"
+        # 오류 표시까지 실패해 예외로 빠져나가도, 다음 회차엔 AI를 다시 부르지 않고 오류로 끝내요
+        db.finish_study_request.side_effect = [RuntimeError("db down"), True]
+        try:
+            w.run_once(mock.Mock())
+        except RuntimeError:
+            pass
+        calls = w.ask.call_count
+        db.finish_study_request.side_effect = None
+        w.run_once(mock.Mock())
+        assert w.ask.call_count == calls and db.finish_study_request.call_args.args[3]["status"] == "error"
+    with mock.patch.object(study, "db") as db:
+        w.ask = mock.Mock(return_value='{"one": "한 줄"}')
+        db.study_context.return_value = {}
+        db.finish_study_draft.side_effect = [RuntimeError("db down"), None]
+        w.draft(mock.Mock(), "000660", "SK하이닉스", "KR", "t0")
+        assert db.finish_study_draft.call_args.args[3] == "error"

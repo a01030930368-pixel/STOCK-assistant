@@ -477,6 +477,9 @@ MIGRATIONS = [
       hits        INTEGER NOT NULL DEFAULT 0,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
+    # 연습용 일봉 받기가 실패하면 몇 번은 몇 시간 뒤 다시 받아 봐요
+    "ALTER TABLE practice_pool ADD COLUMN IF NOT EXISTS errors INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE practice_pool ADD COLUMN IF NOT EXISTS retry_at TIMESTAMPTZ",
     # 기업 공부 노트: 회사마다 한 장. fields에 ①~⑩ 칸, ai에 AI 초안(참고용), 다 적으면 done
     """CREATE TABLE IF NOT EXISTS study_notes (
       ticker       TEXT PRIMARY KEY,
@@ -1623,18 +1626,25 @@ def seed_practice_pool(conn: psycopg.Connection, rows) -> None:
         )
 
 
-def practice_due(conn: psycopg.Connection, before, limit: int, kiwoom: bool = True) -> list:
-    """아직 안 받았거나 오래된 연습용 종목. 키움 키가 없으면 미국만."""
+def practice_due(conn: psycopg.Connection, before, limit: int, kiwoom: bool = True, now=None) -> list:
+    """아직 안 받았거나 오래됐거나 다시 받아 볼 때가 된 연습용 종목. 키움 키가 없으면 미국만."""
     return conn.execute(
         """SELECT ticker, market FROM practice_pool
-           WHERE (fetched_at IS NULL OR fetched_at < %s) AND (%s OR market = 'US')
+           WHERE (fetched_at IS NULL OR fetched_at < %s OR retry_at <= %s) AND (%s OR market = 'US')
            ORDER BY fetched_at NULLS FIRST, ticker LIMIT %s""",
-        (before, kiwoom, limit),
+        (before, now or before, kiwoom, limit),
     ).fetchall()
 
 
-def practice_fetched(conn: psycopg.Connection, ticker: str, now, error) -> None:
-    conn.execute("UPDATE practice_pool SET fetched_at = %s, error = %s WHERE ticker = %s", (now, error, ticker))
+def practice_fetched(conn: psycopg.Connection, ticker: str, now, error, retry_at=None, tries: int = 1) -> None:
+    """받은 결과를 적어요. 실패해서 retry_at을 주면, 연달아 tries번 실패하기 전까지는 그때 다시 받아요(그 뒤로는 오래 쉬어요)."""
+    conn.execute(
+        """UPDATE practice_pool SET fetched_at = %(now)s, error = %(error)s,
+             errors = CASE WHEN %(error)s::text IS NULL THEN 0 ELSE errors + 1 END,
+             retry_at = CASE WHEN %(retry)s::timestamptz IS NOT NULL AND errors + 1 < %(tries)s THEN %(retry)s::timestamptz END
+           WHERE ticker = %(ticker)s""",
+        {"now": now, "error": error, "retry": retry_at, "tries": tries, "ticker": ticker},
+    )
 
 
 # ---------------------------------------------------------------- 기업 공부
@@ -1734,6 +1744,23 @@ def retry_study_draft(conn: psycopg.Connection, ticker: str, asked_at, minutes: 
     conn.execute("UPDATE study_notes SET ai_error = %s WHERE ticker = %s",
                  (f"Gemini가 붐벼서 {row[0]}에 다시 써 볼게요 ({row[1]}/{max_tries}번째). 그대로 두셔도 돼요.", ticker))
     return row[0]
+
+
+def defer_study_draft(conn: psycopg.Connection, ticker: str, asked_at, minutes: int) -> bool:
+    """재무를 아직 모으는 중이면 minutes분 뒤로 미뤄요. 붐빔 재시도(ai_tries)로는 세지 않아요."""
+    return conn.execute(
+        """UPDATE study_notes SET ai_retry_at = now() + make_interval(mins => %s)
+           WHERE ticker = %s AND ai_status = 'pending' AND ai_asked_at IS NOT DISTINCT FROM %s""",
+        (minutes, ticker, asked_at),
+    ).rowcount > 0
+
+
+def finish_study_request(conn: psycopg.Connection, key: str, req_id, value: dict) -> bool:
+    """🎲 추천·업종 비교 답을 같은 부탁(id)일 때만 써요. 그 사이 화면이 새 부탁을 남겼으면 덮지 않고 다음 회차에 처리해요."""
+    return conn.execute(
+        "UPDATE app_settings SET value = %s WHERE key = %s AND value->>'id' IS NOT DISTINCT FROM %s::text",
+        (Jsonb(value), key, req_id),
+    ).rowcount > 0
 
 
 def study_context(conn: psycopg.Connection, ticker: str, market: str) -> dict:

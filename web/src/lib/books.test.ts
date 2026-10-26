@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachEntries, notesOf, sortBooks, timeline, type BookNote, type Book, buildBooks, findBook, onShelf, shortDay, type BookEvent, type EntryRow, type FillRow, type Holding } from "./books";
+import { attachEntries, clampNoteDay, noteRange, notesOf, validDay, sortBooks, timeline, type BookNote, type Book, buildBooks, findBook, onShelf, shortDay, type BookEvent, type EntryRow, type FillRow, type Holding } from "./books";
 
 let n = 0;
 const ev = (day: string, side: "buy" | "sell", quantity: number, price: number, over: Partial<BookEvent> = {}): BookEvent => ({
@@ -163,13 +163,37 @@ describe("book notes", () => {
 
   it("puts each note in the book whose dates cover it", () => {
     const [done, open] = books;
-    expect(notesOf(done, notes).map((n) => n.id)).toEqual([1, 5]);
-    expect(notesOf(open, notes).map((n) => n.id)).toEqual([3]);
+    expect(notesOf(open, notes, books).map((n) => n.id)).toEqual([3]);
+    expect(notesOf(done, notes, books).map((n) => n.id)).toContain(5);
+  });
+
+  it("keeps notes written between selling all and buying again in the closed book", () => {
+    const [done, open] = books;
+    expect(noteRange(done, books)).toEqual({ min: "2026-08-04", max: "2026-10-16" });
+    expect(notesOf(done, notes, books).map((n) => n.id)).toEqual([1, 2, 5]);
+    expect(notesOf(open, notes, books).map((n) => n.id)).toEqual([3]);
+    // 다음 권이 없으면 끝난 권 뒤로 적은 메모도 그 권에 남아요.
+    const [only] = buildBooks([ev("2026-08-04", "buy", 10, 168000), ev("2026-09-15", "sell", 10, 214000)], [], "2026-10-20");
+    expect(notesOf(only, notes, [only]).map((n) => n.id)).toEqual([1, 2, 3, 5]);
+  });
+
+  it("checks note days for real and keeps them inside the book", () => {
+    const [done, open] = books;
+    expect(validDay("2026-02-28")).toBe(true);
+    expect(validDay("2026-02-30")).toBe(false);
+    expect(validDay("2026-13-01")).toBe(false);
+    expect(validDay("2026-9-01")).toBe(false);
+    expect(clampNoteDay("2026-02-30", done, books, "2026-10-20")).toBeNull();
+    expect(clampNoteDay("2026-01-01", done, books, "2026-10-20")).toBe("2026-08-04");
+    expect(clampNoteDay("2026-10-18", done, books, "2026-10-20")).toBe("2026-10-16");
+    expect(clampNoteDay("2026-09-30", done, books, "2026-10-20")).toBe("2026-09-30");
+    expect(clampNoteDay("2026-12-01", open, books, "2026-10-20")).toBe("2026-10-20");
+    expect(clampNoteDay("2026-10-01", open, books, "2026-10-20")).toBe("2026-10-17");
   });
 
   it("mixes notes into the trades by day, after the trades of the same day", () => {
     const [done] = books;
-    const items = timeline(done.pages, notesOf(done, notes));
-    expect(items.map((x) => (x.kind === "note" ? `n${x.note.id}` : x.page.label))).toEqual(["첫 매수", "n1", "전량 매도", "n5"]);
+    const items = timeline(done.pages, notesOf(done, notes, books));
+    expect(items.map((x) => (x.kind === "note" ? `n${x.note.id}` : x.page.label))).toEqual(["첫 매수", "n1", "전량 매도", "n5", "n2"]);
   });
 });

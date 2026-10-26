@@ -246,3 +246,19 @@ def test_search_says_no_search_when_every_model_refuses_with_quota():
     http.post.side_effect = [mock.Mock(status_code=429, text=""), mock.Mock(status_code=503, text=""), mock.Mock(status_code=503, text="")]
     with pytest.raises(ai.AiBusy):
         ai._gemini_search("s", "p", "k", "gemini-flash-latest", http, 4096)
+
+
+def test_cut_off_answers_are_errors_not_short_answers():
+    def handler(request):
+        body = json.loads(request.content)
+        assert body["generationConfig"]["maxOutputTokens"] == 16384
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": '{"one": "잘'}]}, "finishReason": "MAX_TOKENS"}]})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(ai.Truncated):
+        ai.gemini_text("JSON", "p", "k", "m", http, 16384)
+    with pytest.raises(ai.Truncated):
+        ai._gemini_search("JSON", "p", "k", "m", http, 16384)
+    claude = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"content": [{"type": "text", "text": "잘"}], "stop_reason": "max_tokens"})))
+    with pytest.raises(ai.Truncated):
+        ai.claude_text("s", "p", "k", "m", claude, 100)

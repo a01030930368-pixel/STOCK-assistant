@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, ISeriesApi, MouseEventParams, SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
 import { addAlert, addChartMemo, addDoodle, addLevel, addShape, deleteChartMemo, deleteDoodle, deleteLevel, deleteShape, updateLevel, updateShape } from "@/app/actions";
 import {
-  COLORS, fibPrices, KIND_LABEL, kindFor, markColor, measure, moveEdge, nearest, segmentDistance, SHAPE_LABEL, SHAPE_POINTS, snap, strokeDistance, thin, zone,
+  COLORS, fibPrices, KIND_LABEL, kindFor, markColor, measure, moveEdge, nearest, segmentDistance, SHAPE_LABEL, SHAPE_POINTS, snap, sortShapePoints, strokeDistance, thin, zone,
   type Doodle, type DoodlePoint, type Mark, type Shape, type ShapeKind,
 } from "@/lib/drawings";
 import { Drawings, RESIST, SUPPORT, type Stroke } from "./chartDrawings";
@@ -93,6 +93,8 @@ export function tickRound(v: number, market: string): number {
 
 const md = (day: string) => `${Number(day.slice(5, 7))}.${Number(day.slice(8, 10))}`;
 const signed = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+// 차트 끌기. 폰에서 위아래로 쓸면 화면이 내려가게, 크게 보기(화면 꽉 채움)에서만 차트가 위아래로 움직여요.
+const scrolling = (on: boolean, big: boolean) => ({ mouseWheel: on, pressedMouseMove: on, horzTouchDrag: on, vertTouchDrag: on && big });
 const compact = (v: number): string => (v < 0 ? `−${compact(-v)}` : v >= 1e12 ? `${(v / 1e12).toFixed(1)}조` : v >= 1e8 ? `${(v / 1e8).toFixed(1)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : v.toLocaleString("ko-KR"));
 
 export default function ChartMemo({ ticker, name, market, candles, minutes, memos, trades, levels, today, current, marks: savedMarks, doodles: savedDoodles, statements = [], shares = null, shapes: savedShapes = [], practice, footer }: {
@@ -148,6 +150,8 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     } catch { /* 무시 */ }
   }, [show, settings, order, loaded]);
   const [big, setBig] = useState(false);
+  const bigRef = useRef(big);
+  bigRef.current = big;
   const [hover, setHover] = useState<number | null>(null);
   const [day, setDay] = useState(today);
   const [pick, setPick] = useState<string>("");
@@ -191,6 +195,13 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     return aggregate(candles, period).map((c) => ({ ...c, time: c.day as Time, key: c.day, label: c.day }));
   }, [candles, minutes, view, intraday, period, market]);
   const closes = useMemo(() => bars.map((b) => b.close), [bars]);
+  // 가리고 연습하기: 거래량 크기로 회사 규모가 보이지 않게, 평균 거래량 대비 배수로 보여요.
+  const volScale = useMemo(() => {
+    if (!practice?.blind) return 1;
+    const vs = bars.flatMap((b) => (b.volume ? [b.volume] : []));
+    return vs.length ? vs.length / vs.reduce((a, v) => a + v, 0) : 1;
+  }, [bars, practice?.blind]);
+  const volFmt = practice?.blind ? (v: number) => `${v.toFixed(1)}배` : compact;
   const maValues = useMemo(() => settings.ma.map((n) => sma(closes, n)), [closes, settings.ma]);
   const bands = useMemo(() => bollinger(closes, settings.bb[0], settings.bb[1]), [closes, settings.bb]);
   const rsiValues = useMemo(() => rsi(closes, settings.rsi), [closes, settings.rsi]);
@@ -236,6 +247,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         rightPriceScale: { borderColor: "#26262b", scaleMargins: { top: big ? 0.1 : 0.16, bottom: 0.04 } },
         timeScale: { borderColor: "#26262b", rightOffset: 4, minBarSpacing: 2, timeVisible: intraday, secondsVisible: false },
         localization: { locale: "ko-KR", dateFormat: "yyyy-MM-dd", ...(practice?.blind ? { timeFormatter: () => "" } : {}) },
+        handleScroll: scrolling(toolRef.current !== "pen", big), handleScale: toolRef.current !== "pen",
       });
       if (practice?.blind) chart.applyOptions({ timeScale: { tickMarkFormatter: () => "" } });
       chartRef.current = chart;
@@ -292,9 +304,9 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
 
       let pane = 1;
       if (show.volume && bars.some((b) => b.volume)) {
-        const vol = chart.addSeries(lc.HistogramSeries, { priceFormat: { type: "custom", formatter: compact }, priceLineVisible: false, lastValueVisible: false }, pane);
+        const vol = chart.addSeries(lc.HistogramSeries, { priceFormat: { type: "custom", formatter: volFmt }, priceLineVisible: false, lastValueVisible: false }, pane);
         vol.setData(bars.map((b, i) => ({
-          time: b.time, value: b.volume ?? 0,
+          time: b.time, value: (b.volume ?? 0) * volScale,
           color: (i === 0 ? b.close >= b.open : b.close >= bars[i - 1].close) ? "rgba(232,128,111,0.55)" : "rgba(134,168,230,0.55)",
         })));
         chart.panes()[pane].setStretchFactor(big ? 0.18 : 0.28);
@@ -330,8 +342,8 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
           line(SIGNAL, pane).setData(bars.flatMap((b, i) => (stochValues[i] === null ? [] : [{ time: b.time, value: stochValues[i]!.d }])));
           guides(k, 20, 80);
         } else {
-          const s = chart.addSeries(lc.LineSeries, { color: "#7fb8a4", lineWidth: 1, priceLineVisible: false, lastValueVisible: true, priceFormat: { type: "custom", formatter: compact } }, pane);
-          s.setData(bars.map((b, i) => ({ time: b.time, value: obvValues[i] })));
+          const s = chart.addSeries(lc.LineSeries, { color: "#7fb8a4", lineWidth: 1, priceLineVisible: false, lastValueVisible: true, priceFormat: { type: "custom", formatter: practice?.blind ? (v: number) => v.toFixed(1) : compact } }, pane);
+          s.setData(bars.map((b, i) => ({ time: b.time, value: obvValues[i] * volScale })));
         }
         chart.panes()[pane].setStretchFactor(0.28);
         pane++;
@@ -380,7 +392,8 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
         const b = p.time === undefined ? undefined : bars[index.get(String(p.time)) ?? -1];
         if (b) setDay(b.day > today ? today : b.day);
         // 누른 높이의 가격을 알림 가격 칸에 넣습니다. 현재가보다 높으면 "위로", 낮으면 "아래로".
-        const at = p.point ? price.coordinateToPrice(p.point.y) : null;
+        // 거래량·RSI 같은 아래 칸을 누른 건 가격이 아니라서 넘겨요(그 칸 높이를 캔들 가격으로 바꾸면 엉뚱한 값).
+        const at = p.point && (p.paneIndex ?? 0) === 0 ? price.coordinateToPrice(p.point.y) : null;
         if (at !== null && at > 0) {
           const v = tickRound(at, tickMarket);
           setPick(String(v));
@@ -406,7 +419,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     };
     // fmt·period는 bars·market과 함께 바뀌므로 의존성에서 뺍니다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars, show, levels, trades, memosByBar, maValues, bands, closes, today, big, intraday, mode, settings, rsiValues, macdValues, stochValues, obvValues, patternAt, divs, vwapFrom]);
+  }, [bars, show, levels, trades, memosByBar, maValues, bands, closes, today, big, intraday, mode, settings, rsiValues, macdValues, stochValues, obvValues, patternAt, divs, vwapFrom, volScale]);
 
   const keep = useRef<{ range: { from: number; to: number }; len: number; view: View } | null>(null);
   const lastRange = useRef(range);
@@ -445,7 +458,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     drawRef.current?.set({ marks, strokes, visible: drawShown, pending });
   }, [marks, strokes, drawShown, pending]);
   useEffect(() => {
-    chartRef.current?.applyOptions({ handleScroll: tool !== "pen", handleScale: tool !== "pen" });
+    chartRef.current?.applyOptions({ handleScroll: scrolling(tool !== "pen", bigRef.current), handleScale: tool !== "pen" });
     if (tool !== "zone") setPending(null);
   }, [tool]);
 
@@ -456,6 +469,9 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   // 지운 걸 되살리면 번호가 새로 생겨서, 예전 번호 → 새 번호를 ids에 적어 두고 따라가요.
   const history = useRef<(() => Promise<void> | void)[]>([]);
   const [undoable, setUndoable] = useState(0);
+  // 되돌리기는 한 번에 하나씩. 앞의 것이 서버를 기다리는 동안 또 누르면 지운 선이 되살아나는 일이 있었어요.
+  const undoing = useRef(false);
+  const [busy, setBusy] = useState(false);
   const ids = useRef(new Map<string, number>());
   const idOf = (kind: "m" | "s" | "d", id: number) => {
     let x = id;
@@ -466,10 +482,35 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     history.current = [...history.current, undo].slice(-50);
     setUndoable(history.current.length);
   }
+  function forget(undo: () => Promise<void> | void) {
+    history.current = history.current.filter((u) => u !== undo);
+    setUndoable(history.current.length);
+  }
+  // 새로 그린 것: 서버 저장을 기다리기 전에 되돌리기를 먼저 쌓아요. 기다리는 동안 Ctrl+Z를 눌러도 이번 것부터 풀려요.
+  function rememberSave(save: Promise<number | null>, drop: (id: number) => void) {
+    const entry = async () => {
+      const id = await save;
+      if (id !== null) drop(id);
+    };
+    remember(entry);
+    save.then((id) => id === null && forget(entry), () => forget(entry));
+  }
   async function undo() {
+    if (undoing.current) return;
     const last = history.current.pop();
     setUndoable(history.current.length);
-    if (last) await last();
+    if (!last) return;
+    undoing.current = true;
+    setBusy(true);
+    try {
+      await last();
+    } catch {
+      // 서버가 실패하면 되돌리기를 그대로 다시 쌓아 둬요.
+      remember(last);
+    } finally {
+      undoing.current = false;
+      setBusy(false);
+    }
   }
   const undoRef = useRef(undo);
   undoRef.current = undo;
@@ -486,10 +527,11 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
 
   async function saveMark(low: number, high: number | null) {
     const kind = kindFor(low, high, ref);
-    const id = practice ? nextLocal() : await addLevel({ ticker, name, kind, low, high });
+    const save = practice ? Promise.resolve(nextLocal()) : addLevel({ ticker, name, kind, low, high });
+    rememberSave(save, (id) => dropMark(idOf("m", id)));
+    const id = await save;
     if (id === null) return;
     setMarks((m) => [...m, { id, kind, low, high, memo: "", alert: false, color: null }]);
-    remember(() => dropMark(idOf("m", id)));
   }
   function setMark(id: number, change: Partial<Pick<Mark, "memo" | "alert" | "kind" | "color" | "low" | "high">>) {
     setMarks((ms) => ms.map((m) => (m.id === id ? { ...m, ...change } : m)));
@@ -502,9 +544,10 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   async function restoreMark(m: Mark) {
     const id = practice ? nextLocal() : await addLevel({ ticker, name, kind: m.kind, low: m.low, high: m.high });
     if (id === null) return;
-    if (!practice && (m.memo || m.alert || m.color)) await updateLevel(id, { memo: m.memo, alert: m.alert, color: m.color });
     ids.current.set(`m${m.id}`, id);
     setMarks((ms) => [...ms, { ...m, id }]);
+    // 되살린 뒤 메모·색 저장이 실패해도 선은 이미 생겼으니 되돌리기를 다시 쌓지 않아요.
+    if (!practice && (m.memo || m.alert || m.color)) await updateLevel(id, { memo: m.memo, alert: m.alert, color: m.color }).catch(() => {});
   }
   function changeMark(id: number, change: Partial<Pick<Mark, "memo" | "alert" | "kind" | "color">>) {
     const before = marksRef.current.find((m) => m.id === id);
@@ -572,10 +615,18 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     const hit = range ? snap(y, ohlc(Math.floor(range.from), Math.ceil(range.to)), toY, 6) : null;
     return hit ?? tickRound(raw, tickMarket);
   }
+  const snapRef = useRef(snapAt);
+  snapRef.current = snapAt;
+  // 가격 칸(맨 위 칸) 아래, 거래량·RSI 칸을 누른 건 가격으로 못 바꿔요.
+  const inPrice = (y: number) => {
+    const chart = chartRef.current;
+    return !!chart && y >= 0 && y <= chart.paneSize(0).height;
+  };
   // 도구를 고른 동안은 차트 위에 얇은 막을 덮어 누른 자리를 직접 받아요(차트는 빠른 두 번 누름을 놓쳐서).
   function tap(e: React.PointerEvent<HTMLDivElement>) {
     const r = e.currentTarget.getBoundingClientRect();
     const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+    if (!inPrice(y)) return;
     const at = priceRef.current?.coordinateToPrice(y) ?? null;
     if (at !== null && at > 0) drawAt(toolRef.current === "eraser" ? at : snapAt(y, x, at), x, y);
   }
@@ -633,10 +684,13 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     setDraft([]);
     drawRef.current?.set({ draft: null });
     setTool("none");
-    const id = practice ? nextLocal() : await addShape({ ticker, name, view, kind, points });
+    const at = new Map(bars.map((b, i) => [b.key, i]));
+    const sorted = sortShapePoints(kind, points, (k) => at.get(k) ?? 0);
+    const save = practice ? Promise.resolve(nextLocal()) : addShape({ ticker, name, view, kind, points: sorted });
+    rememberSave(save, (id) => dropShape(idOf("s", id)));
+    const id = await save;
     if (id === null) return;
-    setShapes((ss) => [...ss, { id, view, kind, points, color: null, alert: false }]);
-    remember(() => dropShape(idOf("s", id)));
+    setShapes((ss) => [...ss, { id, view, kind, points: sorted, color: null, alert: false }]);
   }
   function setShape(id: number, change: Partial<Pick<Shape, "alert">>) {
     setShapes((ss) => ss.map((x) => (x.id === id ? { ...x, ...change } : x)));
@@ -649,9 +703,9 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   async function restoreShape(x: Shape) {
     const id = practice ? nextLocal() : await addShape({ ticker, name, view: x.view, kind: x.kind, points: x.points });
     if (id === null) return;
-    if (!practice && (x.alert || x.color)) await updateShape(id, { alert: x.alert, color: x.color });
     ids.current.set(`s${x.id}`, id);
     setShapes((ss) => [...ss, { ...x, id }]);
+    if (!practice && (x.alert || x.color)) await updateShape(id, { alert: x.alert, color: x.color }).catch(() => {});
   }
   function changeShape(id: number, change: Partial<Pick<Shape, "alert">>) {
     const before = shapes.find((x) => x.id === id);
@@ -720,7 +774,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
       drag.moved = true;
       const raw = priceRef.current?.coordinateToPrice(y) ?? null;
       if (raw === null || raw <= 0) return;
-      drag.mark = moveEdge(drag.mark, drag.edge, snapAt(y, x, raw));
+      drag.mark = moveEdge(drag.mark, drag.edge, snapRef.current(y, x, raw));
       if (drag.mark.high !== null && drag.edge === "high" && drag.mark.high < drag.mark.low) drag.edge = "low";
       const next = marksRef.current.map((m) => (m.id === drag!.id ? drag!.mark : m));
       marksRef.current = next;
@@ -730,7 +784,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
       if (!drag) return;
       if (!drag.moved) {
         drag = null;
-        chartRef.current?.applyOptions({ handleScroll: true, handleScale: true });
+        chartRef.current?.applyOptions({ handleScroll: scrolling(true, bigRef.current), handleScale: true });
         return;
       }
       const m = drag.mark;
@@ -741,7 +795,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
       drag = null;
       dragged.current = true;
       setTimeout(() => (dragged.current = false), 400);
-      chartRef.current?.applyOptions({ handleScroll: true, handleScale: true });
+      chartRef.current?.applyOptions({ handleScroll: scrolling(true, bigRef.current), handleScale: true });
       setMarks((ms) => ms.map((x) => (x.id === fixed.id ? { ...fixed, kind } : x)));
       if (!practice) void updateLevel(fixed.id, { low: fixed.low, high: fixed.high, kind });
       remember(() => setMark(idOf("m", fixed.id), { low: orig.low, high: orig.high, kind: orig.kind }));
@@ -768,7 +822,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
   // 낙서: 누른 자리(화면 좌표)를 봉 키·봉 안 위치·가격으로 바꿔 둡니다.
   function toPoint(x: number, y: number): DoodlePoint | null {
     const chart = chartRef.current, price = priceRef.current;
-    if (!chart || !price || !bars.length) return null;
+    if (!chart || !price || !bars.length || !inPrice(y)) return null;
     const logical = chart.timeScale().coordinateToLogical(x);
     const p = price.coordinateToPrice(y);
     if (logical === null || p === null || p <= 0) return null;
@@ -795,11 +849,11 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
     live.current = null;
     if (!cur || !cur.pts.length) return;
     const points = thin(cur.px).map((i) => cur.pts[i]);
-    const id = practice ? nextLocal() : await addDoodle({ ticker, view, color: PEN, points });
-    if (id !== null) {
-      setDoodles((ds) => [...ds, { id, view, color: PEN, points }]);
-      remember(() => dropDoodle(idOf("d", id)));
-    } else syncDrawings();
+    const save = practice ? Promise.resolve(nextLocal()) : addDoodle({ ticker, view, color: PEN, points });
+    rememberSave(save, (id) => dropDoodle(idOf("d", id)));
+    const id = await save;
+    if (id !== null) setDoodles((ds) => [...ds, { id, view, color: PEN, points }]);
+    else syncDrawings();
   }
 
   useEffect(() => {
@@ -927,7 +981,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
                 <span><i>저</i><b className="down">{fmt(bar.low)}</b></span>
                 <span><i>종</i><b>{fmt(bar.close)}</b></span>
                 {prev && <span className={bar.close >= prev.close ? "up" : "down"}>{signed((bar.close / prev.close - 1) * 100)}</span>}
-                {bar.volume !== null && <span><i>거래량</i>{compact(bar.volume)}</span>}
+                {bar.volume !== null && <span><i>{practice?.blind ? "거래량(평균 대비)" : "거래량"}</i>{volFmt(bar.volume * volScale)}</span>}
               </div>
               {show.ma && (
                 <div>
@@ -941,7 +995,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
                   {show.rsi && rsiValues[i] !== null && <span style={{ color: GOLD }}>RSI {rsiValues[i]!.toFixed(1)}</span>}
                   {show.macd && macdValues[i] && <span><i>MACD</i><b style={{ color: GOLD }}>{macdValues[i]!.macd.toFixed(2)}</b> <i>신호</i><b style={{ color: SIGNAL }}>{macdValues[i]!.signal.toFixed(2)}</b></span>}
                   {show.stoch && stochValues[i] && <span><i>스토캐스틱</i><b style={{ color: GOLD }}>{stochValues[i]!.k.toFixed(0)}</b> / <b style={{ color: SIGNAL }}>{stochValues[i]!.d.toFixed(0)}</b></span>}
-                  {show.obv && <span><i>OBV</i>{compact(obvValues[i])}</span>}
+                  {show.obv && <span><i>OBV</i>{practice?.blind ? (obvValues[i] * volScale).toFixed(1) : compact(obvValues[i])}</span>}
                 </div>
               )}
               {pattern && <div className="tip-memo"><b>{PATTERNS[pattern].name}</b> · {PATTERNS[pattern].text}</div>}
@@ -980,7 +1034,7 @@ export default function ChartMemo({ ticker, name, market, candles, minutes, memo
                     onClick={() => { setTool(tool === t.key ? "none" : t.key); setDrawShown(true); setLineOpen(false); }}><span className={t.icon === "Fib" ? "fib-ic" : ""}>{t.icon}</span></button>
                 ))}
                 <i />
-                <button type="button" disabled={undoable === 0} aria-label="되돌리기" title="되돌리기 (Ctrl+Z)" onClick={() => void undo()}>↶</button>
+                <button type="button" disabled={undoable === 0 || busy} aria-label="되돌리기" title="되돌리기 (Ctrl+Z)" onClick={() => void undo()}>↶</button>
                 <button type="button" className={magnet ? "on" : ""} aria-pressed={magnet} aria-label="자석" title="자석: 캔들 꼬리·몸통에 붙이기" onClick={() => setMagnet((v) => !v)}>🧲</button>
                 <button type="button" className={drawShown ? "" : "on"} aria-pressed={!drawShown} aria-label={drawShown ? "그림 숨기기" : "그림 보이기"} title={drawShown ? "그림 숨기기" : "그림 보이기"}
                   onClick={() => setDrawShown((v) => !v)}>{drawShown ? "👁" : "🚫"}</button>
@@ -1112,7 +1166,7 @@ function shapeDistance(d: Drawings, s: Shape, p: [number, number]): number {
     if (p[0] < left) return Infinity;
     return Math.min(...fibPrices(s.points[0][2], s.points[1][2]).map((l) => Math.abs((d.y(l.price) ?? -1e9) - p[1])));
   }
-  const [a, b] = px;
+  const [a, b] = px[1][0] < px[0][0] ? [px[1], px[0]] : px; // 그릴 때처럼 오른쪽으로 늘린 선
   const far: [number, number] = b[0] === a[0] ? b : [a[0] + (b[0] - a[0]) * 1e3, a[1] + (b[1] - a[1]) * 1e3];
   let best = segmentDistance(p, a, far);
   if (s.kind === "channel" && px[2]) {

@@ -76,7 +76,7 @@ export function insights(list: Session[]): string[] {
   const many = list.filter((s) => s.trades.length >= 4), few = list.filter((s) => s.trades.length <= 3);
   if (many.length >= MIN_SIDE && few.length >= MIN_SIDE) {
     const m = pct(many.filter(won).length, many.length), f = pct(few.filter(won).length, few.length);
-    if (f - m >= 15) out.push(`매매를 4번 넘게 한 판은 ${m}%만 이겼어요. 3번 이하는 ${f}%예요.`);
+    if (f - m >= 15) out.push(`매매를 4번 이상 한 판은 ${m}%만 이겼어요. 3번 이하는 ${f}%예요.`);
     else if (m - f >= 15) out.push(`자주 사고판 판이 ${m}% 이겨서, 3번 이하(${f}%)보다 나았어요.`);
   }
   const up = list.filter((s) => s.hold > 0);

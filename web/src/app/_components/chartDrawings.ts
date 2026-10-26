@@ -148,6 +148,8 @@ export class Drawings implements ISeriesPrimitive<Time> {
   private drawShape(c: CanvasRenderingContext2D, kind: Shape["kind"], points: DoodlePoint[], color: string, width: number, bold: boolean, alert: boolean) {
     const px = this.shapePixels(points);
     if (!px || px.length < 2) return;
+    // 추세선·채널은 오른쪽에서 왼쪽으로 찍어도 오른쪽(오늘 쪽)으로 늘려요. 워커 알림도 그 선으로 봐요.
+    if (kind !== "fib" && px[1][0] < px[0][0]) [px[0], px[1]] = [px[1], px[0]];
     const [[x1, y1], [x2, y2]] = px;
     c.lineWidth = bold ? 2 : 1.5;
     c.strokeStyle = color;

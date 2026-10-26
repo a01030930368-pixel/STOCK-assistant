@@ -1,7 +1,8 @@
 """차트 연습(관심종목 › 연습하기)에 쓸 국내·미국 큰 종목들의 일봉을 천천히 받아 둬요.
 
 한 번 돌 때 RUN_EACH 종목씩 받아서, 처음 켠 뒤 몇 시간이면 다 채워져요. 그 뒤로는 30일에 한 번 새로 받아요.
-코드가 바뀌었거나 상장 폐지된 종목은 실패로 적어 두고 30일 뒤에 다시 봐요.
+받다가 오류가 나면 RETRY 뒤에 다시 받아 보고, TRIES번 연달아 실패하거나 일봉이 비어 있으면(코드가 바뀌었거나 상장 폐지)
+실패로 적어 두고 30일 뒤에 다시 봐요.
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,8 @@ log = logging.getLogger("worker")
 KST = ZoneInfo("Asia/Seoul")
 RUN_EACH = 2
 REFRESH = timedelta(days=30)
+RETRY, TRIES = timedelta(hours=6), 3
+KR_OFF = "practice_kr_off"  # 키움 키가 없어 국내 종목은 못 받는다는 표시(연습 화면이 읽어요)
 
 KR = """005930 삼성전자,000660 SK하이닉스,373220 LG에너지솔루션,207940 삼성바이오로직스,005380 현대차,000270 기아,
 068270 셀트리온,005490 POSCO홀딩스,035420 NAVER,035720 카카오,051910 LG화학,006400 삼성SDI,105560 KB금융,
@@ -122,10 +125,11 @@ class PoolJob:
         now = now or datetime.now(timezone.utc)
         if not self.seeded:
             db.seed_practice_pool(conn, pool())
+            db.set_setting(conn, KR_OFF, self.kiwoom is None)
             self.seeded = True
         kst = now.astimezone(KST)
-        for ticker, market in db.practice_due(conn, now - REFRESH, RUN_EACH, kiwoom=self.kiwoom is not None):
-            error = None
+        for ticker, market in db.practice_due(conn, now - REFRESH, RUN_EACH, kiwoom=self.kiwoom is not None, now=now):
+            error, retry_at = None, None
             try:
                 rows = self.kiwoom.kr_daily(ticker, kst.strftime("%Y%m%d")) if market == "KR" else prices.us_daily(ticker, self.http)
                 if not rows:
@@ -134,5 +138,5 @@ class PoolJob:
                     db.save_prices(conn, ticker, rows)
             except Exception as e:
                 log.warning("연습용 %s 일봉 받기 실패: %s", ticker, e)
-                error = str(e)[:200]
-            db.practice_fetched(conn, ticker, now, error)
+                error, retry_at = str(e)[:200], now + RETRY
+            db.practice_fetched(conn, ticker, now, error, retry_at, TRIES)

@@ -43,7 +43,7 @@ describe("practice log", () => {
       s(4, 3, { trades: [buy("2024-01-03")] }), s(-2, -5, { trades: [buy("2024-01-03")] }), s(0, -4, { trades: [] }),
     ];
     const lines = insights(list);
-    expect(lines).toContain("매매를 4번 넘게 한 판은 0%만 이겼어요. 3번 이하는 100%예요.");
+    expect(lines).toContain("매매를 4번 이상 한 판은 0%만 이겼어요. 3번 이하는 100%예요.");
     expect(lines.some((l) => l.startsWith("오르는 차트에서는 들고만 있기보다 평균"))).toBe(true);
     expect(lines).toContain("판 뒤 일주일 안에 다시 산 게 3번이에요.");
   });

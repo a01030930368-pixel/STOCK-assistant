@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kindFor, markColor, markLabel, validColor, moveEdge, nearest, snap, strokeDistance, thin, validDoodle, zone, fibPrices, measure, validShape, type Mark } from "./drawings";
+import { kindFor, markColor, markLabel, validColor, moveEdge, nearest, snap, strokeDistance, thin, validDoodle, zone, fibPrices, measure, sortShapePoints, validShape, type DoodlePoint, type Mark } from "./drawings";
 
 const mark = (id: number, low: number, high: number | null = null): Mark => ({ id, kind: "support", low, high, memo: "", alert: false, color: null });
 
@@ -68,6 +68,19 @@ describe("shapes", () => {
   });
   it("measures percent, bars and days", () => {
     expect(measure({ price: 100, index: 3, day: "2026-10-01" }, { price: 125, index: 13, day: "2026-10-15" })).toBe("+25.00% · 10봉 · 14일");
+  });
+});
+
+describe("sortShapePoints", () => {
+  const at = (k: string) => ["2026-10-01", "2026-10-02", "2026-10-05"].indexOf(k);
+  const a: DoodlePoint = ["2026-10-01", 0, 100], b: DoodlePoint = ["2026-10-05", 0, 120], c: DoodlePoint = ["2026-10-02", 0.2, 90];
+  it("추세선·채널은 시간 순으로, 채널 세 번째 점과 피보나치는 그대로", () => {
+    expect(sortShapePoints("trend", [b, a], at)).toEqual([a, b]);
+    expect(sortShapePoints("trend", [a, b], at)).toEqual([a, b]);
+    expect(sortShapePoints("channel", [b, a, c], at)).toEqual([a, b, c]);
+    expect(sortShapePoints("fib", [b, a], at)).toEqual([b, a]);
+    // 같은 봉 안에서는 봉 안 위치로
+    expect(sortShapePoints("trend", [["2026-10-01", 0.3, 1], ["2026-10-01", -0.2, 2]], at)).toEqual([["2026-10-01", -0.2, 2], ["2026-10-01", 0.3, 1]]);
   });
 });
 

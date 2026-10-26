@@ -241,14 +241,44 @@ export function sortBooks(books: Book[], sort: BookSort, info: { stars: (key: st
 }
 
 // 내가 직접 적는 사건 메모(실적 발표, 공시, 뉴스 같은 것). 날짜로 그 권에 들어가요:
-// 첫 매수일부터 전부 판 날까지, 진행 중이면 끝 없이. 기록 전부터 갖고 있던 권은 앞쪽도 열어 둬요.
+// 첫 매수일부터, 다 판 권은 같은 종목 다음 권을 사기 전날까지(다음 권이 없으면 끝 없이), 진행 중이면 끝 없이.
+// 그래서 판 뒤 다시 사기 전까지 적은 메모도 사라지지 않고 끝난 권에 남아요. 기록 전부터 갖고 있던 권은 앞쪽도 열어 둬요.
 export type BookNote = { id: number; market: Market; ticker: string; day: string; body: string; edited: string };
 
-export const noteRange = (b: Book) => ({ min: b.startedBefore ? null : b.start, max: b.end });
+// 2026-02-30처럼 없는 날은 Date가 3월로 넘겨서 모양이 달라져요.
+export function validDay(day: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const d = new Date(`${day}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === day;
+}
 
-export function notesOf(b: Book, notes: BookNote[]): BookNote[] {
-  const { min, max } = noteRange(b);
+const dayBefore = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
+export function noteRange(b: Book, books: Book[]): { min: string | null; max: string | null } {
+  const min = b.startedBefore ? null : b.start;
+  if (!b.end) return { min, max: null };
+  const end = b.end;
+  const next = books.filter((x) => x.key !== b.key && x.market === b.market && x.ticker === b.ticker && x.start !== null && x.start >= end)
+    .map((x) => x.start!).sort()[0];
+  if (!next) return { min, max: null };
+  const before = dayBefore(next);
+  return { min, max: before > end ? before : end };
+}
+
+export function notesOf(b: Book, notes: BookNote[], books: Book[]): BookNote[] {
+  const { min, max } = noteRange(b, books);
   return notes.filter((n) => n.market === b.market && n.ticker === b.ticker && (!min || n.day >= min) && (!max || n.day <= max));
+}
+
+// 서버에서 메모 날짜를 그 권 안(오늘까지)으로 맞춰요. 없는 날이면 null.
+export function clampNoteDay(day: string, b: Book, books: Book[], today: string): string | null {
+  if (!validDay(day)) return null;
+  const { min, max } = noteRange(b, books);
+  let out = day;
+  const hi = max && max < today ? max : today;
+  if (out > hi) out = hi;
+  if (min && out < min) out = min;
+  return out;
 }
 
 // 매매와 메모를 날짜순으로 섞어요. 같은 날이면 매매 다음에 메모, 메모끼리는 먼저 쓴 것부터.

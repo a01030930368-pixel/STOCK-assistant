@@ -113,10 +113,57 @@ def _s(v, limit: int) -> str:
 
 
 def _json(text: str) -> dict:
-    m = re.search(r"\{.*\}", text or "", re.S)
-    if not m:
-        raise ValueError("AI 답에 JSON이 없어요")
-    return json.loads(m.group(0))
+    """```json 블록을 먼저 보고, 없으면 '{'마다 읽어 본 것 중 가장 긴 객체. 앞뒤 설명 글이나 중괄호가 섞여도 읽어요.
+    못 읽은 '{' 안쪽(잘린 답)의 작은 객체는 답으로 쓰지 않아요."""
+    text = text or ""
+    for m in re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S):
+        try:
+            d = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(d, dict):
+            return d
+    dec = json.JSONDecoder()
+    best, skip = None, -1
+    for i, ch in enumerate(text):
+        if ch != "{" or i < skip:
+            continue
+        try:
+            d, j = dec.raw_decode(text, i)
+        except ValueError:
+            skip = _close(text, i)
+            continue
+        if isinstance(d, dict) and (best is None or j - i > best[1]):
+            best = (d, j - i)
+        skip = j
+    if best is None:
+        raise ValueError("AI 답에 JSON이 없어요(잘렸을 수 있어요)")
+    return best[0]
+
+
+def _close(text: str, i: int) -> int:
+    """i의 '{'와 짝이 되는 '}' 다음 자리(괄호 수만 셈). 짝이 없으면(잘림) 글 끝."""
+    depth = 0
+    for k in range(i, len(text)):
+        depth += {"{": 1, "}": -1}.get(text[k], 0)
+        if depth == 0:
+            return k + 1
+    return len(text)
+
+
+def _items(v) -> list:
+    """목록이어야 할 칸에 글 하나가 오면 한 줄짜리 목록으로 봐요(글자마다 쪼개지지 않게)."""
+    if isinstance(v, list):
+        return v
+    return [v] if isinstance(v, str) and v.strip() else []
+
+
+def _num(v) -> float | None:
+    """72.4, "72.4%", "약 1,200" 같은 값에서 숫자를 읽어요."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    m = re.search(r"-?\d+(?:\.\d+)?", str(v or "").replace(",", ""))
+    return float(m.group(0)) if m else None
 
 
 def valid_ticker(ticker: str, market: str) -> bool:
@@ -155,8 +202,8 @@ def parse_pick(text: str, sample: list[Candidate]) -> tuple[Candidate, list[str]
     chosen = next((c for c in sample if c.ticker == str(data.get("ticker", "")).strip().upper()), None)
     if chosen is None:
         raise ValueError("AI가 후보에 없는 종목을 골랐어요")
-    why = [_s(x, 80) for x in (data.get("why") or []) if _s(x, 80)][:3]
-    first = [_s(x, 80) for x in (data.get("first") or []) if _s(x, 80)][:3]
+    why = [_s(x, 80) for x in _items(data.get("why")) if _s(x, 80)][:3]
+    first = [_s(x, 80) for x in _items(data.get("first")) if _s(x, 80)][:3]
     return chosen, why, first, parse_peers(data.get("peers"), chosen.ticker)
 
 
@@ -184,14 +231,27 @@ def _price(v) -> float | None:
     return round(n, 2) if n > 0 else None
 
 
-# "2025년 4월 말", "2026.07" 같은 글에서 연·월을 읽어, 오늘보다 앞선 일이면 True
+# "2025년 4월 말", "2026.07", "2026년 4분기", "2025년 말~2027년" 같은 글에서 연·월을 읽어, 오늘보다 앞선 일이면 True.
+# 범위면 끝 해로 봐요. N분기·NQ는 그 분기 끝 달(3N), "실적"이 붙으면 다음 분기에 발표하니 석 달 뒤로 봐요.
 def already_past(when: str, today: date) -> bool:
-    y = re.search(r"(20\d\d)", when or "")
-    if not y:
+    years = list(re.finditer(r"20\d\d", when or ""))
+    if not years:
         return False
-    year = int(y.group(1))
-    m = re.search(r"20\d\d\s*(?:년\s*|[.\-/]\s*)(\d{1,2})(?!\d)", when)
-    month = int(m.group(1)) if m and 1 <= int(m.group(1)) <= 12 else None
+    y = years[-1]
+    year, after, before = int(y.group(0)), when[y.end():], when[:y.start()]
+    month = None
+    if q := (re.match(r"\s*(?:년\s*)?([1-4])\s*(?:분기|Q)", after, re.I) or re.match(r"\s*(?:년\s*)?Q\s*([1-4])", after, re.I)
+             or re.search(r"(?:Q\s*([1-4])|([1-4])\s*Q)\s*$", before, re.I)):
+        month = 3 * int(next(g for g in q.groups() if g))
+        if "실적" in when:
+            month += 3
+    elif h := re.match(r"\s*(?:년\s*)?(상반기|하반기)", after):
+        month = 6 if h.group(1) == "상반기" else 12
+    elif m := re.match(r"\s*(?:년\s*(\d{1,2})\s*월|[.\-/]\s*(\d{1,2})(?!\d))", after):
+        n = int(m.group(1) or m.group(2))
+        month = n if 1 <= n <= 12 else None
+    if month and month > 12:
+        year, month = year + 1, month - 12
     return year < today.year or (year == today.year and month is not None and month < today.month)
 
 
@@ -200,7 +260,7 @@ def parse_draft(text: str, sources: list[dict] | None = None, own: str = "", tod
     d = _json(text)
     out: dict = {
         "sector": _s(d.get("sector"), 30),
-        "styles": [x for x in dict.fromkeys(_s(v, 10) for v in d.get("styles") or []) if x in STYLES][:3],
+        "styles": [x for x in dict.fromkeys(_s(v, 10) for v in _items(d.get("styles"))) if x in STYLES][:3],
         "one": _s(d.get("one"), 120), "customers": _s(d.get("customers"), 80),
         "power": d.get("power") if d.get("power") in ("강함", "보통", "약함") else "", "powerWhy": _s(d.get("powerWhy"), 100),
         "numbersNote": _s(d.get("numbersNote"), 200), "moat": _s(d.get("moat"), 120),
@@ -210,10 +270,7 @@ def parse_draft(text: str, sources: list[dict] | None = None, own: str = "", tod
     lines = []
     for x in d.get("lines") or []:
         if isinstance(x, dict) and _s(x.get("name"), 30):
-            try:
-                pct = max(0.0, min(100.0, float(x.get("pct"))))
-            except (TypeError, ValueError):
-                pct = 0.0
+            pct = max(0.0, min(100.0, _num(x.get("pct")) or 0.0))
             lines.append({"name": _s(x.get("name"), 30), "pct": round(pct, 1)})
     out["lines"] = lines[:5]
     promises = d.get("promises")
@@ -223,7 +280,7 @@ def parse_draft(text: str, sources: list[dict] | None = None, own: str = "", tod
                      if isinstance(x, dict) and _s(x.get("text"), 80) and not already_past(str(x.get("when") or ""), today)][:3]
     out["risks"] = [{"text": _s(x.get("text"), 80), "signal": _s(x.get("signal"), 80)} for x in d.get("risks") or [] if isinstance(x, dict) and _s(x.get("text"), 80)][:3]
     out["peers"] = parse_peers(d.get("peers"), own)
-    out["questions"] = [_s(x, 80) for x in d.get("questions") or [] if _s(x, 80)][:3]
+    out["questions"] = [_s(x, 80) for x in _items(d.get("questions")) if _s(x, 80)][:3]
     seen, out["sources"] = set(), []
     for x in sources or []:
         url = str(x.get("url") or "")
@@ -277,7 +334,10 @@ def draft_prompt(name: str, market: str, ctx: dict, today: date | None = None) -
 
 
 RETRY_MINUTES, RETRY_TRIES = 10, 6  # 붐비면 10분 뒤, 최대 6번(1시간)
+WAIT_RESEARCH_MINUTES = 2  # 새 노트는 앱이 재무를 먼저 모으도록 한 번만 이만큼 미뤄요(재시도 횟수엔 안 세요)
 NO_SEARCH_HOURS = 24  # 이 키에 검색이 없다고 나오면 하루 동안은 검색을 묻지 않고 바로 뉴스로 써요
+DRAFT_TOKENS = 16384  # 노트 전체 초안. Gemini는 생각에 쓴 글자도 한도에 세서 넉넉히 둬요
+CRASHED = "처리하다 문제가 생겼어요. 잠시 뒤 다시 눌러 보세요."
 
 
 def news_lines(items: list[dict]) -> str:
@@ -292,41 +352,58 @@ class StudyWorker:
         self.search = ai.search_asker(cfg)
         self.no_search_until: datetime | None = None
         self.rand = rand or random.Random()
+        self.deferred: set = set()  # 재무를 기다리느라 한 번 미룬 초안 (ticker, asked_at)
+        self.running: set = set()  # 처리 중인 부탁. 처리하다 예외로 빠져나가면 남아서, 다음 회차에 AI를 또 부르지 않고 오류로 끝내요
+
+    def _guard(self, key: tuple, work, fail) -> None:
+        if key in self.running:
+            self.running.discard(key)
+            fail()
+            return
+        self.running.add(key)
+        work()
+        self.running.discard(key)
 
     def run_once(self, conn: psycopg.Connection) -> bool:
         req = db.get_setting(conn, "study_pick")
         if isinstance(req, dict) and req.get("status") == "pending":
-            self.pick(conn, req)
+            self._guard(("pick", req.get("id")), lambda: self.pick(conn, req),
+                        lambda: db.finish_study_request(conn, "study_pick", req.get("id"), {**req, "status": "error", "error": CRASHED}))
             return True
         row = db.pending_study_draft(conn)
         if row:
-            self.draft(conn, *row)
+            self._guard(("draft", row[0], row[3]), lambda: self.draft(conn, *row),
+                        lambda: db.finish_study_draft(conn, row[0], None, "error", CRASHED, row[3]))
             return True
         req = db.get_setting(conn, "study_compare")
         if isinstance(req, dict) and req.get("status") == "pending":
-            self.compare(conn, req)
+            self._guard(("compare", req.get("id")), lambda: self.compare(conn, req),
+                        lambda: db.finish_study_request(conn, "study_compare", req.get("id"), {**req, "status": "error", "error": CRASHED}))
             return True
         return False
 
     def compare(self, conn: psycopg.Connection, req: dict) -> None:
         """같은 업종으로 공부한 회사들을 AI가 한두 문장으로 비교해요(참고용)."""
+        done = lambda v: db.finish_study_request(conn, "study_compare", req.get("id"), {**req, **v})  # noqa: E731
         if not self.ask:
-            db.set_setting(conn, "study_compare", {**req, "status": "error", "error": "AI 키가 없어요"})
+            done({"status": "error", "error": "AI 키가 없어요"})
             return
         rows = db.study_compare_context(conn, [str(t) for t in req.get("tickers") or []][:8])
         if len(rows) < 2:
-            db.set_setting(conn, "study_compare", {**req, "status": "error", "error": "비교할 회사가 2곳 이상 있어야 해요"})
+            done({"status": "error", "error": "비교할 회사가 2곳 이상 있어야 해요"})
             return
         try:
             text = _s(self.ask(COMPARE_SYSTEM, compare_prompt(str(req.get("sector") or ""), rows), self.key, self.model, self.http, 1024), 300)
             if not text:
                 raise ValueError("AI 답이 비었어요")
-            db.set_setting(conn, "study_compare", {**req, "status": "done", "text": text, "model": self.model, "at": datetime.now(timezone.utc).isoformat()})
         except Exception as e:
-            db.set_setting(conn, "study_compare", {**req, "status": "error", "error": str(e)[:200]})
+            done({"status": "error", "error": str(e)[:200]})
             log.warning("기업 공부 업종 비교 실패: %s", e)
+            return
+        done({"status": "done", "text": text, "model": self.model, "at": datetime.now(timezone.utc).isoformat()})
 
     def pick(self, conn: psycopg.Connection, req: dict) -> None:
+        done = lambda v: db.finish_study_request(conn, "study_pick", req.get("id"), {**req, **v})  # noqa: E731
         market = req.get("market") if req.get("market") in ("KR", "US") else None
         cands = []
         for ticker, name, mk, closes in db.study_universe(conn, market):
@@ -341,7 +418,7 @@ class StudyWorker:
             sectors = db.sectors_of(conn, [c.ticker for c in top])
             top = fresh_pool(top, sectors, set(coverage.get("names") or coverage["sectors"]))
         if not top:
-            db.set_setting(conn, "study_pick", {**req, "status": "error", "error": "흐름을 볼 일봉이 아직 모자라요. 워커가 연습용 종목 일봉을 받는 중이에요."})
+            done({"status": "error", "error": "흐름을 볼 일봉이 아직 모자라요. 워커가 연습용 종목 일봉을 받는 중이에요."})
             return
         sample = self.rand.sample(top, min(SAMPLE, len(top)))
         themes = db.study_themes(conn, [c.ticker for c in sample])
@@ -357,21 +434,32 @@ class StudyWorker:
         else:
             chosen, why, first, peers = fallback_pick(sample, self.rand)
         pick = {"why": why, "first": first, "flow": describe(chosen), "model": model, "at": datetime.now(timezone.utc).isoformat(), "fresh": fresh}
-        db.create_ai_study(conn, chosen.ticker, chosen.name, chosen.market, pick, peers, draft=bool(self.ask))
-        db.set_setting(conn, "study_pick", {**req, "status": "done", "ticker": chosen.ticker})
+        try:
+            db.create_ai_study(conn, chosen.ticker, chosen.name, chosen.market, pick, peers, draft=bool(self.ask))
+        except Exception as e:
+            done({"status": "error", "error": f"노트를 못 만들었어요: {e}"[:200]})
+            log.warning("기업 공부 추천 노트 만들기 실패: %s", e)
+            return
+        done({"status": "done", "ticker": chosen.ticker})
         log.info("기업 공부 추천: %s", chosen.name)
 
     def draft(self, conn: psycopg.Connection, ticker: str, name: str, market: str, asked_at) -> None:
         if not self.ask:
             db.finish_study_draft(conn, ticker, None, "none", "AI 키가 없어요", asked_at)
             return
+        # 새 노트면 앱이 재무제표를 먼저 모으도록 한 번만 조금 미뤄요(research_job._new_study). 못 모으는 종목도 있어서 한 번만.
+        if (ticker, asked_at) not in self.deferred and any(t == ticker for t, _, _ in db.study_unresearched(conn)):
+            self.deferred.add((ticker, asked_at))
+            if db.defer_study_draft(conn, ticker, asked_at, WAIT_RESEARCH_MINUTES):
+                log.info("%s 기업 공부 초안: 재무를 모으는 중이라 %d분 뒤에 써요", name, WAIT_RESEARCH_MINUTES)
+                return
         try:
             prompt = draft_prompt(name, market, db.study_context(conn, ticker, market))
             out, why = None, ""
             now = datetime.now(timezone.utc)
             if self.search and not (self.no_search_until and now < self.no_search_until):
                 try:
-                    out = parse_draft(*self.search(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, 4096), own=ticker)
+                    out = parse_draft(*self.search(DRAFT_SYSTEM, prompt, self.key, self.model, self.http, DRAFT_TOKENS), own=ticker)
                     out["searched"] = True
                 except ai.NoSearch as e:
                     log.info("%s: %s. 구글 뉴스 제목으로 대신 써요", name, e)
@@ -388,26 +476,37 @@ class StudyWorker:
                     log.warning("%s 구글 뉴스 제목을 못 모았어요: %s", name, e)
                 ask_prompt = prompt + ("\n" + news_lines(news) if news else "")
                 sources = [{"title": n["title"], "url": n["url"]} for n in news[:8]]
-                out = parse_draft(self.ask(DRAFT_SYSTEM, ask_prompt, self.key, self.model, self.http, 4096), sources, own=ticker)
+                out = parse_draft(self.ask(DRAFT_SYSTEM, ask_prompt, self.key, self.model, self.http, DRAFT_TOKENS), sources, own=ticker)
                 out["searched"] = False
                 out["news"] = len(news)
                 if why:
                     out["searchError"] = why
             out["model"] = self.model
             out["at"] = datetime.now(timezone.utc).isoformat()
-            db.finish_study_draft(conn, ticker, out, "done", None, asked_at)
-            db.add_study_peers(conn, ticker, out["peers"])
-            log.info("%s 기업 공부 AI 초안을 썼습니다", name)
         except ai.AiBusy as e:
             # 질 낮은 가벼운 모델로 쓰는 대신, 조금 뒤 같은 모델로 다시 써 봐요.
             if at := db.retry_study_draft(conn, ticker, asked_at, RETRY_MINUTES, RETRY_TRIES):
                 log.info("%s 기업 공부 초안: Gemini가 붐벼 %s에 다시 써요", name, at)
                 return
             db.finish_study_draft(conn, ticker, None, "error", f"Gemini가 계속 붐벼요. 나중에 다시 눌러 보세요. ({e})"[:200], asked_at)
+            return
         except Exception as e:
             msg = "AI 답이 너무 오래 걸려 끊겼어요. 잠시 뒤 다시 눌러 보세요." if isinstance(e, httpx.TimeoutException) else str(e)
             db.finish_study_draft(conn, ticker, None, "error", msg[:200], asked_at)
             log.warning("%s 기업 공부 AI 초안 실패: %s", name, e)
+            return
+        try:
+            db.finish_study_draft(conn, ticker, out, "done", None, asked_at)
+        except Exception as e:
+            # 저장이 안 되면 오류로 끝내요. 'pending'으로 남으면 4초마다 AI를 다시 불러요.
+            db.finish_study_draft(conn, ticker, None, "error", f"초안을 저장하지 못했어요: {e}"[:200], asked_at)
+            log.warning("%s 기업 공부 AI 초안 저장 실패: %s", name, e)
+            return
+        try:
+            db.add_study_peers(conn, ticker, out["peers"])
+        except Exception as e:
+            log.warning("%s 기업 공부 경쟁사 넣기 실패: %s", name, e)
+        log.info("%s 기업 공부 AI 초안을 썼습니다", name)
 
 
 def loop(cfg: Config, db_conn) -> None:

@@ -89,7 +89,10 @@ def claude_text(system: str, prompt: str, key: str, model: str, http: httpx.Clie
     if res.status_code >= 400:
         # 키가 응답에 섞여 나올 일은 없지만, 오류 본문은 앞부분만 남깁니다.
         raise RuntimeError(f"Claude API 오류 {res.status_code}: {res.text[:120]}")
-    return "".join(b.get("text", "") for b in res.json().get("content", []) if b.get("type") == "text")
+    data = res.json()
+    if data.get("stop_reason") == "max_tokens":
+        raise Truncated(f"Claude 답이 길이 한도({max_tokens})에서 잘렸어요")
+    return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
 
 
 def ask(prompt: str, key: str, model: str, http: httpx.Client) -> Comment:
@@ -106,6 +109,10 @@ BUSY_WAIT = 8  # 붐빔(503) 답을 받으면 이만큼(초) 쉬고 같은 모�
 
 class AiBusy(RuntimeError):
     """모든 모델이 붐비거나(503·429) 너무 오래 걸렸어요. 조금 뒤 다시 하면 될 때가 많아요."""
+
+
+class Truncated(RuntimeError):
+    """답이 길이 한도에서 잘렸어요(생각에 쓴 글자도 한도에 셉니다). 잘린 글을 답으로 쓰지 않고, 부른 쪽이 다시 하거나 다른 길로 가요."""
 
 
 class NoSearch(RuntimeError):
@@ -173,10 +180,9 @@ def gemini_text(system: str, prompt: str, key: str, model: str, http: httpx.Clie
             raise RuntimeError(f"Gemini API 오류 {res.status_code}: {res.text[:160]}")
         cands = res.json().get("candidates") or []
         parts = ((cands[0].get("content") or {}).get("parts") or []) if cands else []
-        text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
         if cands and cands[0].get("finishReason") == "MAX_TOKENS":
-            log.warning("Gemini 답이 길이 한도에서 잘렸어요 (%s)", m)
-        return text
+            raise Truncated(f"Gemini 답이 길이 한도({config['maxOutputTokens']})에서 잘렸어요 ({m})")
+        return "".join(p.get("text", "") for p in parts if not p.get("thought"))
     raise _gave_up(errors)
 
 
@@ -202,6 +208,8 @@ def _gemini_search(system: str, prompt: str, key: str, model: str, http: httpx.C
         cands = res.json().get("candidates") or []
         if not cands:
             return "", []
+        if cands[0].get("finishReason") == "MAX_TOKENS":
+            raise Truncated(f"Gemini 검색 답이 길이 한도에서 잘렸어요 ({m})")
         parts = (cands[0].get("content") or {}).get("parts") or []
         chunks = (cands[0].get("groundingMetadata") or {}).get("groundingChunks") or []
         sources = [{"title": (c.get("web") or {}).get("title", ""), "url": (c.get("web") or {}).get("uri", "")} for c in chunks if c.get("web")]
@@ -222,7 +230,10 @@ def _claude_search(system: str, prompt: str, key: str, model: str, http: httpx.C
     )
     if res.status_code >= 400:
         raise RuntimeError(f"Claude 검색 오류 {res.status_code}: {res.text[:120]}")
-    blocks = res.json().get("content", [])
+    data = res.json()
+    if data.get("stop_reason") == "max_tokens":
+        raise Truncated(f"Claude 검색 답이 길이 한도({max_tokens})에서 잘렸어요")
+    blocks = data.get("content", [])
     sources = [{"title": r.get("title", ""), "url": r.get("url", "")}
                for b in blocks if b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list) for r in b["content"]]
     # 검색 뒤에 쓴 마지막 글에 JSON이 있어요.

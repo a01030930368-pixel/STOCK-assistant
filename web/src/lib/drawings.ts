@@ -109,6 +109,14 @@ export function validShape(kind: unknown, points: unknown): kind is ShapeKind {
   return (kind === "trend" || kind === "channel" || kind === "fib") && validDoodle(points) && points.length === SHAPE_POINTS[kind];
 }
 
+// 추세선·채널의 두 점을 시간 순으로(채널 세 번째 점은 그대로). 피보나치는 시작·끝 순서가 뜻이 있어서 그대로예요.
+// at(key) = 봉 번호. 워커는 선을 오늘 쪽으로 늘려 알림을 보니, 저장도 왼쪽 → 오른쪽으로 맞춰요.
+export function sortShapePoints(kind: ShapeKind, points: DoodlePoint[], at: (key: string) => number): DoodlePoint[] {
+  if (kind === "fib" || points.length < 2) return points;
+  const [a, b, ...rest] = points;
+  return at(b[0]) + b[1] < at(a[0]) + a[1] ? [b, a, ...rest] : points;
+}
+
 // 피보나치 되돌림: 끝점(100% 반대쪽)에서 시작점 쪽으로 되돌아온 비율마다의 가격. 0%는 끝점, 100%는 시작점이에요.
 export function fibPrices(start: number, end: number): { ratio: number; price: number }[] {
   return FIB_LEVELS.map((r) => ({ ratio: r, price: end - (end - start) * r }));

@@ -259,6 +259,16 @@ def test_week_moves_counts_new_buys_from_buy_price():
     assert "🔵 노키아 ADR -1.0% (금요일에 산 뒤)" in briefing.weekly_message(w).splitlines()
 
 
+def test_week_moves_counts_rebuy_after_selling_all():
+    start, end = date(2026, 10, 19), date(2026, 10, 25)
+    trades = [_t("2026-10-19", "buy", 10, 100), _t("2026-10-20", "sell", 10, 110), _t("2026-10-22", "buy", 10, 90)]
+    [(n, p, d)] = briefing.week_moves([("SK하이닉스", "KR", "000660", False, 10, 95, 80)], trades, start, end)
+    assert round(p, 1) == 5.6 and d == date(2026, 10, 22)
+    # 지난주부터 들고 있다가 일부만 팔고 다시 산 건 지난주 종가에서부터 셈해요.
+    old = [_t("2026-10-01", "buy", 10, 100), _t("2026-10-20", "sell", 5, 110), _t("2026-10-22", "buy", 5, 90)]
+    assert briefing.week_moves([("SK하이닉스", "KR", "000660", False, 10, 95, 80)], old, start, end)[0][2] is None
+
+
 def test_weekly_report_once(monkeypatch):
     sent, marked = [], set()
     monkeypatch.setattr("app.briefing_job.db.notice_sent", lambda conn, key: key in marked)
@@ -292,4 +302,42 @@ def test_saturday_morning_says_friday():
     text = briefing.morning_message(date(2026, 10, 24), [q], [h], [])
     assert "금요일 밤 미국장" in text and "(금요일 마감)" in text
     assert "밤사이" not in briefing.morning_message(date(2026, 10, 24), [q], [], [])
-    assert "밤사이 미국장" in briefing.morning_message(date(2026, 10, 26), [q], [h], [])
+    # 월요일 아침의 미국장은 토요일에 이미 보낸 금요일 장이에요.
+    mon = briefing.morning_message(date(2026, 10, 26), [q], [h], [], repeat=date(2026, 10, 23))
+    assert "🌙 <b>금요일 미국장</b> <i>(토요일에 보낸 것과 같아요)</i>" in mon and "밤사이" not in mon
+    assert "밤사이 미국장" in briefing.morning_message(date(2026, 10, 27), [q], [h], [])
+    # 금요일이 한국 휴장(한글날)이면 '금요일 마감'이라고 하지 않아요.
+    assert "(금요일 마감)" not in briefing.morning_message(date(2026, 10, 10), [q], [h], [])
+
+
+def test_no_saturday_morning_after_us_holiday_friday():
+    assert briefing.morning_due(datetime(2026, 12, 25, 23, 30, tzinfo=timezone.utc)) is None  # 토 12.26, 금 크리스마스
+    assert briefing.morning_due(datetime(2027, 3, 26, 23, 30, tzinfo=timezone.utc)) is None  # 토 3.27, 금 성금요일
+    assert briefing.morning_due(datetime(2026, 10, 9, 23, 30, tzinfo=timezone.utc)) == date(2026, 10, 10)  # 한국만 휴장
+
+
+def test_monday_morning_marks_friday_session_as_repeat(monkeypatch):
+    sent, settings = [], {}
+    monkeypatch.setattr("app.briefing_job.db.notice_sent", lambda conn, key: False)
+    monkeypatch.setattr("app.briefing_job.db.mark_notice", lambda conn, key: None)
+    monkeypatch.setattr("app.briefing_job.db.events_on", lambda conn, day: [])
+    monkeypatch.setattr("app.briefing_job.db.briefing_holdings", lambda conn: [])
+    monkeypatch.setattr("app.briefing_job.db.briefing_us", lambda conn: [])
+    monkeypatch.setattr("app.briefing_job.db.get_setting", lambda conn, key: settings.get(key))
+    monkeypatch.setattr("app.briefing_job.db.set_setting", lambda conn, key, v: settings.__setitem__(key, v))
+    monkeypatch.setattr("app.briefing_job.telegram.send", lambda token, chat, text, http, html=False: sent.append(text))
+
+    class Bar:
+        def __init__(self, d, c):
+            self.day, self.close = d, c
+
+    bars = [Bar(date(2026, 10, 22), 100.0), Bar(date(2026, 10, 23), 101.0)]
+    monkeypatch.setattr("app.briefing_job.prices.yahoo_daily", lambda s, http, span: bars)
+    job = BriefingJob(cfg(), None)
+    job.run(None, datetime(2026, 10, 23, 23, 5, tzinfo=timezone.utc))  # 토
+    assert "금요일 밤 미국장" in sent[-1] and settings["briefing_us_day"] == "2026-10-23"
+    job.run(None, datetime(2026, 10, 25, 23, 5, tzinfo=timezone.utc))  # 월
+    assert "금요일 미국장</b> <i>(토요일에 보낸 것과 같아요)</i>" in sent[-1] and "밤사이" not in sent[-1]
+    bars.append(Bar(date(2026, 10, 26), 102.0))
+    job.run(None, datetime(2026, 10, 26, 23, 5, tzinfo=timezone.utc))  # 화
+    assert "밤사이 미국장" in sent[-1] and settings["briefing_us_day"] == "2026-10-26"

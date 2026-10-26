@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { readStudyPick, requestStudyPick } from "@/app/actions";
 
 const MARKETS = [{ key: "ALL", label: "아무거나" }, { key: "KR", label: "국내" }, { key: "US", label: "미국" }];
-const WAIT_MS = 2000, GIVE_UP = 45; // 2초마다 최대 90초
+// 2초마다 최대 6분. 워커는 기업 공부 일을 한 줄로 해서, AI가 다른 노트 초안을 쓰는 중이면 몇 분 기다려요.
+const WAIT_MS = 2000, SLOW = 15, GIVE_UP = 180;
 
 export default function StudyDice() {
   const router = useRouter();
@@ -17,7 +18,7 @@ export default function StudyDice() {
 
   useEffect(() => {
     if (!id) return;
-    if (tries >= GIVE_UP) { setId(null); setError("워커가 답이 없어요. 워커가 켜져 있는지 확인해 주세요."); return; }
+    if (tries >= GIVE_UP) { setId(null); setError("AI가 다른 노트를 쓰느라 오래 걸려요. 조금 뒤 다시 눌러 주세요. 계속 이러면 워커가 켜져 있는지 봐 주세요."); return; }
     const timer = setTimeout(async () => {
       const r = await readStudyPick(id).catch(() => null);
       if (r?.status === "done" && r.ticker) { setId(null); router.push(`/watch/study?t=${encodeURIComponent(r.ticker)}`); router.refresh(); }
@@ -45,6 +46,7 @@ export default function StudyDice() {
         <span>🧭 안 해 본 업종·유형에서 고르기<small className="muted">지금까지 공부한 업종은 빼고 골라요</small></span>
       </label>
       <button type="button" onClick={roll} disabled={id !== null}>{id ? "AI가 고르는 중…" : "🎲 공부할 회사 골라 줘"}</button>
+      {id && tries >= SLOW && <p className="muted practice-small">AI가 다른 노트를 쓰는 중이라 조금 걸려요. 그대로 두시면 이어서 해요.</p>}
       {error && <p className="practice-warn practice-small">{error}</p>}
     </div>
   );

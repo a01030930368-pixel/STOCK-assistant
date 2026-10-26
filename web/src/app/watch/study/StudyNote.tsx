@@ -15,7 +15,7 @@ export type NoteData = {
   ticker: string; name: string; market: "KR" | "US"; status: string; confidence: number; fields: Fields; step: number; done: boolean;
   studiedOn: string | null; reviewOn: string | null; source: string; pick: Pick | null; ai: Draft | null; aiStatus: string | null; aiError: string | null;
   price: number | null; numbers: Numbers | null; knownSector: string | null; peers: PeerLine[]; versions: Version[]; events: { day: string; title: string }[];
-  filings: { day: string; title: string }[]; value: string | null; alerts: number[]; today: string;
+  filings: { day: string; title: string }[]; value: string | null; alerts: number[]; today: string; aiKey: boolean;
 };
 
 type Set = (f: Fields) => void;
@@ -32,22 +32,45 @@ export default function StudyNote({ note }: { note: NoteData }) {
   const [reviewOn, setReviewOn] = useState(note.reviewOn ?? "");
   const [ai, setAi] = useState({ draft: note.ai, status: note.aiStatus, error: note.aiError, fill: false });
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "fail">("");
+  const [tick, setTick] = useState(0);
   const money_ = (v: number) => (note.market === "US" ? usd(v) : `${won(v)}원`);
+  // 처음 적기(B)에서 친 글은 잠깐 뒤 저절로 저장해요. dirty: 아직 저장 안 한 글이 있음.
+  const fieldsRef = useRef(fields);
+  const dirty = useRef(false);
+  useEffect(() => { fieldsRef.current = fields; }, [fields]);
+  const edit: Set = (f) => { dirty.current = true; setFields(f); };
+  async function flush() {
+    if (!dirty.current) return true;
+    dirty.current = false;
+    const ok = await save(fieldsRef.current);
+    if (!ok) dirty.current = true;
+    return ok;
+  }
+  useEffect(() => {
+    if (!dirty.current) return;
+    const timer = setTimeout(() => { void flush(); }, 1500);
+    return () => clearTimeout(timer);
+  }, [fields]);
 
-  // AI 초안을 부탁해 두었으면 3초마다 확인해요.
+  // AI 초안을 부탁해 두었으면 3초마다 확인해요. 못 읽으면(네트워크 등) 다음에 다시 봐요.
   useEffect(() => {
     if (ai.status !== "pending") return;
     const timer = setTimeout(async () => {
+      // 전부 채우기는 저장된 칸 기준으로 빈 칸에만 들어가요. 적다 만 글을 먼저 저장해 둬요.
+      if (dirty.current) await flush();
       const r = await readStudyDraft(note.ticker).catch(() => null);
-      if (r?.filled) router.refresh();
-      else if (r) setAi((a) => ({ ...a, draft: (r.ai as Draft) ?? null, status: r.status, error: r.error }));
+      if (!r) { setTick((t) => t + 1); return; }
+      // 채워졌으면 서버의 칸으로 바꿔요. 들고 있던 옛 칸으로 다음 저장 때 덮지 않게.
+      if (r.filled && r.fields) { dirty.current = false; setFields(r.fields); }
+      setAi((a) => ({ ...a, draft: (r.ai as Draft) ?? null, status: r.status, error: r.error, fill: r.filled ? false : a.fill }));
+      if (r.filled) router.refresh();
     }, 3000);
     return () => clearTimeout(timer);
-  }, [ai, note.ticker, router]);
+  }, [ai, tick, note.ticker, router]);
 
   async function askAi(fill = false) {
     // 전부 채우기는 지금 적은 칸을 먼저 저장해 두고, 초안은 빈 칸에만 들어가요.
-    if (fill) await save(fields);
+    if (fill) { dirty.current = false; await save(fieldsRef.current); }
     await requestStudyDraft(note.ticker, fill);
     setAi((a) => ({ ...a, status: "pending", error: null, fill }));
   }
@@ -91,16 +114,23 @@ export default function StudyNote({ note }: { note: NoteData }) {
         <span className="study-saving">{saving === "saving" ? "저장 중…" : saving === "saved" ? "저장했어요" : saving === "fail" ? "저장 못 했어요" : ""}</span>
       </div>
 
-      <KindRow f={fields} known={note.knownSector} draft={ai.draft} onSave={async (next) => { setFields(next); await save(next); }} />
+      <KindRow f={fields} known={note.knownSector} draft={ai.draft} onSave={async (kind) => {
+        // 업종·유형만 지금 칸에 얹어요. 고치기를 연 뒤 다른 칸에 적은 글을 옛 글로 덮지 않게.
+        const next = { ...fieldsRef.current, ...kind };
+        dirty.current = false;
+        fieldsRef.current = next;
+        setFields(next);
+        await save(next);
+      }} />
       {note.pick && <PickCard pick={note.pick} />}
-      <AiBar status={ai.status} error={ai.error} has={Boolean(ai.draft)} fill={ai.fill} searched={ai.draft?.searched} news={ai.draft?.news} searchError={ai.draft?.searchError} onAsk={askAi} />
+      <AiBar status={ai.status} error={ai.error} has={Boolean(ai.draft)} fill={ai.fill} searched={ai.draft?.searched} news={ai.draft?.news} searchError={ai.draft?.searchError} aiKey={note.aiKey} onAsk={askAi} />
 
       {note.done ? (
         <OnePage note={note} fields={fields} setFields={setFields} save={save} draft={ai.draft} money_={money_} />
       ) : (
-        <Wizard note={note} fields={fields} setFields={setFields} step={step} count={count} draft={ai.draft} money_={money_}
-          go={async (n) => { await save(fields, { step: n }); setStep(n); window.scrollTo({ top: 0 }); }}
-          finish={async () => { if (await save(fields, { finish: true })) router.refresh(); }} />
+        <Wizard note={note} fields={fields} setFields={edit} step={step} count={count} draft={ai.draft} money_={money_}
+          go={async (n) => { dirty.current = false; await save(fields, { step: n }); setStep(n); window.scrollTo({ top: 0 }); }}
+          finish={async () => { dirty.current = false; if (await save(fields, { finish: true })) router.refresh(); }} />
       )}
     </div>
   );
@@ -129,10 +159,11 @@ function searchNote(news?: number, searchError?: string): string {
   return news ? `무료 AI 키라 웹 검색 대신 ${read}` : `이번엔 ${read}`;
 }
 
-function AiBar({ status, error, has, fill, searched, news, searchError, onAsk }: {
-  status: string | null; error: string | null; has: boolean; fill: boolean; searched?: boolean; news?: number; searchError?: string; onAsk: (fill?: boolean) => void;
+function AiBar({ status, error, has, fill, searched, news, searchError, aiKey, onAsk }: {
+  status: string | null; error: string | null; has: boolean; fill: boolean; searched?: boolean; news?: number; searchError?: string; aiKey: boolean; onAsk: (fill?: boolean) => void;
 }) {
-  if (status === "none") return null;
+  // 'none'은 그때 AI 키가 없었다는 뜻. 나중에 키를 넣었으면 다시 부탁할 수 있게 보여 줘요.
+  if (status === "none" && !aiKey) return null;
   return (
     <div className="study-aibar">
       {status === "pending" ? (
@@ -155,7 +186,7 @@ function AiBar({ status, error, has, fill, searched, news, searchError, onAsk }:
 }
 
 // 업종 · 주식 유형: 노트 맨 위 한 줄. 업종은 비어 있으면 증권사 분류를 보여 줘요.
-function KindRow({ f, known, draft, onSave }: { f: Fields; known: string | null; draft: Draft | null; onSave: (f: Fields) => Promise<void> }) {
+function KindRow({ f, known, draft, onSave }: { f: Fields; known: string | null; draft: Draft | null; onSave: (kind: { sector: string; styles: string[] }) => Promise<void> }) {
   const [edit, setEdit] = useState(false);
   const [work, setWork] = useState(f);
   const sector = f.sector || known || "";
@@ -173,7 +204,7 @@ function KindRow({ f, known, draft, onSave }: { f: Fields; known: string | null;
             {" "}<button type="button" className="chip-btn" onClick={() => setWork(applyDraft(work, draft, ["kind"]))}>빈 칸에 넣기</button></p>
         ) : null}
         <div className="study-edit-acts">
-          <button type="button" onClick={async () => { await onSave(work); setEdit(false); }}>저장</button>
+          <button type="button" onClick={async () => { await onSave({ sector: work.sector, styles: work.styles }); setEdit(false); }}>저장</button>
           <button type="button" className="soft" onClick={() => setEdit(false)}>취소</button>
         </div>
       </div>
@@ -619,13 +650,31 @@ function RisksEd({ f, set }: { f: Fields; set: Set }) {
   );
 }
 
+// 가격 칸: "12." 처럼 치는 중인 소수점이 지워지지 않게 칸 글자를 따로 들고 있어요(PctInput과 같은 방식).
+function PriceInput({ value, onChange, placeholder }: { value: number | null; onChange: (v: number | null) => void; placeholder: string }) {
+  const [text, setText] = useState(value === null ? "" : String(value));
+  const [prev, setPrev] = useState(value);
+  if (value !== prev) {
+    setPrev(value);
+    if ((Number(text) || null) !== value) setText(value === null ? "" : String(value));
+  }
+  return (
+    <input value={text} inputMode="decimal" placeholder={placeholder} onChange={(e) => {
+      const t = (e.target.value.replace(/[^\d.]/g, "").match(/^\d*(\.\d*)?/) ?? [""])[0];
+      setText(t);
+      const n = Number(t);
+      onChange(n > 0 ? n : null);
+    }} />
+  );
+}
+
 function PriceEd({ f, set, note, money_ }: { f: Fields; set: Set; note: NoteData; money_: (v: number) => string }) {
-  const num = (v: string) => { const n = Number(v.replace(/[^\d.]/g, "")); return n > 0 ? n : null; };
+  const unit = note.market === "US" ? "$" : "원";
   return (
     <div className="study-form">
       <div className="study-line">
-        <label className="study-lab">싸다 (이 아래면)<input value={f.cheap ?? ""} onChange={(e) => set({ ...f, cheap: num(e.target.value) })} inputMode="decimal" placeholder={note.market === "US" ? "$" : "원"} /></label>
-        <label className="study-lab">비싸다 (이 위면)<input value={f.pricey ?? ""} onChange={(e) => set({ ...f, pricey: num(e.target.value) })} inputMode="decimal" placeholder={note.market === "US" ? "$" : "원"} /></label>
+        <label className="study-lab">싸다 (이 아래면)<PriceInput value={f.cheap} onChange={(cheap) => set({ ...f, cheap })} placeholder={unit} /></label>
+        <label className="study-lab">비싸다 (이 위면)<PriceInput value={f.pricey} onChange={(pricey) => set({ ...f, pricey })} placeholder={unit} /></label>
       </div>
       <p className="muted practice-small">지금 {note.price !== null ? money_(note.price) : "-"}{note.value && ` · ${note.value}`}</p>
       <input value={f.priceWhy} onChange={(e) => set({ ...f, priceWhy: e.target.value })} placeholder="왜 그 가격이에요? (예: PER 8배, 지난 5년 밴드 아래쪽)" />
