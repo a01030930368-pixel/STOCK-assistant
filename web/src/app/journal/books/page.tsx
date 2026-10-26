@@ -28,7 +28,7 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
   const edited = (b: Book) => {
     const times = b.pages.filter((p) => p.entryId !== null).map((p) => edits.get(`${p.side}:${p.entryId}`) ?? "");
     const r = reviews.get(b.key)?.edited;
-    return [...times, ...notesOf(b, notes).map((n) => n.edited), r ?? ""].reduce((a, x) => (x > a ? x : a), "") || null;
+    return [...times, ...notesOf(b, notes, books).map((n) => n.edited), r ?? ""].reduce((a, x) => (x > a ? x : a), "") || null;
   };
   const shown = sortBooks(books.filter((b) => onShelf(b, shelf, (k) => reviews.has(k))), sort, { stars: (k) => reviews.get(k)?.stars ?? null, edited });
   const open = findBook(books, params.b);
@@ -72,7 +72,7 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
         <div className="book-view">
           {open ? (
             <BookView b={open} review={reviews.get(open.key)} editing={params.edit === "review"} back={href({ s: shelf })} day={day}
-              notes={notesOf(open, notes)} editNote={Number(params.note) || null} />
+              notes={notesOf(open, notes, books)} books={books} editNote={Number(params.note) || null} />
           ) : (
             <p className="muted">왼쪽 책장에서 한 권을 고르면 여기에 펼쳐져요. 한 권은 그 종목을 처음 산 날부터 전부 판 날까지예요.</p>
           )}
@@ -87,8 +87,8 @@ function period(b: Book, day: string): string {
   return `${from} → ${b.end ? shortDay(b.end, day) : "진행 중"}${b.days !== null ? ` · ${b.days}일` : ""}`;
 }
 
-async function BookView({ b, review, editing, back, day, notes, editNote }: {
-  b: Book; review?: Review; editing: boolean; back: string; day: string; notes: BookNote[]; editNote: number | null;
+async function BookView({ b, review, editing, back, day, notes, books, editNote }: {
+  b: Book; review?: Review; editing: boolean; back: string; day: string; notes: BookNote[]; books: Book[]; editNote: number | null;
 }) {
   const entryHref = (p: Page) => `/journal/books/entry?${new URLSearchParams({ b: b.key, e: p.id })}`;
   const first = b.pages.find((p) => p.side === "buy");
@@ -119,7 +119,7 @@ async function BookView({ b, review, editing, back, day, notes, editNote }: {
         {timeline(b.pages, notes).map((it) => {
           if (it.kind === "note") {
             return it.note.id === editNote
-              ? <NoteForm key={`n${it.note.id}`} b={b} day={day} note={it.note} />
+              ? <NoteForm key={`n${it.note.id}`} b={b} books={books} day={day} note={it.note} />
               : <NoteItem key={`n${it.note.id}`} b={b} day={day} note={it.note} />;
           }
           const p = it.page;
@@ -137,7 +137,7 @@ async function BookView({ b, review, editing, back, day, notes, editNote }: {
           </Link>
           );
         })}
-        {!editNote && <NoteForm b={b} day={day} />}
+        {!editNote && <NoteForm b={b} books={books} day={day} />}
       </div>
 
       {b.end ? (
@@ -165,9 +165,11 @@ function NoteItem({ b, day, note }: { b: Book; day: string; note: BookNote }) {
 }
 
 // 새 메모(맨 아래) 또는 고치는 메모. 날짜는 이 권 안에서만 고를 수 있어요.
-function NoteForm({ b, day, note }: { b: Book; day: string; note?: BookNote }) {
-  const { min, max } = noteRange(b);
-  const last = max && max < day ? max : day;
+function NoteForm({ b, books, day, note }: { b: Book; books: Book[]; day: string; note?: BookNote }) {
+  const { min, max } = noteRange(b, books);
+  // 다 판 권의 새 메모는 판 날을 먼저 보여 줘요(그 뒤 날짜도 고를 수 있어요).
+  const top = max && max < day ? max : day;
+  const last = b.end && b.end < top ? b.end : top;
   return (
     <div id={note ? `note-${note.id}` : "note-new"} className="tl-item tl-note tl-note-form">
       <span className="tl-dot note" />
@@ -176,7 +178,7 @@ function NoteForm({ b, day, note }: { b: Book; day: string; note?: BookNote }) {
         {note && <input type="hidden" name="noteId" value={note.id} />}
         <div className="tl-note-top">
           <b>{note ? "메모 고치기" : "메모 남기기"}</b>
-          <input type="date" name="day" required defaultValue={note?.day ?? last} min={min ?? undefined} max={max ?? day} aria-label="날짜" />
+          <input type="date" name="day" required defaultValue={note?.day ?? last} min={min ?? undefined} max={max && max < day ? max : day} aria-label="날짜" />
         </div>
         <textarea name="body" required rows={note ? 4 : 2} maxLength={2000} defaultValue={note?.body ?? ""}
           placeholder="중요한 일이 있었으면 적어 두세요. 예: 실적 발표에서 HBM 매출이 두 배, 다음 날 +8%" />

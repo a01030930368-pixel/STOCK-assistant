@@ -35,6 +35,30 @@ export function curve(trades: Trade[], bars: Bar[], bench: Bar[]): Curve | null 
   return out;
 }
 
+// 일봉(price_history)은 주식 분할을 반영해 고친 값인데 체결 값은 그날 실제 값이라, 분할 전 체결은 몇 배 차이가 나요.
+// 체결 값이 그날(없으면 그 앞) 종가와 1.8배 넘게, 또는 0.55배 밑으로 다르면 분할로 보고 가까운 분할 비율로 맞춰요
+// (값은 나누고 수량은 곱해서 넣은 돈은 그대로). 어느 비율과도 안 맞으면 맞출 수 없어서 null이에요.
+const SPLITS = [2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 30, 40, 50, 100];
+export function splitFactor(price: number, close: number | undefined): number | null {
+  if (!close || !(price > 0) || !(close > 0)) return 1;
+  const r = price / close;
+  if (r <= 1.8 && r >= 0.55) return 1;
+  const near = (x: number) => Math.abs(Math.log(r / x));
+  const best = [...SPLITS, ...SPLITS.map((x) => 1 / x)].reduce((a, x) => (near(x) < near(a) ? x : a));
+  return near(best) < Math.log(1.1) ? best : null;
+}
+
+// 분할을 맞춘 체결(같은 순서). price가 null이면 그 체결은 일봉과 맞출 수 없어요.
+export function adjustSplits(trades: Trade[], bars: Bar[]): { trades: (Trade & { factor: number | null })[]; split: boolean; mismatch: boolean } {
+  const out = trades.map((t) => {
+    let close: number | undefined;
+    for (const b of bars) { if (b.day > t.day) break; close = b.close; }
+    const f = splitFactor(t.price, close);
+    return f === null || f === 1 ? { ...t, factor: f } : { ...t, price: t.price / f, quantity: t.quantity * f, factor: f };
+  });
+  return { trades: out, split: out.some((t) => t.factor !== null && t.factor !== 1), mismatch: out.some((t) => t.factor === null) };
+}
+
 // 다 판 권은 판 날(그 날 일봉이 없으면 그 앞)까지만 세요. 그래야 내 결과·계속 보유·지수가 같은 기간이 돼요. 보유 중이면 마지막 날.
 export function endIndex(c: Curve, end: string | null): number {
   if (!end) return c.days.length - 1;

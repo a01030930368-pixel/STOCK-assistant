@@ -111,5 +111,10 @@ describe("study notes", () => {
 
   it("puts the review date three months out", () => {
     expect(reviewDefault("2026-10-22")).toBe("2027-01-22");
+    // 달 끝은 넘치지 않고 그달 마지막 날로
+    expect(reviewDefault("2026-11-30")).toBe("2027-02-28");
+    expect(reviewDefault("2027-11-30")).toBe("2028-02-29");
+    expect(reviewDefault("2026-05-31")).toBe("2026-08-31");
+    expect(reviewDefault("2026-03-31")).toBe("2026-06-30");
   });
 });

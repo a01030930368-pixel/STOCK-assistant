@@ -24,6 +24,15 @@ async function nameOf(ticker: string): Promise<string> {
   return row?.name ?? ticker;
 }
 
+function poolNote(p: { waiting: string; failed: string; skipped: string }): string {
+  const parts = [
+    Number(p.waiting) > 0 && `${p.waiting}개는 워커가 1분에 2개씩 받는 중`,
+    Number(p.failed) > 0 && `${p.failed}개는 못 받아서 나중에 다시 받아요`,
+    Number(p.skipped) > 0 && `국내 ${p.skipped}개는 키움 키가 없어서 못 받아요`,
+  ].filter(Boolean);
+  return parts.length ? ` (${parts.join(" · ")})` : "";
+}
+
 // 🎲: 일봉이 넉넉한 종목 중 하나, 그 안의 아무 시점
 async function rollDice(): Promise<string | null> {
   const tickers = await safe<{ ticker: string }>(
@@ -56,8 +65,14 @@ export default async function PracticePage({ searchParams }: { searchParams: Pro
     else redirect(`/watch/practice?g=${encodeGame({ ticker, start: days[at], blind: false })}`);
   }
 
-  const [pool] = await safe<{ ready: string; total: string }>(
-    "SELECT count(*) FILTER (WHERE fetched_at IS NOT NULL AND error IS NULL) AS ready, count(*) AS total FROM practice_pool",
+  // 받은 것 / 받는 중 / 실패 / 키움 키가 없어 못 받는 국내 종목을 따로 세요.
+  const [pool] = await safe<{ ready: string; total: string; waiting: string; failed: string; skipped: string }>(
+    `WITH off AS (SELECT coalesce((SELECT value = 'true'::jsonb FROM app_settings WHERE key = 'practice_kr_off'), false) AS kr_off)
+     SELECT count(*) FILTER (WHERE fetched_at IS NOT NULL AND error IS NULL) AS ready, count(*) AS total,
+       count(*) FILTER (WHERE fetched_at IS NULL AND NOT (kr_off AND market = 'KR')) AS waiting,
+       count(*) FILTER (WHERE error IS NOT NULL) AS failed,
+       count(*) FILTER (WHERE fetched_at IS NULL AND kr_off AND market = 'KR') AS skipped
+     FROM practice_pool, off`,
   );
   const [played] = await safe<{ n: string }>("SELECT count(*) AS n FROM practice_sessions");
   const names = await safe<{ ticker: string; name: string }>(
@@ -103,7 +118,7 @@ export default async function PracticePage({ searchParams }: { searchParams: Pro
           <Link className="button practice-dice" href="/watch/practice?dice=1">🎲 아무 종목</Link>
           <p className="muted practice-small">
             🎲는 종목 이름과 날짜를 가리고, 가격도 시작 봉을 100으로 바꿔 보여 줘요. 차트 모양만 보고 판단하는 연습이에요.
-            {pool && Number(pool.total) > 0 && ` 연습용 종목 ${pool.ready}/${pool.total}개 준비됨${Number(pool.ready) < Number(pool.total) ? " (워커가 1분에 2개씩 받는 중)" : ""}.`}
+            {pool && Number(pool.total) > 0 && ` 연습용 종목 ${pool.ready}/${pool.total}개 준비됨${poolNote(pool)}.`}
           </p>
           {"none" in sp && <p className="practice-warn">아직 연습할 만큼 일봉이 쌓인 종목이 없어요. 워커가 연습용 종목 일봉을 받는 중이니 조금 뒤에 다시 눌러 주세요.</p>}
           <form className="row practice-pick" action="/watch/practice">

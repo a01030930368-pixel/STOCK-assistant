@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from . import calendar
+
 KST = ZoneInfo("Asia/Seoul")
 WEEK = "월화수목금토일"
 EVENING = time(20, 0)
@@ -71,9 +73,11 @@ class Holding:
 
 def morning_due(now: datetime) -> date | None:
     """월~토 아침 8시~11시면 오늘 날짜를, 아니면 None을 돌려줍니다.
-    금요일 미국장은 토요일 새벽에 끝나서 토요일 아침에도 보내요."""
+    금요일 미국장은 토요일 새벽에 끝나서 토요일 아침에도 보내요. 금요일이 미국 휴장이면 토요일엔 안 보내요."""
     local = now.astimezone(KST)
     if local.weekday() == 6 or not (MORNING <= local.time() < MORNING_UNTIL):
+        return None
+    if local.weekday() == 5 and calendar.is_holiday("US", local.date() - timedelta(days=1)):
         return None
     return local.date()
 
@@ -155,23 +159,28 @@ AI_NOTE = "<i>🤖 AI 한마디는 참고용이에요. 사고팔지는 직접 �
 
 def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], items: list[Item],
                     us: list[UsStock] | None = None, fx: float | None = None, fx_prev: float | None = None,
-                    term: str | None = None) -> str:
+                    term: str | None = None, repeat: date | None = None) -> str:
     """텔레그램 HTML 모양(굵게·고정폭 표)으로 만들어요. 이름·뉴스 같은 글은 모두 이스케이프해요.
-    term은 terms.message가 만든(이미 이스케이프한) 오늘의 용어예요."""
+    term은 terms.message가 만든(이미 이스케이프한) 오늘의 용어예요.
+    repeat은 지난 브리핑에서 이미 보낸 미국장 날짜예요(월요일 아침의 금요일 장 등). 있으면 '밤사이'라고 하지 않아요."""
     e = html.escape
     night = "금요일 밤" if day.weekday() == 5 else "밤사이"
+    again = ""
+    if repeat:
+        night = f"{WEEK[repeat.weekday()]}요일"
+        again = " <i>(토요일에 보낸 것과 같아요)</i>" if day.weekday() == 0 and repeat.weekday() == 4 else " <i>(지난번에 보낸 것과 같아요)</i>"
     lines = [f"☀️ <b>좋은 아침이에요</b> · {day_label(day)}"]
     if indexes:
         rows, col = [], max(width(q.name) for q in indexes) + 1
         for q in indexes:
             tail = f"  {q.last:,.0f}원" if q.name == "원/달러" else ""
             rows.append(f"{e(pad(q.name, col))}{dot(q.change_pct)} {_pct(q.change_pct):>6}{tail}")
-        lines += ["", f"🌙 <b>{night} 미국장</b>", "<pre>" + "\n".join(rows) + "</pre>"]
+        lines += ["", f"🌙 <b>{night} 미국장</b>{again}", "<pre>" + "\n".join(rows) + "</pre>"]
     us = us or []
     if us:
         total = us_total(us, fx, fx_prev)
         if total:
-            lines += ["", f"💵 <b>{night} 내 미국 주식</b>", f"<b>{dot(total.won)} {_signed_won(total.won)}</b>  ({_pct(total.pct)})"]
+            lines += ["", f"💵 <b>{night} 내 미국 주식</b>{again}", f"<b>{dot(total.won)} {_signed_won(total.won)}</b>  ({_pct(total.pct)})"]
             sub = f"평가액 {_won_short(total.value)}"
             if abs(total.fx_effect) >= 10_000:
                 sub += f" · 환율 효과 {_signed_won(total.fx_effect)}"
@@ -193,7 +202,7 @@ def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], it
     rest = [h for h in holdings if h.market == "KR" or not us]
     if rest:
         title = "💼 <b>국내 종목</b>" if us else "💼 <b>내 종목</b>"
-        if day.weekday() == 5:
+        if day.weekday() == 5 and not calendar.is_holiday("KR", day - timedelta(days=1)):
             title += " <i>(금요일 마감)</i>"
         col = max(width(h.name) for h in rest) + 1
         rows = [f"{e(pad(h.name, col))}{dot(h.day_change_pct)} {_pct(h.day_change_pct):>6}  평단 {_pct(h.pnl_pct)}" for h in rest]
@@ -311,16 +320,25 @@ def _won_short(v: float) -> str:
 def week_moves(rows, trades, start: date, end: date) -> list[tuple]:
     """보유 종목의 이번 주 등락: (이름, %, 이번 주에 처음 산 날 또는 None).
     이번 주에 새로 산 종목은 지난주 종가가 아니라 이번 주에 산 값(체결 평균)에서부터 셈해요.
+    이번 주에 다 팔았다가 다시 샀으면 마지막으로 0주가 된 뒤에 산 것만 평균내요.
     rows는 db.weekly_inputs의 보유 종목 줄, trades는 키움 체결(books.Trade)이에요. ISA 체결은 없어서 ISA는 주간 등락 그대로예요."""
     out = []
     for name, market, ticker, isa, quantity, cur, prev in rows:
         if not cur:
             continue
-        buys = [t for t in trades if not isa and t.market == market and t.ticker == ticker and start <= t.day <= end]
-        bought = sum(float(t.quantity) for t in buys if t.side == "buy")
-        sold = sum(float(t.quantity) for t in buys if t.side == "sell")
-        paid = [t for t in buys if t.side == "buy"]
-        if paid and float(quantity) - bought + sold <= 1e-9:
+        week = sorted((t for t in trades if not isa and t.market == market and t.ticker == ticker and start <= t.day <= end),
+                      key=lambda t: (t.day, t.time or ""))
+        # 지금 수량에서 거꾸로 거슬러 올라가며 마지막으로 0주였던 때를 찾아요.
+        pos, cut = float(quantity), None
+        for i in range(len(week) - 1, -1, -1):
+            t = week[i]
+            pos += float(t.quantity) if t.side == "sell" else -float(t.quantity)
+            if pos <= 1e-9:
+                cut = i
+                break
+        paid = [t for t in week[cut:] if t.side == "buy"] if cut is not None else []  # cut번째 체결 직전이 0주
+        if paid:
+            bought = sum(float(t.quantity) for t in paid)
             base = sum(float(t.quantity) * float(t.price) for t in paid) / bought
             out.append((name, (float(cur) / base - 1) * 100, min(t.day for t in paid)))
         elif prev:

@@ -109,9 +109,13 @@ def tick(cfg: config.Config, conn: psycopg.Connection, kiwoom: KiwoomClient | No
     shapes_ = db.chart_shapes(conn)
     if shapes_:
         cache: dict[str, list[str]] = {}
-        days_of = lambda t: cache.setdefault(t, db.trading_days(conn, t))
-        today = now.astimezone(timezone(timedelta(hours=9))).date().isoformat()
-        for shape, price, line, send in shapes.due(shapes_, prices, days_of, today, now):
+
+        def days_of(t: str) -> list[str]:
+            if t not in cache:
+                cache[t] = db.trading_days(conn, t)
+            return cache[t]
+        # 미국 일봉은 뉴욕 날짜로 쌓여서, 오늘도 종목 시장 기준으로 봐요(한국 자정 뒤 한 봉 밀리던 것).
+        for shape, price, line, send in shapes.due(shapes_, prices, days_of, lambda t: shapes.today_of(t, now), now):
             if send:
                 text = shapes.message(shape, price, line)
                 if cfg.telegram_bot_token and cfg.telegram_chat_id:

@@ -173,6 +173,8 @@ function Mini({ cell, period, settings, layout, onMount, onCross, onRange }: {
         rightPriceScale: { borderColor: "#26262b", scaleMargins: { top: 0.08, bottom: 0.22 } },
         timeScale: { borderColor: "#26262b", rightOffset: 3, minBarSpacing: 1.5 },
         localization: { locale: "ko-KR", dateFormat: "yyyy-MM-dd" },
+        // 폰에서 위아래로 쓸면 차트가 아니라 화면이 내려가요. 옆으로 끌기는 그대로.
+        handleScroll: { vertTouchDrag: false },
       });
       const price = chart.addSeries(lc.CandlestickSeries, {
         upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, priceLineColor: GOLD,

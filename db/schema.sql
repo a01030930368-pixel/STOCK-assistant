@@ -432,7 +432,9 @@ CREATE TABLE practice_pool (
   name        TEXT NOT NULL DEFAULT '',
   market      TEXT NOT NULL CHECK (market IN ('KR', 'US')),
   fetched_at  TIMESTAMPTZ,
-  error       TEXT
+  error       TEXT,
+  errors      INTEGER NOT NULL DEFAULT 0,  -- 연달아 실패한 횟수
+  retry_at    TIMESTAMPTZ                  -- 실패하면 이때 다시 받아 봐요
 );
 CREATE TABLE practice_sessions (
   id          SERIAL PRIMARY KEY,

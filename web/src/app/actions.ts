@@ -6,8 +6,9 @@ import { pool, query } from "@/lib/db";
 import { optionalNumber, validateMacro, type MacroInput } from "@/lib/macro";
 import { rulesFromForm } from "@/lib/screener";
 import { averageBefore, averagePrice, holdingDays, marketOf as tickerMarket, remainingQuantity, returnPct, sameQuantity, validateBuy, type BuyInput, type Fill } from "@/lib/journal";
-import type { Book } from "@/lib/books";
-import { loadBook } from "@/lib/booksData";
+import { clampNoteDay, findBook, type Book } from "@/lib/books";
+import { loadBook, loadBooks } from "@/lib/booksData";
+import { today as seoulToday } from "@/lib/format";
 import { buildCells, type Cell } from "@/lib/brief";
 import { decodeGame, score, STEPS, type Decision } from "@/lib/practice";
 import { ALL_PARTS, applyDraft, cleanFields, reviewDefault, STATUSES, type Draft, type Fields } from "@/lib/study";
@@ -351,10 +352,15 @@ const NOTE_MAX = 2000;
 export async function saveBookNote(form: FormData) {
   const key = text(form, "bookKey");
   const [market, ticker] = key.split(":");
-  const day = text(form, "day");
+  const rawDay = text(form, "day");
   const body = text(form, "body").slice(0, NOTE_MAX);
   const id = num(form, "noteId");
-  if ((market !== "KR" && market !== "US") || !ticker || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !body) redirect(bookHref(key));
+  if ((market !== "KR" && market !== "US") || !ticker || !body) redirect(bookHref(key));
+  // 날짜는 진짜 있는 날인지 보고(2026-02-30은 안 돼요), 그 권 안으로 맞춰요.
+  const books = await loadBooks();
+  const book = findBook(books, key);
+  const day = book ? clampNoteDay(rawDay, book, books, seoulToday()) : null;
+  if (!day) redirect(bookHref(key));
   const [row] = id > 0
     ? await query<{ id: number }>("UPDATE book_notes SET day = $2, body = $3, updated_at = now() WHERE id = $1 RETURNING id", [id, day, body])
     : await query<{ id: number }>("INSERT INTO book_notes (market, ticker, day, body) VALUES ($1, $2, $3, $4) RETURNING id", [market, ticker, day, body]);
@@ -703,9 +709,10 @@ export async function readBrief(ticker: string) {
 }
 
 // 관심종목 › 연습하기 기록. 점수는 화면이 보낸 값 대신 저장된 일봉으로 다시 셈해요.
-export async function savePractice(input: { game: string; steps: number; decisions: Decision[] }): Promise<number | null> {
+export async function savePractice(input: { game: string; steps: number; decisions: Decision[]; blind?: boolean }): Promise<number | null> {
   const game = decodeGame(input.game);
-  if (!game || !Number.isInteger(input.steps) || input.steps < 0 || input.steps > STEPS || !Array.isArray(input.decisions)) return null;
+  // 한 봉도 안 넘긴 판은 남기지 않아요.
+  if (!game || !Number.isInteger(input.steps) || input.steps < 1 || input.steps > STEPS || !Array.isArray(input.decisions)) return null;
   const rows = await query<{ day: string; close: string }>(
     "SELECT to_char(day, 'YYYY-MM-DD') AS day, close FROM price_history WHERE ticker = $1 ORDER BY day", [game.ticker],
   );
@@ -724,7 +731,8 @@ export async function savePractice(input: { game: string; steps: number; decisio
   const [row] = await query<{ id: number }>(
     `INSERT INTO practice_sessions (ticker, name, start_day, end_day, blind, trades, return_pct, hold_pct, calls, hits)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-    [game.ticker, named?.name ?? "", game.start, rows[end].day, game.blind,
+    // 🎲 정답을 본 뒤 다시 한 판은 가린 연습이 아니에요(화면이 blind: false로 보내요).
+    [game.ticker, named?.name ?? "", game.start, rows[end].day, game.blind && input.blind !== false,
       JSON.stringify(r.trades.map((t) => ({ day: rows[t.i].day, side: t.side, price: t.price }))), r.returnPct, r.holdPct, r.calls, r.hits],
   );
   revalidatePath("/watch/practice");
@@ -884,12 +892,13 @@ export async function settleStudyFill(ticker: string): Promise<boolean> {
   return saveStudy({ ticker: t, fields: applyDraft(cleanFields(row.fields), row.ai, ALL_PARTS), finish: true });
 }
 
-export async function readStudyDraft(ticker: string): Promise<{ status: string | null; ai: unknown; error: string | null; filled: boolean } | null> {
+// filled면 채운 뒤의 칸(fields)도 같이 돌려줘서, 화면이 들고 있던 옛 칸으로 덮어쓰지 않게 해요.
+export async function readStudyDraft(ticker: string): Promise<{ status: string | null; ai: unknown; error: string | null; filled: boolean; fields: Fields | null; done: boolean } | null> {
   const filled = await settleStudyFill(ticker);
-  const [row] = await query<{ ai_status: string | null; ai: unknown; ai_error: string | null }>(
-    "SELECT ai_status, ai, ai_error FROM study_notes WHERE ticker = $1", [String(ticker ?? "").toUpperCase()],
+  const [row] = await query<{ ai_status: string | null; ai: unknown; ai_error: string | null; fields: unknown; done: boolean }>(
+    "SELECT ai_status, ai, ai_error, fields, done FROM study_notes WHERE ticker = $1", [String(ticker ?? "").toUpperCase()],
   ).catch(() => []);
-  return row ? { status: row.ai_status, ai: row.ai, error: row.ai_error, filled } : null;
+  return row ? { status: row.ai_status, ai: row.ai, error: row.ai_error, filled, fields: filled ? cleanFields(row.fields, true) : null, done: row.done } : null;
 }
 
 export async function addStudyPeer(form: FormData) {

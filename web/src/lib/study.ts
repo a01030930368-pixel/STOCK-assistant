@@ -185,11 +185,11 @@ export function pastSelf(versions: Version[], now: Date, priceNow: number | null
 
 export const pastLabel = (p: PastSelf) => (p.months >= 1 ? `${p.months}개월 전 나는` : `${p.days}일 전 나는`);
 
-// 다시 볼 날 기본값: 다 적은 날부터 석 달 뒤
+// 다시 볼 날 기본값: 다 적은 날부터 석 달 뒤. 그달에 없는 날(11-30 → 2월)은 그달 마지막 날로.
 export function reviewDefault(today: string): string {
-  const d = new Date(`${today}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + 3);
-  return d.toISOString().slice(0, 10);
+  const [y, m, day] = today.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m + 3, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m + 2, Math.min(day, last))).toISOString().slice(0, 10);
 }
 
 // 매출 비중은 소수점 한 자리까지 (예: 72.4%)

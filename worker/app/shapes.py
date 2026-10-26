@@ -2,9 +2,11 @@
 
 점은 [날짜, 봉 안 위치(0~1), 가격]. 선 값은 두 점을 이은 직선을 거래일 번호로 늘려서 구해요.
 채널은 세 번째 점이 평행선 높이예요."""
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from .alerts import format_price
 from .levels import COOLDOWN
@@ -30,7 +32,9 @@ def _x(days: dict[str, int], point) -> float | None:
 
 
 def lines_at(shape: Shape, days: dict[str, int], at: float) -> list[float]:
-    """at번째 봉 자리에서 선(채널이면 두 선)의 가격. 점의 날짜가 일봉에 없으면 빈 목록."""
+    """at번째 봉 자리에서 선(채널이면 두 선)의 가격. 점의 날짜가 일봉에 없으면 빈 목록.
+
+    두 점을 어느 쪽부터 찍었든 같은 직선이에요. 화면도 늘 오른쪽(오늘 쪽)으로 늘려 그려요."""
     if len(shape.points) < 2:
         return []
     x1, x2 = _x(days, shape.points[0]), _x(days, shape.points[1])
@@ -46,13 +50,26 @@ def lines_at(shape: Shape, days: dict[str, int], at: float) -> list[float]:
     return out
 
 
+NY, KST = ZoneInfo("America/New_York"), ZoneInfo("Asia/Seoul")
+
+
+def today_of(ticker: str, now: datetime) -> str:
+    """그 종목 일봉이 쌓이는 날짜(db.snapshot_prices와 같게): 미국은 뉴욕 날짜, 국내는 한국 날짜.
+
+    티커 모양으로 시장을 정해요(web lib/journal.ts guessMarket과 같은 규칙). 영문만이면 미국, 그 밖은 국내."""
+    us = re.fullmatch(r"[A-Z]+([.-][A-Z]+)?", ticker.strip().upper()) is not None
+    return now.astimezone(NY if us else KST).date().isoformat()
+
+
 def now_index(days: list[str], today: str) -> float:
     """오늘 봉 자리. 오늘 일봉이 아직 없으면 마지막 봉 바로 다음이에요."""
     return len(days) - 1 if days and days[-1] == today else len(days)
 
 
-def due(shapes: list[Shape], prices: dict[str, Decimal], days_of, today: str, now: datetime) -> list[tuple[Shape, Decimal, float | None, bool]]:
-    """(그림, 현재가, 닿은 선 가격, 알림 보낼지). days_of(ticker) -> 일봉 날짜 목록(오래된 순)."""
+def due(shapes: list[Shape], prices: dict[str, Decimal], days_of, today, now: datetime) -> list[tuple[Shape, Decimal, float | None, bool]]:
+    """(그림, 현재가, 닿은 선 가격, 알림 보낼지). days_of(ticker) -> 일봉 날짜 목록(오래된 순).
+
+    today는 날짜 문자열이나 today(ticker) -> 그 종목 시장의 오늘 날짜."""
     out = []
     for s in shapes:
         cur = prices.get(s.ticker)
@@ -60,7 +77,7 @@ def due(shapes: list[Shape], prices: dict[str, Decimal], days_of, today: str, no
             continue
         days = days_of(s.ticker)
         index = {d: i for i, d in enumerate(days)}
-        lines = lines_at(s, index, now_index(days, today))
+        lines = lines_at(s, index, now_index(days, today(s.ticker) if callable(today) else today))
         hit = None
         if s.last_price is not None:
             last, c = float(s.last_price), float(cur)

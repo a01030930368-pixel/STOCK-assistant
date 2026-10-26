@@ -28,6 +28,10 @@ describe("practice", () => {
     expect(r.holdPct).toBe(0);
     expect([r.calls, r.hits]).toEqual([3, 2]);
     expect(score(closes, 0, 9, [{ i: 2, side: "sell" }]).calls).toBe(0);
+    // 끝나기 5봉 안에 산 건 5봉 뒤를 못 봐서 맞힘에 안 넣어요(매매로는 셈해요).
+    const late = score(closes, 0, 9, [{ i: 5, side: "buy" }, { i: 8, side: "sell" }]);
+    expect([late.trades.length, late.calls, late.hits]).toEqual([2, 0, 0]);
+    expect(score(closes, 0, 9, [{ i: 4, side: "buy" }]).calls).toBe(1);
   });
 
   it("rescales to 100 at the start", () => {

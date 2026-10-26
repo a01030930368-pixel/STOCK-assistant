@@ -47,8 +47,9 @@ export function score(closes: number[], start: number, end: number, decisions: D
     if (d.side === "buy") held = p;
     else { money *= p / held!; held = null; }
     trades.push({ i: d.i, side: d.side, price: p });
-    const later = Math.min(d.i + JUDGE, end);
-    if (later > d.i) {
+    // 끝나기 전 JUDGE봉 안에 한 매매는 'JUDGE봉 뒤'를 볼 수 없어서 맞힘에 넣지 않아요.
+    const later = d.i + JUDGE;
+    if (later <= end) {
       calls++;
       if (d.side === "buy" ? closes[later] > p : closes[later] < p) hits++;
     }

@@ -1,7 +1,7 @@
 """저녁 일정 알림과 아침 브리핑을 하루 한 번씩만 보냅니다. 보낸 기록은 DB에 남겨 워커를 다시 켜도 두 번 가지 않습니다."""
 import logging
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import psycopg
@@ -11,6 +11,7 @@ from .config import Config
 
 log = logging.getLogger("worker")
 US_NEWS_HOURS = 18  # 아침 8시 기준 전날 오후 2시 이후 뉴스 = 미국 장 전후
+US_DAY_KEY = "briefing_us_day"  # 아침 브리핑에 마지막으로 보낸 미국장 날짜(뉴욕)
 
 
 class BriefingJob:
@@ -19,7 +20,7 @@ class BriefingJob:
         self.http = http
         self.key, self.model, self.ask = ai.text_asker(cfg)
         # 아침 브리핑은 그날 한 번만 만들고, 못 보낸 조각부터 10분 뒤에 다시 보내요(매분 다시 만들지 않게).
-        self._morning_parts: tuple[object, list[str], int, object] | None = None
+        self._morning_parts: tuple[object, list[str], int, object, object] | None = None
         self._morning_retry: datetime | None = None
 
     def run(self, conn: psycopg.Connection, now: datetime | None = None) -> None:
@@ -122,8 +123,10 @@ class BriefingJob:
         if not self._morning_parts or self._morning_parts[0] != day:
             holdings = [briefing.Holding(*r) for r in db.briefing_holdings(conn)]
             items = [briefing.Item(*r) for r in db.events_on(conn, day)]
-            indexes = self._indexes()
-            us = self._us(conn, now, indexes)
+            indexes, us_day = self._indexes()
+            # 이 미국장(뉴욕 날짜)을 지난 브리핑에서 이미 보냈으면(월요일의 금요일 장) '밤사이'라 하지 않고 다시 보낸 거라고 적어요.
+            repeat = us_day if us_day and self._sent_us_day(conn) == us_day.isoformat() else None
+            us = self._us(conn, now, indexes, ai_note=repeat is None)
             fx, fx_prev = self._fx(conn, indexes) if us else (None, None)
             # 오늘의 용어는 못 만들어도 브리핑은 그대로 보내요.
             try:
@@ -132,12 +135,12 @@ class BriefingJob:
             except Exception as e:
                 log.warning("오늘의 용어 만들기 실패: %s", e)
                 term_at, term = None, None
-            text = briefing.morning_message(day, indexes, holdings, items, us, fx, fx_prev, term)
-            self._morning_parts = (day, telegram.split(text), 0, term_at)
-        _, parts, sent, term_at = self._morning_parts
+            text = briefing.morning_message(day, indexes, holdings, items, us, fx, fx_prev, term, repeat)
+            self._morning_parts = (day, telegram.split(text), 0, term_at, us_day)
+        _, parts, sent, term_at, us_day = self._morning_parts
         while sent < len(parts):
             if not telegram.deliver(self.cfg.telegram_bot_token, self.cfg.telegram_chat_id, parts[sent], self.http, html=True):
-                self._morning_parts = (day, parts, sent, term_at)
+                self._morning_parts = (day, parts, sent, term_at, us_day)
                 self._morning_retry = now + timedelta(minutes=10)
                 return
             sent += 1
@@ -146,6 +149,16 @@ class BriefingJob:
         db.mark_notice(conn, key)
         if term_at is not None:
             db.set_setting(conn, "terms_next", term_at + 1)
+        if us_day is not None:
+            db.set_setting(conn, US_DAY_KEY, us_day.isoformat())
+
+    def _sent_us_day(self, conn: psycopg.Connection) -> str | None:
+        # 못 읽어도 브리핑은 그대로 보내요('밤사이'로).
+        try:
+            return db.get_setting(conn, US_DAY_KEY)
+        except Exception as e:
+            log.warning("지난 브리핑 미국장 날짜 읽기 실패: %s", e)
+            return None
 
     def _fx(self, conn: psycopg.Connection, indexes: list[briefing.Quote]) -> tuple[float | None, float | None]:
         # 원/달러 지금 값과 전날 값. 야후가 막히면 키움 잔고의 환율(전날 값은 모름)로 대신해요.
@@ -154,8 +167,10 @@ class BriefingJob:
                 return q.last, q.last / (1 + q.change_pct / 100) if q.change_pct is not None else None
         return db.us_exchange_rate(conn), None
 
-    def _us(self, conn: psycopg.Connection, now: datetime, indexes: list[briefing.Quote]) -> list[briefing.UsStock]:
-        """미국 보유 종목마다 밤사이 종가 두 개(야후), 밤사이 뉴스, AI 한마디. 종가를 못 받은 종목은 빼요."""
+    def _us(self, conn: psycopg.Connection, now: datetime, indexes: list[briefing.Quote],
+            ai_note: bool = True) -> list[briefing.UsStock]:
+        """미국 보유 종목마다 밤사이 종가 두 개(야후), 밤사이 뉴스, AI 한마디. 종가를 못 받은 종목은 빼요.
+        이미 보낸 미국장이면(ai_note=False) AI 한마디는 다시 받지 않아요."""
         since = now - timedelta(hours=US_NEWS_HOURS)
         stocks, news = [], {}
         for ticker, name, qty, avg, cur in db.briefing_us(conn):
@@ -169,7 +184,7 @@ class BriefingJob:
             last, prev = float(bars[-1].close), float(bars[-2].close) if len(bars) > 1 else None
             news[ticker] = db.news_since(conn, ticker, since)
             stocks.append(briefing.UsStock(ticker, name, qty, last, prev, avg, news[ticker][0] if news[ticker] else None))
-        if stocks and self.ask:
+        if stocks and self.ask and ai_note:
             try:
                 lines = briefing.parse_us_ai(
                     self.ask(briefing.US_AI_SYSTEM, briefing.us_ai_prompt(stocks, indexes, news), self.key, self.model, self.http, 800),
@@ -179,9 +194,9 @@ class BriefingJob:
                 log.warning("아침 브리핑 AI 한마디 실패, 빼고 보냅니다: %s", e)
         return stocks
 
-    def _indexes(self) -> list[briefing.Quote]:
-        # 지수 하나가 막혀도 나머지와 브리핑은 그대로 보냅니다.
-        out = []
+    def _indexes(self) -> tuple[list[briefing.Quote], date | None]:
+        # 지수 하나가 막혀도 나머지와 브리핑은 그대로 보냅니다. 미국 지수 마지막 봉의 날짜(뉴욕)도 같이 돌려줘요.
+        out, day = [], None
         for symbol, name in briefing.INDEXES:
             try:
                 bars = prices.yahoo_daily(symbol, self.http, span="5d")
@@ -191,4 +206,6 @@ class BriefingJob:
             if bars:
                 last, prev = float(bars[-1].close), float(bars[-2].close) if len(bars) > 1 else None
                 out.append(briefing.Quote(name, last, (last / prev - 1) * 100 if prev else None))
-        return out
+                if symbol.startswith("^"):  # 환율은 주말에도 움직여서 빼요.
+                    day = max(day or bars[-1].day, bars[-1].day)
+        return out, day

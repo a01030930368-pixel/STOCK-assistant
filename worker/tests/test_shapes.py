@@ -29,3 +29,20 @@ def test_alert_when_price_crosses_line():
     cooled = shapes.due([shape(last=Decimal(145), alerted=NOW - timedelta(hours=1))], {"000660": Decimal(151)}, lambda t: DAYS, "2026-10-08", NOW)
     assert cooled[0][3] is False
     assert "추세선 닿음 · SK하이닉스(000660)" in shapes.message(shape(), Decimal(151), 150.0)
+
+
+def test_today_by_market():
+    # 한국 10-08 오전 1시 = 뉴욕 10-07 낮. 미국 일봉은 뉴욕 날짜로 쌓여서 오늘 봉은 10-07(4번째)이에요.
+    at = datetime(2026, 10, 7, 16, tzinfo=timezone.utc)
+    assert shapes.today_of("AAPL", at) == "2026-10-07" and shapes.today_of("BRK.B", at) == "2026-10-07"
+    assert shapes.today_of("000660", at) == "2026-10-08" and shapes.today_of("Q500001", at) == "2026-10-08"
+    us = shapes.Shape(1, "AAPL", "애플", "trend", [["2026-10-01", 0, 100], ["2026-10-05", 0, 120]], True, Decimal(135), None)
+    got = shapes.due([us], {"AAPL": Decimal(141)}, lambda t: DAYS, lambda t: shapes.today_of(t, at), at)
+    assert got[0][2] == 140 and got[0][3] is True
+
+
+def test_reversed_points_same_line():
+    # 오른쪽에서 왼쪽으로 그려도(끝점이 먼저) 화면처럼 오늘 쪽으로 늘린 같은 선이에요.
+    idx = {d: i for i, d in enumerate(DAYS)}
+    rev = shape(points=[["2026-10-05", 0, 120], ["2026-10-01", 0, 100]])
+    assert shapes.lines_at(rev, idx, 4) == shapes.lines_at(shape(), idx, 4) == [140]
