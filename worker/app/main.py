@@ -8,7 +8,7 @@ import psycopg
 
 import httpx
 
-from . import alerts, brief, config, db, levels, logsafe, macro, shapes, study, telegram
+from . import alerts, brief, config, db, levels, live, logsafe, macro, shapes, study, telegram
 from .kiwoom import KiwoomClient
 from .research_job import ResearchJob
 from .screener_job import ScreenerJob
@@ -268,6 +268,7 @@ def main() -> None:
     threading.Thread(target=alert_loop, args=(cfg, kiwoom, isa), name="alerts", daemon=True).start()
     brief.start(cfg, Connection(cfg.database_url))
     study.start(cfg, Connection(cfg.database_url))
+    live.start(kiwoom, Connection(cfg.database_url))
     jobs = [
         ("종목 정보 수집", research.run), ("관심종목 갱신", watching.run), ("체결 내역 갱신", trades.run), ("미국 장외 시세", ext_quotes.run),
         ("ISA 체결 갱신", isa_trades.run), ("공시 알림", filings.run), ("실적 정리", results.run), ("매매 당시 기록", buy_context.run),

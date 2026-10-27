@@ -16,6 +16,8 @@ import type { FlowRow } from "@/lib/flows";
 import type { Report } from "@/lib/earnings";
 import type { StatementRow } from "@/lib/statements";
 import BriefPanel, { type Brief } from "./BriefPanel";
+import LivePrice from "./LivePrice";
+import { combine, prevClose, quoteFrom } from "@/lib/live";
 import { bigMoney, debtRatio, median, operatingMargin, type FinancialRow } from "@/lib/research";
 
 export const dynamic = "force-dynamic";
@@ -174,6 +176,12 @@ export default async function StockPage({ params, searchParams }: { params: Prom
   const here = `/stock/${encodeURIComponent(ticker)}`;
   const peerMargin = median(peerLatest.map(operatingMargin));
   const latestMargin = financials[0] ? operatingMargin(financials[0]) : null;
+  // 이름 아래 가격 줄: 처음엔 지금 아는 값으로 그리고, 화면이 워커에게 몇 초마다 새 값을 물어봐요.
+  const held = combine((await safe<{ quantity: string; avg_price: string }>(
+    `SELECT quantity, avg_price FROM holdings WHERE ticker = $1 AND quantity > 0
+     UNION ALL SELECT quantity, avg_price FROM isa_holdings WHERE ticker = $1 AND quantity > 0`, [ticker],
+  )).map((r) => ({ quantity: Number(r.quantity), avg: Number(r.avg_price) })));
+  const firstQuote = stock.cur === null ? null : quoteFrom(Number(stock.cur), prevClose(candles, today));
   const [studied] = await safe<{ ticker: string }>("SELECT ticker FROM study_notes WHERE ticker = $1", [ticker]);
 
   return (
@@ -191,9 +199,11 @@ export default async function StockPage({ params, searchParams }: { params: Prom
             : <button type="submit" formAction={startStudy} className="chip-btn">📒 공부 노트 쓰기</button>}
         </form>
       </div>
+      <LivePrice ticker={stock.ticker} market={stock.market === "US" ? "US" : "KR"} initial={firstQuote} holding={held} />
       {showBrief && <BriefPanel ticker={ticker} name={stock.name} market={stock.market} brief={brief ?? null} closeHref={here}
         ai={Boolean(process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY)} />}
-      <SummaryLine parts={summary} />
+      {/* 평단 대비는 가격 줄에 있어서 요약 줄에서는 빼요 */}
+      <SummaryLine parts={summary?.filter((p) => !p.text.startsWith("평단 대비"))} />
       {comment && <div className="panel ai-panel"><AiNote c={comment} title={<span className="label">AI 한마디</span>} /></div>}
       {stock.position_id && <p><Link href={`/journal/${stock.position_id}`}>매매일지 보기</Link></p>}
 
