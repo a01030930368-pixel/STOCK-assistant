@@ -49,6 +49,8 @@ class FakeHttp:
         self.asked.append((name, (params or {}).get("range")))
         if name in self.fail:
             raise RuntimeError("막혔어요")
+        if "fearandgreed" in url:
+            return FakeRes({"fear_and_greed": {"score": 40, "timestamp": "2026-10-23T20:00:00+00:00"}})
         t = int(datetime(2026, 10, 23, 14, 30, tzinfo=timezone.utc).timestamp())
         return FakeRes(yahoo("America/New_York", [t], [100.0]))
 
@@ -61,7 +63,7 @@ def test_job_saves_skips_missing_keys_and_records_errors(monkeypatch):
     job = markets.MarketsJob(SimpleNamespace(ecos_api_key="", fred_api_key=""), http)
     now = datetime(2026, 10, 25, 1, 0, tzinfo=timezone.utc)
     job.run(None, now)
-    assert "MK:KOSPI" in saved and "MK:BTC" in saved and "MK:KR3Y" not in saved and "MK:US2Y" not in saved
+    assert "MK:KOSPI" in saved and "MK:BTC" in saved and "MK:FEARGREED" in saved and "MK:KR3Y" not in saved and "MK:US2Y" not in saved
     st = settings["markets_status"]
     assert not st["ok"] and set(st["errors"]) == {"SOX", "US10Y"}
     assert ("^KS11", "2y") in http.asked
@@ -71,3 +73,10 @@ def test_job_saves_skips_missing_keys_and_records_errors(monkeypatch):
     assert http.asked == []
     job.run(None, now.replace(minute=40))
     assert ("^KS11", "5d") in http.asked and ("^SOX", "2y") in http.asked
+
+
+def test_cnn_fear_greed_rows():
+    x = datetime(2026, 10, 23, 23, 59, tzinfo=timezone.utc).timestamp() * 1000  # 뉴욕 10-23 저녁
+    body = {"fear_and_greed": {"score": 61.857, "rating": "greed", "timestamp": "2026-10-26T14:30:00+00:00"},
+            "fear_and_greed_historical": {"data": [{"x": x, "y": 55.2, "rating": "neutral"}]}}
+    assert markets.cnn_closes(body) == [(date(2026, 10, 23), Decimal("55.2")), (date(2026, 10, 26), Decimal("61.9"))]

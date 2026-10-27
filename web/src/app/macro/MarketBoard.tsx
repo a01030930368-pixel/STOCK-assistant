@@ -85,7 +85,7 @@ export default function MarketBoard({ series, status }: { series: Record<string,
         })}
       </div>
       {missing.length > 0 && <p className="muted mk-small">이번에 못 받은 지수: {missing.join(", ")} · 다음 차례(30분 뒤)에 다시 받아요.</p>}
-      {!empty && <p className="muted mk-small">야후 파이낸스·한국은행·FRED 일봉이에요. 30분마다 새로 받아요. 국고채·미국 2년 금리는 하루 늦게 나와요.</p>}
+      {!empty && <p className="muted mk-small">야후 파이낸스·한국은행·FRED·CNN 일봉이에요. 30분마다 새로 받아요. 국고채·미국 2년 금리는 하루 늦게 나와요.</p>}
     </section>
   );
 }
@@ -101,7 +101,7 @@ function Card({ c, period, color, onTap }: { c: CardData; period: Period; color:
       <span className="mk-name">{color && <i className="mk-dot" style={{ background: color }} />}{meta.name}</span>
       {c.last ? (
         <>
-          <span className="mk-val"><strong className="num">{fmtValue(meta, c.last.close)}</strong> <span className={`num ${dir(meta, c.day)}`}>{fmtChange(meta, c.day)}</span></span>
+          <span className="mk-val"><strong className="num">{fmtValue(meta, c.last.close)}</strong>{meta.word && <span className="gold">{meta.word(c.last.close)}</span>} <span className={`num ${dir(meta, c.day)}`}>{fmtChange(meta, c.day)}</span></span>
           <svg className="mk-spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
             {spark.refY !== null && <line className="ref" x1="0" x2={W} y1={spark.refY} y2={spark.refY} />}
             {spark.line && <polyline className={`line ${d || "flat"}`} points={spark.line} />}
@@ -180,6 +180,7 @@ function Focus({ main, overlay, cards, period, onClose, onRemove }: {
           {main.last && (
             <div className="mk-focus-val">
               <strong className="num">{fmtValue(meta, main.last.close)}</strong>
+              {meta.word && <span className="gold">{meta.word(main.last.close)}</span>}
               <span className={`num ${dir(meta, main.day)}`}>하루 {fmtChange(meta, main.day)}</span>
               <span className={`num ${dir(meta, main.period)}`}>{label} {fmtChange(meta, main.period)}</span>
               <span className="muted">{main.last.day.slice(5).replace("-", ".")} 기준</span>
