@@ -1,8 +1,13 @@
 // 매크로 환경 › 국내·해외 지수 카드. 워커(worker/app/markets.py)가 sector_daily에 market 'MK'로 넣은 일봉을 써요.
 
 export type Tab = "KR" | "US";
-export type Unit = "pt" | "won" | "usd" | "rate";
-export type Meta = { code: string; name: string; tab: Tab; unit: Unit; digits: number; hint?: string; ref?: number };
+export type Unit = "pt" | "won" | "usd" | "rate" | "score";
+export type Meta = { code: string; name: string; tab: Tab; unit: Unit; digits: number; hint?: string; ref?: number; word?: (v: number) => string };
+
+// CNN 공포·탐욕 지수 구간(0~100).
+export function fearGreedWord(v: number): string {
+  return v < 25 ? "극단적 공포" : v < 45 ? "공포" : v <= 55 ? "중립" : v <= 75 ? "탐욕" : "극단적 탐욕";
+}
 export type Point = { day: string; close: number };
 
 export const MARKETS: Meta[] = [
@@ -24,6 +29,7 @@ export const MARKETS: Meta[] = [
   { code: "WTI", name: "WTI 유가", tab: "US", unit: "usd", digits: 2 },
   { code: "GOLD", name: "금", tab: "US", unit: "usd", digits: 0 },
   { code: "BTC", name: "비트코인", tab: "US", unit: "usd", digits: 0 },
+  { code: "FEARGREED", name: "공포·탐욕 지수(CNN)", tab: "US", unit: "score", digits: 0, hint: "25 아래 극단적 공포, 75 위 극단적 탐욕", word: fearGreedWord },
 ];
 export const metaOf = (code: string) => MARKETS.find((m) => m.code === code);
 
@@ -61,13 +67,18 @@ export function fmtValue(m: Meta, v: number): string {
   return m.unit === "rate" ? `${n}%` : m.unit === "usd" ? `$${n}` : n;
 }
 
-// 금리는 %p(차이), 나머지는 %(비율)로 등락을 말해요.
+// 금리는 %p, 공포·탐욕은 점수 차이, 나머지는 %(비율)로 등락을 말해요.
+const byDiff = (m: Meta) => m.unit === "rate" || m.unit === "score";
 export function fmtChange(m: Meta, c: Change | null): string {
   if (!c) return "-";
+  if (m.unit === "score") return `${c.abs >= 0 ? "+" : ""}${c.abs.toFixed(0)}`;
   if (m.unit === "rate") return `${c.abs >= 0 ? "+" : ""}${c.abs.toFixed(2)}%p`;
   return `${c.pct >= 0 ? "+" : ""}${c.pct.toFixed(1)}%`;
 }
-export const dir = (m: Meta, c: Change | null) => (!c ? "" : (m.unit === "rate" ? c.abs : c.pct) > 0 ? "up" : (m.unit === "rate" ? c.abs : c.pct) < 0 ? "down" : "");
+export const dir = (m: Meta, c: Change | null) => {
+  const v = !c ? 0 : byDiff(m) ? c.abs : c.pct;
+  return v > 0 ? "up" : v < 0 ? "down" : "";
+};
 
 // 겹쳐 보기: 시작=100. 기준 구간의 첫날보다 늦게 시작하는 지수는 그 지수의 첫날을 100으로 잡아요.
 export function indexed(points: Point[], from: string): Point[] {

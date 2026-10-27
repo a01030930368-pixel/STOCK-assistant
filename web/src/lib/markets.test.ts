@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardData, fmtChange, fmtValue, indexed, isDoubleTap, metaOf, slice, sparkPath, type Point } from "./markets";
+import { cardData, dir, fearGreedWord, fmtChange, fmtValue, indexed, isDoubleTap, metaOf, slice, sparkPath, type Point } from "./markets";
 
 const days = (n: number, start = "2026-01-01", f = (i: number) => 100 + i): Point[] =>
   Array.from({ length: n }, (_, i) => ({ day: new Date(Date.parse(`${start}T00:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10), close: f(i) }));
@@ -41,5 +41,16 @@ describe("markets", () => {
     expect(isDoubleTap({ code: "SPX", at: 1000 }, "SPX", 1500)).toBe(false);
     expect(isDoubleTap({ code: "SPX", at: 1000 }, "VIX", 1100)).toBe(false);
     expect(isDoubleTap(null, "SPX", 1)).toBe(false);
+  });
+});
+
+describe("fear & greed", () => {
+  it("names CNN bands and shows point changes", () => {
+    expect([10, 30, 50, 60, 90].map(fearGreedWord)).toEqual(["극단적 공포", "공포", "중립", "탐욕", "극단적 탐욕"]);
+    const m = metaOf("FEARGREED")!;
+    const c = cardData(m, [{ day: "2026-10-23", close: 55.2 }, { day: "2026-10-26", close: 61.9 }], "1m");
+    expect(fmtValue(m, 61.9)).toBe("62");
+    expect(fmtChange(m, c.day)).toBe("+7");
+    expect(dir(m, c.day)).toBe("up");
   });
 });

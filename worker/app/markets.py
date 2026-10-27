@@ -3,6 +3,7 @@
 - 주가지수·환율·원자재·비트코인: 야후 일봉(키 없이). 날짜는 그 거래소 시간대로 맞춰요(코스피는 한국 날짜).
 - 국고채 3년·10년: 한국은행 ECOS 시장금리(일별). ECOS 키가 있어야 해요.
 - 미국 10년 금리: 야후 ^TNX, 안 되면 FRED DGS10. 미국 2년 금리: FRED DGS2(FRED 키가 있어야 해요).
+- 공포·탐욕 지수: CNN 차트 데이터(키 없이, 비공식). 날짜는 뉴욕 날짜예요.
 처음 켤 때 2년 치를 받고, 그 뒤로는 30분마다 최근 며칠만 다시 받아요(오늘 봉은 그때그때 바뀌어요).
 """
 import logging
@@ -29,7 +30,12 @@ SERIES = [
     ("SPX", "yahoo", "^GSPC"), ("NASDAQ", "yahoo", "^IXIC"), ("DOW", "yahoo", "^DJI"), ("SOX", "yahoo", "^SOX"),
     ("VIX", "yahoo", "^VIX"), ("US10Y", "yahoo", "^TNX"), ("US2Y", "fred", "DGS2"),
     ("DXY", "yahoo", "DX-Y.NYB"), ("WTI", "yahoo", "CL=F"), ("GOLD", "yahoo", "GC=F"), ("BTC", "yahoo", "BTC-USD"),
+    ("FEARGREED", "cnn", ""),
 ]
+CNN = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/"
+# CNN은 브라우저가 아니면 418을 돌려줘요.
+BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+NY = ZoneInfo("America/New_York")
 FALLBACK = {"US10Y": ("fred", "DGS10")}
 
 
@@ -48,6 +54,21 @@ def scale(code: str, closes: list) -> list:
     if code == "US10Y" and closes and closes[-1][1] > 20:
         return [(d, c / 10) for d, c in closes]
     return closes
+
+
+def cnn_closes(body: dict) -> list[tuple[date, Decimal]]:
+    """CNN 공포·탐욕 응답을 (뉴욕 날짜, 점수)로. 과거 목록(x=밀리초, y=점수)에 지금 점수를 오늘 값으로 더해요."""
+    out: dict[date, Decimal] = {}
+    for p in (body.get("fear_and_greed_historical") or {}).get("data") or []:
+        if p.get("x") is not None and p.get("y") is not None:
+            out[datetime.fromtimestamp(p["x"] / 1000, timezone.utc).astimezone(NY).date()] = round(Decimal(str(p["y"])), 1)
+    now = body.get("fear_and_greed") or {}
+    if now.get("score") is not None and now.get("timestamp"):
+        day = datetime.fromisoformat(str(now["timestamp"]).replace("Z", "+00:00")).astimezone(NY).date()
+        out[day] = round(Decimal(str(now["score"])), 1)
+    if not out:
+        raise ValueError("CNN 공포·탐욕 응답이 비어 있어요")
+    return sorted(out.items())
 
 
 def ecos_closes(rows: list[dict]) -> list[tuple[date, Decimal]]:
@@ -106,6 +127,11 @@ class MarketsJob:
             res = self.http.get(f"{intraday.YAHOO}{name}", params={"interval": "1d", "range": span}, headers={"User-Agent": intraday.UA})
             res.raise_for_status()
             return yahoo_closes(res.json())
+        if source == "cnn":
+            res = self.http.get(f"{CNN}{start.isoformat()}", headers={"User-Agent": BROWSER_UA, "Accept": "application/json",
+                                                                    "Referer": "https://edition.cnn.com/"})
+            res.raise_for_status()
+            return cnn_closes(res.json())
         if source == "ecos":
             if not self.cfg.ecos_api_key:
                 return None
