@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import httpx
+from app import kiwoom
 
 import pytest
 
@@ -249,3 +250,25 @@ def test_balance_reads_every_page():
         return httpx.Response(200, json=SAMPLE, headers={"cont-yn": "Y", "next-key": "K"})
 
     assert [h.ticker for h in _client(handler).domestic_balance().holdings] == ["005930", "035420"]
+
+
+def test_balance_pages_wait_for_kt00018_limit(monkeypatch):
+    # 2026-10-29부터 kt00018은 초당 3회. 쪽을 이어 받을 때 요청 사이가 0.4초 이상이어야 해요.
+    page2 = dict(SAMPLE, acnt_evlt_remn_indv_tot=[])
+    clock = {"t": 100.0}
+    stamps = []
+    monkeypatch.setattr(kiwoom.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(kiwoom.time, "sleep", lambda s: clock.__setitem__("t", clock["t"] + s))
+
+    def handler(request):
+        if request.url.path == "/oauth2/token":
+            return httpx.Response(200, json={"token": "T", "expires_dt": "29991231235959"})
+        stamps.append(clock["t"])
+        if request.headers.get("next-key") == "K2":
+            return httpx.Response(200, json=page2)
+        nxt = "K2" if request.headers.get("next-key") == "K" else "K"
+        return httpx.Response(200, json=SAMPLE, headers={"cont-yn": "Y", "next-key": nxt})
+
+    _client(handler).domestic_balance()
+    assert len(stamps) == 3
+    assert all(b - a >= 0.4 - 1e-9 for a, b in zip(stamps, stamps[1:]))
