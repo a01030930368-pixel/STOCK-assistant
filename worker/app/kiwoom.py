@@ -15,6 +15,8 @@ KST_FORMAT = "%Y%m%d%H%M%S"
 KST = ZoneInfo("Asia/Seoul")
 # 키움은 초당 요청 수를 제한합니다. 요청 사이에 이만큼 쉬고, 초과 오류면 잠깐 쉬었다 한 번 더 보냅니다.
 MIN_GAP = 0.25
+# TR마다 따로 정한 한도. 계좌평가잔고(kt00018)는 2026-10-29부터 초당 3회라, 여러 쪽을 이어 받을 때도 0.4초씩 띄워요.
+API_GAP = {"kt00018": 0.4}
 TOO_MANY = ("요청개수", "(429)")
 # 토큰이 만료되었거나 무효라는 응답이면 새로 받아 한 번 더 보냅니다.
 BAD_TOKEN = ("토큰", "token", "8005:")
@@ -175,14 +177,20 @@ class KiwoomClient:
         self._token_expires: datetime | None = None
         self._lock = threading.Lock()
         self._last_call = 0.0
+        self._last_api: dict[str, float] = {}
 
-    def _wait_turn(self) -> None:
-        # 여러 작업이 동시에 불러도 키움 요청은 MIN_GAP 간격으로 하나씩 나갑니다.
+    def _wait_turn(self, api_id: str | None = None) -> None:
+        # 여러 작업이 동시에 불러도 키움 요청은 MIN_GAP 간격으로 하나씩 나갑니다. API_GAP에 있는 TR은 그 간격도 지켜요.
         with self._lock:
-            gap = MIN_GAP - (time.monotonic() - self._last_call)
+            now = time.monotonic()
+            gap = MIN_GAP - (now - self._last_call)
+            if api_id in API_GAP:
+                gap = max(gap, API_GAP[api_id] - (now - self._last_api.get(api_id, -1e9)))
             if gap > 0:
                 time.sleep(gap)
             self._last_call = time.monotonic()
+            if api_id:
+                self._last_api[api_id] = self._last_call
 
     def _access_token(self) -> str:
         # 토큰은 만료 10분 전까지 재사용합니다. 재발급을 반복하면 제한에 걸립니다.
@@ -229,7 +237,7 @@ class KiwoomClient:
         if next_key:
             headers["cont-yn"] = "Y"
             headers["next-key"] = next_key
-        self._wait_turn()
+        self._wait_turn(api_id)
         res = self._http.post(f"{self._base_url}{path}", headers=headers, json=payload)
         if res.status_code == 429:
             raise RuntimeError(f"키움 API 오류 {api_id}: 요청 개수 초과(429)")
