@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, combine, mine, prevClose, quoteFrom, quoteOf } from "./live";
+import { ago, combine, mine, prevClose, quoteFrom, quoteOf, wonAbout } from "./live";
 
 describe("live price line", () => {
   it("uses the close before today as the previous close", () => {
@@ -33,5 +33,13 @@ describe("live price line", () => {
     expect(mine(h, 68400)!.pct).toBeCloseTo(11.76, 2);
     expect(mine(null, 1)).toBeNull();
     expect(combine([])).toBeNull();
+  });
+});
+
+describe("won estimate", () => {
+  it("rounds to 100 won with a sign", () => {
+    expect(wonAbout(30.24, 1324.3)).toBe("+40,000원");
+    expect(wonAbout(-12.5, 1400)).toBe("-17,500원");
+    expect(wonAbout(0.01, 1400)).toBe("0원");
   });
 });
