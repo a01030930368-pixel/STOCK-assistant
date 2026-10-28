@@ -314,6 +314,11 @@ class KiwoomClient:
         from .watch import parse_kr_quote
         return parse_kr_quote(ticker, self._post("/api/dostk/stkinfo", "ka10001", {"stk_cd": ticker}))
 
+    def kr_price(self, ticker: str):
+        # ka10001 주식기본정보요청. 종목 화면 실시간 가격 줄: (현재가, 전일 대비, 등락률)
+        from .live import kr_change
+        return kr_change(self._post("/api/dostk/stkinfo", "ka10001", {"stk_cd": ticker}))
+
     def kr_sector(self, ticker: str) -> str:
         # ka10100 종목정보 조회. 업종명(upName)
         from .watch import parse_kr_sector

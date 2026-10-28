@@ -13,6 +13,7 @@ import { buildCells, type Cell } from "@/lib/brief";
 import { decodeGame, score, STEPS, type Decision } from "@/lib/practice";
 import { ALL_PARTS, applyDraft, cleanFields, reviewDefault, STATUSES, type Draft, type Fields } from "@/lib/study";
 import { loadBriefInput } from "@/lib/briefData";
+import type { LiveValue } from "@/lib/live";
 import { KIND_LABEL, validColor, validDoodle, validShape, type DoodlePoint, type LevelKind, type ShapeKind } from "@/lib/drawings";
 
 // values: 오류가 났을 때 입력한 값을 폼에 되돌려 주기 위해 사용합니다.
@@ -934,4 +935,17 @@ export async function studyAlert(input: { ticker: string; price: number }): Prom
   refreshWatch(ticker);
   refreshStudy(ticker);
   return true;
+}
+
+// 종목 화면 실시간 가격 줄: 이 종목을 보고 있다고 남기고(seen), 워커가 덧붙인 최신 가격을 돌려줘요.
+export async function pollLive(ticker: string, market: string): Promise<LiveValue | null> {
+  const t = ticker.toUpperCase();
+  if (!/^[0-9A-Z.\-]{1,12}$/.test(t) || (market !== "KR" && market !== "US")) return null;
+  const [row] = await query<{ value: LiveValue }>(
+    `INSERT INTO app_settings (key, value) VALUES ($1, jsonb_build_object('market', $2::text, 'seen', now()))
+     ON CONFLICT (key) DO UPDATE SET value = app_settings.value || jsonb_build_object('market', $2::text, 'seen', now())
+     RETURNING value`,
+    [`live:${t}`, market],
+  ).catch(() => []);
+  return row?.value ?? null;
 }
