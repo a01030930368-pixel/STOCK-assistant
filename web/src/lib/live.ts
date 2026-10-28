@@ -48,3 +48,9 @@ export function combine(rows: { quantity: number; avg: number }[]): Holding | nu
 
 export const tone = (v: number | null | undefined) => (!v ? "" : v > 0 ? "up" : "down");
 export const arrow = (v: number | null | undefined) => (!v ? "" : v > 0 ? "▲" : "▼");
+
+// 미국 종목 평가손익을 원화로 어림해요(100원 단위). 환율은 키움 잔고 환율, 없으면 한국은행 환율.
+export function wonAbout(usd: number, rate: number): string {
+  const v = Math.round((usd * rate) / 100) * 100;
+  return `${v > 0 ? "+" : v < 0 ? "-" : ""}${Math.abs(v).toLocaleString("ko-KR")}원`;
+}

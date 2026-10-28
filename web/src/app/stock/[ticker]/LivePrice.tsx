@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { pollLive } from "@/app/actions";
-import { ago, arrow, mine, POLL_MS, quoteOf, tone, type Holding, type LiveValue, type Quote } from "@/lib/live";
+import { ago, arrow, mine, wonAbout, POLL_MS, quoteOf, tone, type Holding, type LiveValue, type Quote } from "@/lib/live";
 
 // 종목 이름 아래 가격 줄. 화면이 보이는 동안 3초마다 워커가 받은 최신 가격을 물어봐요.
-export default function LivePrice({ ticker, market, initial, holding }: {
-  ticker: string; market: "KR" | "US"; initial: Quote | null; holding: Holding | null;
+export default function LivePrice({ ticker, market, initial, holding, fx = 0 }: {
+  ticker: string; market: "KR" | "US"; initial: Quote | null; holding: Holding | null; fx?: number;
 }) {
   const [quote, setQuote] = useState<Quote | null>(initial);
   const [live, setLive] = useState<LiveValue | null>(null);
@@ -70,6 +70,7 @@ export default function LivePrice({ ticker, market, initial, holding }: {
         <span className="muted live-mine">
           평단 {money(holding!.avg)} 대비 <span className={tone(my.pct)}>{my.pct > 0 ? "+" : ""}{my.pct.toFixed(1)}%</span>
           {" · "}평가손익 <span className={tone(my.pnl)}>{money(my.pnl, true)}</span>
+          {!won && fx > 0 && <> (약 <span className={tone(my.pnl)}>{wonAbout(my.pnl, fx)}</span>)</>}
         </span>
       )}
     </div>
