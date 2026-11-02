@@ -1,6 +1,6 @@
 // 기업 공부 › 가설 탭: 확인 기준·날짜가 있는 내 생각(가설), 그 근거, 실적 날 점검, 지난 실적 발표 기록.
 // 근거는 워커(worker/app/thesis.py)가 실적·공시·뉴스에서 붙이고, 숫자로 적은 가설은 분기 숫자로 맞춰 봐요. 판정은 사용자가 정해요.
-import { change, margin, type Report } from "./earnings";
+import { change, margin, surprise, type Line, type Report } from "./earnings";
 import { quarterLabel } from "./statements";
 import type { Fields } from "./study";
 
@@ -134,38 +134,122 @@ export function reviewRows(period: string, theses: Thesis[]): ReviewItem[] {
 // ---------------------------------------------------------------- 지난 실적 발표 기록
 
 export type Filing = { day: string; period: string; title: string; url: string; source: string };
-export type Quarter = Partial<Record<"revenue" | "operating_income" | "net_income", number>>;
+export const Q_ITEMS = ["revenue", "gross_profit", "operating_income", "net_income", "cfo"] as const;
+export type QItem = (typeof Q_ITEMS)[number];
+export type Quarter = Partial<Record<QItem, number>>;
+
+// 시장 예상치(워커 estimates.py). 미국은 Finnhub, 국내는 네이버 예상 칸을 발표 전까지 매일 적어 둔 값.
+export type Estimate = {
+  period: string; source: "finnhub" | "naver"; epsActual: number | null; epsEstimate: number | null;
+  revenueActual: number | null; revenueEstimate: number | null; opEstimate: number | null; netEstimate: number | null;
+  reportedOn: string | null; hour: string | null; asOf: string;
+};
+export type Close = { day: string; close: number };
+type Tone = { text: string; tone: string } | null;
+export type EstItem = { label: string; kind: "money" | "eps"; actual: number | null; estimate: number; pct: number | null };
+export type DetailLine = { label: string; value: number | null; qoq: Tone; yoy: Tone };
+export type MarginLine = { label: string; now: number | null; before: number | null; diff: number | null };
+export type Reaction = { baseDay: string; base: number; next: { day: string; pct: number } | null; week: { day: string; pct: number } | null; when: string };
+
 export type HistoryRow = {
   period: string; label: string; day: string | null; links: { label: string; url: string }[];
   revenue: number | null; op: number | null; net: number | null;
-  revYoy: { text: string; tone: string } | null; opYoy: { text: string; tone: string } | null; opm: number | null;
+  revYoy: Tone; opYoy: Tone; opm: number | null;
   eps: { actual: number | null; estimate: number | null } | null; ai: string; review: Review | null;
+  est: { source: Estimate["source"]; asOf: string; items: EstItem[] } | null;
+  lines: DetailLine[]; margins: MarginLine[]; cashRatio: number | null;
+  prelim: { label: string; prelim: number; final: number }[]; reaction: Reaction | null;
 };
 
 const SOURCE_LABEL: Record<string, string> = {
   dart_prelim: "잠정실적 공시", dart_report: "정기보고서", sec_8k: "실적 발표(8-K)", sec_10q: "10-Q", sec_10k: "연간 보고서",
 };
+const LINE_LABEL: Record<QItem, string> = { revenue: "매출", gross_profit: "매출총이익", operating_income: "영업이익", net_income: "순이익", cfo: "영업현금흐름" };
+
+const yearBefore = (p: string) => `${Number(p.slice(0, 4)) - 1}${p.slice(4)}`;
+const ratio = (a: number | null | undefined, b: number | null | undefined) => (a == null || !b ? null : (a / b) * 100);
+
+// 발표 전 마지막 종가 → 반응한 첫 거래일 종가, 그리고 5거래일 뒤. 미국 개장 전(bmo) 발표는 그날이 첫 반응이에요.
+export function reaction(closes: Close[], day: string | null, hour: string | null = null): Reaction | null {
+  if (!day || closes.length < 2) return null;
+  const sorted = [...closes].sort((a, b) => a.day.localeCompare(b.day));
+  let i = -1;
+  for (let k = 0; k < sorted.length && sorted[k].day < day; k++) i = k;
+  if (i < 0) return null;
+  const bmo = hour === "bmo";
+  const first = sorted.findIndex((c) => (bmo ? c.day >= day : c.day > day));
+  if (first < 0) return null;
+  const base = sorted[i];
+  const at = (k: number) => (k < sorted.length ? { day: sorted[k].day, pct: (sorted[k].close / base.close - 1) * 100 } : null);
+  return { baseDay: base.day, base: base.close, next: at(first), week: at(first + 4), when: bmo ? "개장 전 발표" : hour === "amc" ? "장 마감 뒤 발표" : "" };
+}
+
+function estItems(e: Estimate, actual: { revenue: number | null; op: number | null; net: number | null; eps: number | null }): EstItem[] {
+  const out: EstItem[] = [];
+  const add = (label: string, kind: EstItem["kind"], a: number | null, est: number | null) => {
+    if (est === null || (a === null && e.source === "naver")) return;
+    out.push({ label, kind, actual: a, estimate: est, pct: surprise(a, est) });
+  };
+  add("매출", "money", actual.revenue ?? e.revenueActual, e.revenueEstimate);
+  add("영업이익", "money", actual.op, e.opEstimate);
+  add("순이익", "money", actual.net, e.netEstimate);
+  add("EPS", "eps", e.epsActual ?? actual.eps, e.epsEstimate);
+  return out;
+}
 
 // 분기마다 한 줄. 숫자는 실적 정리(잠정·발표) → 재무제표 순으로 찾아요. 오래된 기록까지 최근 것부터.
-export function earningsHistory(filings: Filing[], reports: (Report & { id?: string })[], quarters: Record<string, Quarter>, reviews: Review[], limit = 12): HistoryRow[] {
+export function earningsHistory(
+  filings: Filing[], reports: (Report & { id?: string })[], quarters: Record<string, Quarter>, reviews: Review[], limit = 12,
+  extra: { estimates?: Estimate[]; closes?: Close[] } = {},
+): HistoryRow[] {
+  const ests = new Map((extra.estimates ?? []).map((e) => [e.period, e]));
   const periods = new Set<string>([...filings.map((f) => f.period), ...reports.map((r) => r.period), ...Object.keys(quarters)]);
+  for (const e of ests.values()) if (e.reportedOn || e.epsActual !== null || e.revenueActual !== null) periods.add(e.period);
+  const repOf = (p: string) => reports.filter((r) => r.period === p).sort((a, b) => b.reported_on.localeCompare(a.reported_on))[0];
+  const lineOf = (p: string, k: QItem) => (repOf(p)?.data.lines as Record<string, Line | undefined> | undefined)?.[k];
+  const value = (p: string, k: QItem): number | null => {
+    const line = lineOf(p, k);
+    return line?.cur ?? quarters[p]?.[k] ?? (k === "revenue" ? ests.get(p)?.revenueActual ?? null : null);
+  };
   const rows: HistoryRow[] = [];
   for (const period of [...periods].sort().reverse()) {
-    const rep = reports.filter((r) => r.period === period).sort((a, b) => b.reported_on.localeCompare(a.reported_on))[0];
+    const rep = repOf(period), est = ests.get(period);
     const fs = filings.filter((f) => f.period === period).sort((a, b) => a.day.localeCompare(b.day));
-    const q = quarters[period] ?? {}, qy = quarters[`${Number(period.slice(0, 4)) - 1}${period.slice(4)}`] ?? {};
-    const pick = (k: "revenue" | "operating_income" | "net_income") => rep?.data.lines[k]?.cur ?? q[k] ?? null;
+    const qy = quarters[yearBefore(period)] ?? {};
     const yoyOf = (k: "revenue" | "operating_income") => rep?.data.lines[k]?.yoy ?? qy[k] ?? null;
-    const revenue = pick("revenue"), op = pick("operating_income");
+    const revenue = value(period, "revenue"), op = value(period, "operating_income"), net = value(period, "net_income");
     if (revenue === null && op === null && !fs.length && !rep) continue;
     const links = fs.map((f) => ({ label: SOURCE_LABEL[f.source] ?? f.title, url: f.url }));
     if (rep?.url && !links.some((l) => l.url === rep.url)) links.unshift({ label: rep.data.preliminary ? "잠정실적 공시" : "실적 발표", url: rep.url });
+    // 처음 발표된 날(잠정실적 → 정정·확정 보고서가 뒤에 와도 첫 날 기준)
+    const firsts = [...reports.filter((r) => r.period === period).map((r) => r.reported_on), ...(est?.reportedOn ? [est.reportedOn] : []), ...fs.map((f) => f.day)].filter(Boolean).sort();
+    const day = firsts[0] ?? null;
+    const eps = rep?.data.eps ?? (est && est.epsActual !== null ? { actual: est.epsActual, estimate: est.epsEstimate } : null);
+
+    const lines: DetailLine[] = Q_ITEMS.map((k) => {
+      const v = value(period, k);
+      const line = lineOf(period, k);
+      return { label: LINE_LABEL[k], value: v, qoq: change(v, value(prevQuarter(period), k) ?? line?.prev), yoy: change(v, value(yearBefore(period), k) ?? line?.yoy) };
+    }).filter((l) => l.value !== null);
+    const marginOf = (p: string, k: QItem) => ratio(value(p, k), value(p, "revenue"));
+    const margins: MarginLine[] = (["gross_profit", "operating_income", "net_income"] as const).map((k) => {
+      const now = marginOf(period, k), before = marginOf(yearBefore(period), k);
+      return { label: `${LINE_LABEL[k]}률`, now, before, diff: now !== null && before !== null ? now - before : null };
+    }).filter((m) => m.now !== null);
+    const cfo = value(period, "cfo");
+    const prelim = rep?.data.preliminary ? (["revenue", "operating_income", "net_income"] as const).flatMap((k) => {
+      const a = rep.data.lines[k]?.cur, b = quarters[period]?.[k];
+      return a != null && b != null && Math.abs(a - b) > Math.abs(b) * 0.005 ? [{ label: LINE_LABEL[k], prelim: a, final: b }] : [];
+    }) : [];
+
     rows.push({
-      period, label: quarterLabel(period), day: rep?.reported_on ?? fs[0]?.day ?? null, links,
-      revenue, op, net: pick("net_income"),
+      period, label: quarterLabel(period), day, links, revenue, op, net,
       revYoy: change(revenue, yoyOf("revenue")), opYoy: change(op, yoyOf("operating_income")),
       opm: rep ? margin(rep.data, "cur") : revenue && op !== null ? (op / revenue) * 100 : null,
-      eps: rep?.data.eps ?? null, ai: rep?.ai ?? "", review: reviews.find((r) => r.period === period) ?? null,
+      eps, ai: rep?.ai ?? "", review: reviews.find((r) => r.period === period) ?? null,
+      est: est ? { source: est.source, asOf: est.asOf, items: estItems(est, { revenue, op, net, eps: eps?.actual ?? null }) } : null,
+      lines, margins, cashRatio: cfo !== null && net && net > 0 ? cfo / net : null, prelim,
+      reaction: reaction(extra.closes ?? [], day, est?.hour ?? null),
     });
     if (rows.length >= limit) break;
   }
@@ -174,9 +258,16 @@ export function earningsHistory(filings: Filing[], reports: (Report & { id?: str
 
 export function quartersFrom(rows: { kind: string; period: string; item: string; value: number }[]): Record<string, Quarter> {
   const out: Record<string, Quarter> = {};
+  const cost: Record<string, number> = {};
   for (const r of rows) {
-    if (r.kind !== "Q" || !["revenue", "operating_income", "net_income"].includes(r.item)) continue;
-    (out[r.period] ??= {})[r.item as keyof Quarter] = r.value;
+    if (r.kind !== "Q") continue;
+    if (r.item === "cost_of_sales") cost[r.period] = r.value;
+    if (!(Q_ITEMS as readonly string[]).includes(r.item)) continue;
+    (out[r.period] ??= {})[r.item as QItem] = r.value;
+  }
+  for (const [p, c] of Object.entries(cost)) {
+    const q = out[p];
+    if (q && q.gross_profit === undefined && q.revenue !== undefined) q.gross_profit = q.revenue - c;
   }
   return out;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanThesis, counts, earningsHistory, meter, metricRule, pendingSuggestion, quartersFrom, reviewRows, seeds, sortTheses, upcoming, type Thesis } from "./thesis";
+import { cleanThesis, counts, earningsHistory, meter, metricRule, pendingSuggestion, quartersFrom, reaction, reviewRows, seeds, sortTheses, upcoming, type Thesis } from "./thesis";
 import type { Report } from "./earnings";
 
 const base: Thesis = {
@@ -106,5 +106,54 @@ describe("earningsHistory", () => {
     expect(rows[1].revYoy?.text).toBe("+50%");
     expect(rows[1].review?.memo).toBe("좋았다");
     expect(earningsHistory([], [report], q, [], 2)).toHaveLength(2);
+  });
+});
+
+describe("earnings detail", () => {
+  const q = quartersFrom([
+    { kind: "Q", period: "2025Q3", item: "revenue", value: 100 }, { kind: "Q", period: "2025Q3", item: "operating_income", value: 20 },
+    { kind: "Q", period: "2025Q3", item: "net_income", value: 10 }, { kind: "Q", period: "2025Q3", item: "cost_of_sales", value: 60 },
+    { kind: "Q", period: "2026Q2", item: "revenue", value: 110 },
+    { kind: "Q", period: "2026Q3", item: "revenue", value: 120 }, { kind: "Q", period: "2026Q3", item: "operating_income", value: 30 },
+    { kind: "Q", period: "2026Q3", item: "net_income", value: 20 }, { kind: "Q", period: "2026Q3", item: "gross_profit", value: 50 },
+    { kind: "Q", period: "2026Q3", item: "cfo", value: 30 },
+  ]);
+  const closes = [
+    { day: "2026-10-21", close: 100 }, { day: "2026-10-22", close: 100 }, { day: "2026-10-23", close: 110 },
+    { day: "2026-10-26", close: 105 }, { day: "2026-10-27", close: 106 }, { day: "2026-10-28", close: 107 }, { day: "2026-10-29", close: 120 },
+  ];
+  it("compares with the market estimate and adds qoq, margins, cash and price reaction", () => {
+    const est = { period: "2026Q3", source: "finnhub" as const, epsActual: 0.5, epsEstimate: 0.4, revenueActual: 120, revenueEstimate: 125,
+      opEstimate: null, netEstimate: null, reportedOn: "2026-10-22", hour: "amc", asOf: "2026-11-02" };
+    const [r] = earningsHistory([], [], q, [], 1, { estimates: [est], closes });
+    expect(r.day).toBe("2026-10-22");
+    expect(r.est!.items.map((i) => [i.label, i.estimate, i.actual])).toEqual([["매출", 125, 120], ["EPS", 0.4, 0.5]]);
+    expect(r.est!.items[0].pct).toBeCloseTo(-4);
+    expect(r.est!.items[1].pct).toBeCloseTo(25);
+    expect(r.lines.map((l) => l.label)).toEqual(["매출", "매출총이익", "영업이익", "순이익", "영업현금흐름"]);
+    expect(r.lines[0].qoq?.text).toBe("+9%");
+    expect(r.lines[0].yoy?.text).toBe("+20%");
+    expect(r.margins.find((m) => m.label === "매출총이익률")).toMatchObject({ before: 40 });
+    expect(r.margins.find((m) => m.label === "영업이익률")!.diff).toBeCloseTo(5);
+    expect(r.cashRatio).toBeCloseTo(1.5);
+    // 장 마감 뒤 발표: 10/21 종가 기준이 아니라 발표일 10/22 전날까지의 마지막 종가(10/21) → 다음 거래일 10/23
+    expect(r.reaction).toMatchObject({ baseDay: "2026-10-21", next: { day: "2026-10-23" }, week: { day: "2026-10-29" }, when: "장 마감 뒤 발표" });
+    expect(r.reaction!.next!.pct).toBeCloseTo(10);
+  });
+  it("shows a kr consensus and the preliminary to final change", () => {
+    const rep = { period: "2026Q3", reported_on: "2026-10-23", url: "u", market: "KR", ai: "",
+      data: { unit: "KRW", lines: { revenue: { cur: 121, prev: null, yoy: 100 }, operating_income: { cur: 30, prev: null, yoy: 20 } }, eps: null, revenue_estimate: null, history: [], surprises: [], preliminary: true } } as Report;
+    const est = { period: "2026Q3", source: "naver" as const, epsActual: null, epsEstimate: null, revenueActual: null, revenueEstimate: 118,
+      opEstimate: 33, netEstimate: null, reportedOn: null, hour: null, asOf: "2026-10-22" };
+    const [r] = earningsHistory([], [rep], q, [], 1, { estimates: [est], closes });
+    expect(r.est!.items.map((i) => i.label)).toEqual(["매출", "영업이익"]);
+    expect(r.est!.items[1].pct).toBeCloseTo(-9.09, 1);
+    expect(r.prelim).toEqual([{ label: "매출", prelim: 121, final: 120 }]);
+    expect(r.reaction).toMatchObject({ baseDay: "2026-10-22", next: { day: "2026-10-26" }, when: "" });
+  });
+  it("bmo reacts the same day and missing prices give nothing", () => {
+    expect(reaction(closes, "2026-10-23", "bmo")).toMatchObject({ baseDay: "2026-10-22", next: { day: "2026-10-23" } });
+    expect(reaction(closes, "2026-10-01")).toBeNull();
+    expect(reaction(closes, "2026-10-29")).toBeNull();
   });
 });

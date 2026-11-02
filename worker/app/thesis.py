@@ -17,7 +17,7 @@ import httpx
 import psycopg
 from psycopg.types.json import Jsonb
 
-from . import ai, earnings, research, telegram
+from . import ai, earnings, estimates, research, telegram
 from .config import Config
 from .market import KST
 from .study import _json, _s
@@ -322,6 +322,7 @@ class ThesisJob:
         self.sec_ciks = sec_ciks
         self.last: datetime | None = None
         self.filed: dict[str, date] = {}  # 오늘 지난 실적 목록을 받아 본 종목
+        self.estimated: dict[str, date] = {}  # 오늘 시장 예상치를 받아 본 종목
         self.key, self.model, self.ask = ai.text_asker(cfg)
 
     @property
@@ -335,7 +336,7 @@ class ThesisJob:
             return
         self.last = now
         today = now.astimezone(KST).date()
-        for step in (lambda: self.filings(conn, today), lambda: self.metrics(conn, today), lambda: self.reviews(conn, today, now),
+        for step in (lambda: self.filings(conn, today), lambda: self.estimates(conn, today), lambda: self.metrics(conn, today), lambda: self.reviews(conn, today, now),
                      lambda: self.scan(conn, now), lambda: self.notices(conn, now)):
             try:
                 step()
@@ -369,6 +370,26 @@ class ThesisJob:
             self.filed[ticker] = today
             done += 1
             save_filings(conn, found)
+
+    def estimates(self, conn: psycopg.Connection, today: date) -> None:
+        """공부 중인 종목의 시장 예상치. 하루에 한 번, 한 회차에 몇 종목씩."""
+        done = 0
+        for ticker, market in conn.execute("SELECT ticker, market FROM study_notes WHERE status <> '탈락' ORDER BY updated_at DESC").fetchall():
+            if self.estimated.get(ticker) == today or done >= 3:
+                continue
+            self.estimated[ticker] = today
+            try:
+                if market == "KR":
+                    rows = estimates.naver_estimates(ticker, estimates.naver_quarter(ticker, self.http))
+                elif self.cfg.finnhub_api_key:
+                    rows = estimates.finnhub_estimates(ticker, *estimates.finnhub_rows(ticker, self.cfg.finnhub_api_key, today, self.http))
+                else:
+                    continue
+            except Exception as e:
+                log.warning("%s 실적 예상치 받기 실패: %s", ticker, e)
+                continue
+            done += 1
+            estimates.save(conn, rows, today)
 
     # ------------------------------------------------------------ 숫자 가설
 

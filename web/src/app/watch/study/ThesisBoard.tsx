@@ -286,11 +286,19 @@ function ReviewPanel({ review, onDone }: { review: Review & { rows: ReviewItem[]
 
 // ---------------------------------------------------------------- 지난 실적 발표 기록
 
+function Pct({ v }: { v: number }) {
+  return <b className={v >= 0 ? "up" : "down"}>{v >= 0 ? "+" : "−"}{Math.abs(v).toFixed(1)}%</b>;
+}
+
 function EarningsHistory({ rows, market }: { rows: HistoryRow[]; market: "KR" | "US" }) {
   const m = (v: number | null) => money(v, market);
+  const fmt = (v: number | null, kind: "money" | "eps") =>
+    v === null ? "-" : kind === "money" ? m(v) : market === "US" ? `$${v.toFixed(2)}` : `${Math.round(v).toLocaleString("ko-KR")}원`;
+  const noKrEst = market === "KR" && !rows.some((r) => r.est);
   return (
     <section className="panel th-history">
       <h3>실적 발표 기록</h3>
+      {noKrEst && rows.length > 0 && <p className="muted th-small">국내 시장 예상치는 지난 값을 무료로 구할 곳이 없어요. 이제부터 발표 전 예상치를 매일 적어 두니, 다음 실적부터 예상과 비교해 보여 드려요.</p>}
       {rows.length === 0 ? <p className="muted">아직 모은 실적 발표가 없어요. 공부 노트를 만들면 하루 안에 지난 3년 치 발표 목록을 모아 와요.</p> : (
         <div className="th-hist">
           {rows.map((r, i) => (
@@ -303,14 +311,54 @@ function EarningsHistory({ rows, market }: { rows: HistoryRow[]; market: "KR" | 
                 {r.review?.doneAt && <span className="th-pill g">점검함</span>}
               </summary>
               <div className="th-hist-body">
+                {r.est && r.est.items.length > 0 && (
+                  <div className="th-hist-block">
+                    <span className="th-k">시장 예상과 비교</span>
+                    <table className="th-hist-table">
+                      <thead><tr><th></th><th>예상</th><th>실제</th><th>차이</th></tr></thead>
+                      <tbody>{r.est.items.map((it) => (
+                        <tr key={it.label}>
+                          <th>{it.label}</th><td>{fmt(it.estimate, it.kind)}</td><td><b>{fmt(it.actual, it.kind)}</b></td>
+                          <td>{it.pct === null ? "-" : <span className={it.pct >= 0 ? "up" : "down"}>{it.pct >= 0 ? "+" : "−"}{Math.abs(it.pct).toFixed(1)}% {it.pct >= 0 ? "웃돎" : "밑돎"}</span>}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                    <span className="muted th-small">{r.est.source === "naver" ? `네이버 증권 컨센서스, 발표 전 마지막 기록(${fullDot(r.est.asOf)})` : "Finnhub 애널리스트 평균 예상"}</span>
+                  </div>
+                )}
+                {r.lines.length > 0 && (
+                  <div className="th-hist-block">
+                    <span className="th-k">숫자 자세히</span>
+                    <table className="th-hist-table">
+                      <thead><tr><th></th><th>이번 분기</th><th>직전 분기 대비</th><th>1년 전 대비</th></tr></thead>
+                      <tbody>{r.lines.map((l) => (
+                        <tr key={l.label}>
+                          <th>{l.label}</th><td><b>{m(l.value)}</b></td>
+                          <td>{l.qoq ? <span className={l.qoq.tone}>{l.qoq.text}</span> : "-"}</td>
+                          <td>{l.yoy ? <span className={l.yoy.tone}>{l.yoy.text}</span> : "-"}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
                 <div className="th-hist-nums">
-                  <span>영업이익률 <b>{r.opm === null ? "-" : `${r.opm.toFixed(1)}%`}</b></span>
-                  <span>순이익 <b>{m(r.net)}</b></span>
-                  {r.eps && r.eps.actual !== null && (
-                    <span>EPS <b>${r.eps.actual.toFixed(2)}</b>{r.eps.estimate !== null && <span className="muted"> (예상 ${r.eps.estimate.toFixed(2)})</span>}</span>
-                  )}
-                  <span className="muted th-small">1년 전 같은 분기와 비교</span>
+                  {r.margins.map((x) => (
+                    <span key={x.label}>{x.label} <b>{x.now!.toFixed(1)}%</b>{x.diff !== null && <span className={x.diff >= 0 ? "up" : "down"}> {x.diff >= 0 ? "+" : "−"}{Math.abs(x.diff).toFixed(1)}%p</span>}</span>
+                  ))}
+                  {r.margins.length === 0 && <span>영업이익률 <b>{r.opm === null ? "-" : `${r.opm.toFixed(1)}%`}</b></span>}
+                  {r.cashRatio !== null && <span>현금 전환 <b>{r.cashRatio.toFixed(1)}배</b> <span className="muted">(영업현금흐름 ÷ 순이익)</span></span>}
+                  {r.margins.some((x) => x.diff !== null) && <span className="muted th-small">%p는 1년 전 같은 분기와의 차이</span>}
                 </div>
+                {r.prelim.length > 0 && (
+                  <p className="th-hist-note">잠정 → 확정: {r.prelim.map((x) => `${x.label} ${m(x.prelim)} → ${m(x.final)}`).join(", ")}</p>
+                )}
+                {r.reaction && (
+                  <p className="th-hist-note">
+                    발표 뒤 주가{r.reaction.when && <span className="muted"> ({r.reaction.when})</span>}: 발표 전 종가 {fullDot(r.reaction.baseDay)} 기준
+                    {r.reaction.next && <> · 첫 거래일 <Pct v={r.reaction.next.pct} /></>}
+                    {r.reaction.week && <> · 5거래일 뒤 <Pct v={r.reaction.week.pct} /></>}
+                  </p>
+                )}
                 {r.ai && <p className="th-hist-ai">✨ {r.ai}</p>}
                 {r.review?.doneAt && (
                   <div className="th-hist-review">
