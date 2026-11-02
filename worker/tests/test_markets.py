@@ -59,6 +59,8 @@ def test_job_saves_skips_missing_keys_and_records_errors(monkeypatch):
     saved, settings = {}, {}
     monkeypatch.setattr(markets.db, "save_sector_daily", lambda conn, m, c, rows: saved.__setitem__(f"{m}:{c}", rows))
     monkeypatch.setattr(markets.db, "set_setting", lambda conn, k, v: settings.__setitem__(k, v))
+    intra = {}
+    monkeypatch.setattr(markets.db, "save_market_intraday", lambda conn, c, rows: intra.__setitem__(c, rows))
     http = FakeHttp(fail={"^SOX", "^TNX"})
     job = markets.MarketsJob(SimpleNamespace(ecos_api_key="", fred_api_key=""), http)
     now = datetime(2026, 10, 25, 1, 0, tzinfo=timezone.utc)
@@ -67,6 +69,7 @@ def test_job_saves_skips_missing_keys_and_records_errors(monkeypatch):
     st = settings["markets_status"]
     assert not st["ok"] and set(st["errors"]) == {"SOX", "US10Y"}
     assert ("^KS11", "2y") in http.asked
+    assert ("^KS11", "1mo") in http.asked and intra["KOSPI"][0][1] == Decimal("100.0") and "US2Y" not in intra
     # 30분 안에는 다시 안 받고, 그 뒤에는 짧게 받아요
     http.asked.clear()
     job.run(None, now.replace(minute=10))

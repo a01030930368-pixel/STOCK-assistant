@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardData, dir, fearGreedWord, fmtChange, fmtValue, indexed, isDoubleTap, metaOf, slice, sparkPath, type Point } from "./markets";
+import { cardData, dir, fearGreedWord, fmtChange, fmtValue, indexed, intradayPoint, isDoubleTap, metaOf, slice, sliceIntraday, sparkPath, timeOf, type Point } from "./markets";
 
 const days = (n: number, start = "2026-01-01", f = (i: number) => 100 + i): Point[] =>
   Array.from({ length: n }, (_, i) => ({ day: new Date(Date.parse(`${start}T00:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10), close: f(i) }));
@@ -25,9 +25,9 @@ describe("markets", () => {
   });
 
   it("indexes overlay lines to 100 from a common start", () => {
-    const a = indexed([{ day: "2026-01-01", close: 50 }, { day: "2026-01-02", close: 55 }, { day: "2026-01-03", close: 60 }], "2026-01-02");
+    const a = indexed([{ day: "2026-01-01", close: 50 }, { day: "2026-01-02", close: 55 }, { day: "2026-01-03", close: 60 }], { day: "2026-01-02", close: 0 });
     expect(a.map((p) => p.close)).toEqual([100, (60 / 55) * 100]);
-    expect(indexed([], "2026-01-01")).toEqual([]);
+    expect(indexed([], { day: "2026-01-01", close: 1 })).toEqual([]);
   });
 
   it("spark path includes the reference line in range", () => {
@@ -52,5 +52,36 @@ describe("fear & greed", () => {
     expect(fmtValue(m, 61.9)).toBe("62");
     expect(fmtChange(m, c.day)).toBe("+7");
     expect(dir(m, c.day)).toBe("up");
+  });
+});
+
+describe("short periods", () => {
+  // 코스피 15분 봉: 10/29(목)~11/02(월) 장중, 하루 4개씩
+  const bars: Point[] = [];
+  for (const day of ["2026-10-29", "2026-10-30", "2026-11-02"]) {
+    for (const hm of ["00:00", "01:00", "03:00", "06:15"]) bars.push(intradayPoint(`${day}T${hm}:00Z`, 2500 + bars.length));
+  }
+  it("turns utc bars into korean time points", () => {
+    expect(bars[0]).toMatchObject({ day: "2026-10-29 09:00", close: 2500 });
+    expect(timeOf(bars[0])).toBe(Date.parse("2026-10-29T09:00:00Z") / 1000);
+  });
+  it("slices 1 day, 3 trading days and a week, keeping one bar before as base", () => {
+    expect(sliceIntraday(bars, "1d").map((b) => b.day)).toEqual(["2026-10-30 15:15", "2026-11-02 09:00", "2026-11-02 10:00", "2026-11-02 12:00", "2026-11-02 15:15"]);
+    expect(sliceIntraday(bars, "3d")).toHaveLength(12);
+    expect(sliceIntraday(bars, "1w")).toHaveLength(12);
+    expect(sliceIntraday(bars.slice(0, 1), "1d")).toEqual([]);
+  });
+  it("card uses intraday bars for short periods and falls back to daily", () => {
+    const daily = days(30, "2026-10-01", (i) => 2400 + i);
+    const k = metaOf("KOSPI")!;
+    const c = cardData(k, daily, "1d", bars);
+    expect(c.points).toHaveLength(5);
+    expect(c.last?.day).toBe("2026-11-02 15:15");
+    expect(c.period?.abs).toBe(4);
+    expect(cardData(k, daily, "1d").points).toHaveLength(2);
+    expect(cardData(k, daily, "3d").points).toHaveLength(4);
+    expect(cardData(k, daily, "1w").points.length).toBe(9);
+    expect(cardData(k, daily, "1m", bars).points[0].t).toBeUndefined();
+    expect(slice(daily, "1d").at(-1)!.day).toBe("2026-10-30");
   });
 });

@@ -3,34 +3,40 @@ import type { KiwoomFill } from "./fills";
 
 type Row = {
   key: string; market: "KR" | "US"; day: string; time: string | null; ticker: string; name: string; side: "buy" | "sell";
-  quantity: string; price: string; fee: string | null; count: number; done: boolean; position_id: number | null;
+  quantity: string; price: string; fee: string | null; count: number; done: boolean; position_id: number | null; account: "main" | "isa";
 };
 
-// 최근 3개월 키움 체결. 그 체결로 쓴 기록이 있거나, 3일 안에 쓴 같은 종목 기록이 이 체결과 가장 가까우면 '적음'으로 봅니다.
+// 최근 3개월 키움 체결(일반 계좌 + ISA). 그 체결로 쓴 기록이 있거나, 3일 안에 쓴 같은 종목 기록이 이 체결과 가장 가까우면 '적음'으로 봅니다.
 // 워커가 아직 체결 테이블을 만들기 전(예전 DB)이면 빈 목록입니다.
 export async function loadFills(key?: string): Promise<KiwoomFill[]> {
+  // ISA 계좌 체결(isa_fills)도 같은 목록에 넣어요. 일반 계좌와 키가 겹치지 않게 'isa:'를 앞에 붙여요.
   const rows = await query<Row>(
-    `SELECT f.fill_key AS key, f.market, to_char(f.trade_date, 'YYYY-MM-DD') AS day, f.fill_time AS time, f.ticker,
-       COALESCE(NULLIF(f.name, ''), f.ticker) AS name, f.side, f.quantity, f.price, f.fee, f.fill_count AS count,
+    `WITH all_fills AS (
+       SELECT fill_key AS key, market, trade_date, fill_time, ticker, name, side, quantity, price, fee, fill_count, hidden, 'main' AS account FROM trade_fills
+       UNION ALL
+       SELECT 'isa:' || fill_key, 'KR', trade_date, NULL, ticker, name, side, quantity, price, fee, 1, hidden, 'isa' FROM isa_fills
+     )
+     SELECT f.key, f.market, to_char(f.trade_date, 'YYYY-MM-DD') AS day, f.fill_time AS time, f.ticker,
+       COALESCE(NULLIF(f.name, ''), f.ticker) AS name, f.side, f.quantity, f.price, f.fee, f.fill_count AS count, f.account,
        EXISTS (SELECT 1 FROM (
            SELECT b.fill_key, b.trade_date, p.ticker, p.market FROM buy_entries b JOIN positions p ON p.id = b.position_id WHERE f.side = 'buy'
            UNION ALL
            SELECT s.fill_key, s.trade_date, p.ticker, p.market FROM sell_entries s JOIN positions p ON p.id = s.position_id WHERE f.side = 'sell'
          ) e
-         WHERE e.fill_key = f.fill_key OR (e.fill_key IS NULL AND e.ticker = f.ticker AND e.market = f.market
+         WHERE e.fill_key = f.key OR (e.fill_key IS NULL AND e.ticker = f.ticker AND e.market = f.market
            AND abs(e.trade_date - f.trade_date) <= 3
            -- 일기장과 같은 규칙: 일지에서 가장 가까운 체결 하나만 '적음'
-           AND NOT EXISTS (SELECT 1 FROM trade_fills g WHERE g.ticker = f.ticker AND g.market = f.market AND g.side = f.side
-             AND g.fill_key <> f.fill_key AND abs(g.trade_date - e.trade_date) < abs(f.trade_date - e.trade_date)))) AS done,
+           AND NOT EXISTS (SELECT 1 FROM all_fills g WHERE g.ticker = f.ticker AND g.market = f.market AND g.side = f.side
+             AND g.key <> f.key AND abs(g.trade_date - e.trade_date) < abs(f.trade_date - e.trade_date)))) AS done,
        (SELECT p.id FROM positions p WHERE p.ticker = f.ticker AND p.status = 'open' ORDER BY p.id LIMIT 1) AS position_id
-     FROM trade_fills f
-     WHERE ${key ? "f.fill_key = $1" : "NOT f.hidden AND f.trade_date >= CURRENT_DATE - 92"}
+     FROM all_fills f
+     WHERE ${key ? "f.key = $1" : "NOT f.hidden AND f.trade_date >= CURRENT_DATE - 92"}
      ORDER BY f.trade_date DESC, f.fill_time DESC NULLS LAST, f.ticker`,
     key ? [key] : [],
   ).catch(() => [] as Row[]);
   return rows.map((r) => ({
     key: r.key, market: r.market, day: r.day, time: r.time, ticker: r.ticker, name: r.name, side: r.side,
     quantity: Number(r.quantity), price: Number(r.price), fee: r.fee === null ? null : Number(r.fee), count: r.count,
-    done: r.done, positionId: r.position_id,
+    done: r.done, positionId: r.position_id, isa: r.account === "isa",
   }));
 }

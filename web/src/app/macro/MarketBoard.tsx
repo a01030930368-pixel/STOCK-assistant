@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { IChartApi, Time } from "lightweight-charts";
+import type { IChartApi, UTCTimestamp } from "lightweight-charts";
 import {
-  MARKETS, MAX_OVERLAY, OVERLAY_COLORS, PERIODS, cardData, dir, fmtChange, fmtValue, indexed, isDoubleTap, metaOf, sparkPath,
+  MARKETS, MAX_OVERLAY, OVERLAY_COLORS, PERIOD_KEYS, PERIODS, cardData, isShort, timeOf, dir, fmtChange, fmtValue, indexed, isDoubleTap, metaOf, sparkPath,
   type CardData, type Period, type Point, type Tab,
 } from "@/lib/markets";
 
@@ -18,7 +18,7 @@ const load = <T extends string>(key: string, ok: readonly T[], fallback: T): T =
 };
 const save = (key: string, v: string) => { try { localStorage.setItem(key, v); } catch { /* 저장이 막혀도 화면은 그대로 써요 */ } };
 
-export default function MarketBoard({ series, status }: { series: Record<string, Point[]>; status: Status }) {
+export default function MarketBoard({ series, intraday = {}, status }: { series: Record<string, Point[]>; intraday?: Record<string, Point[]>; status: Status }) {
   const [tab, setTab] = useState<Tab>("KR");
   const [period, setPeriod] = useState<Period>("3m");
   const [focus, setFocus] = useState<string | null>(null);
@@ -28,7 +28,7 @@ export default function MarketBoard({ series, status }: { series: Record<string,
 
   useEffect(() => {
     setTab(load("mk_tab", ["KR", "US"] as const, "KR"));
-    setPeriod(load("mk_period", ["1m", "3m", "1y"] as const, "3m"));
+    setPeriod(load("mk_period", PERIOD_KEYS, "3m"));
   }, []);
   useEffect(() => {
     if (!focus) return;
@@ -37,7 +37,7 @@ export default function MarketBoard({ series, status }: { series: Record<string,
     return () => window.removeEventListener("keydown", onKey);
   }, [focus]);
 
-  const cards = useMemo(() => Object.fromEntries(MARKETS.map((m) => [m.code, cardData(m, series[m.code] ?? [], period)])), [series, period]);
+  const cards = useMemo(() => Object.fromEntries(MARKETS.map((m) => [m.code, cardData(m, series[m.code] ?? [], period, intraday[m.code] ?? [])])), [series, intraday, period]);
   const pickTab = (t: Tab) => { setTab(t); save("mk_tab", t); };
   const pickPeriod = (p: Period) => { setPeriod(p); save("mk_period", p); };
 
@@ -85,7 +85,7 @@ export default function MarketBoard({ series, status }: { series: Record<string,
         })}
       </div>
       {missing.length > 0 && <p className="muted mk-small">이번에 못 받은 지수: {missing.join(", ")} · 다음 차례(30분 뒤)에 다시 받아요.</p>}
-      {!empty && <p className="muted mk-small">야후 파이낸스·한국은행·FRED·CNN 일봉이에요. 30분마다 새로 받아요. 국고채·미국 2년 금리는 하루 늦게 나와요.</p>}
+      {!empty && <p className="muted mk-small">야후 파이낸스·한국은행·FRED·CNN 일봉이에요(1일·3일·1주는 야후 15분 봉). 30분마다 새로 받아요. 국고채·미국 2년 금리는 하루 늦게 나와요.</p>}
     </section>
   );
 }
@@ -121,7 +121,7 @@ function Focus({ main, overlay, cards, period, onClose, onRemove }: {
   const label = PERIODS.find((p) => p.key === period)!.label;
   const lines = useMemo(() => {
     if (!overlay.length) return null;
-    const from = main.points[0]?.day ?? "";
+    const from = main.points[0];
     return [main, ...overlay.map((c) => cards[c])].map((c, k) => ({
       code: c.meta.code, name: c.meta.name, color: OVERLAY_COLORS[k],
       points: indexed(c.points, from),
@@ -141,7 +141,7 @@ function Focus({ main, overlay, cards, period, onClose, onRemove }: {
         layout: { background: { type: lc.ColorType.Solid, color: "transparent" }, textColor: MUTED, fontSize: 11, fontFamily: "'Pretendard Variable', Pretendard, sans-serif", attributionLogo: false },
         grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
         rightPriceScale: { borderColor: BORDER, scaleMargins: { top: 0.1, bottom: 0.08 } },
-        timeScale: { borderColor: BORDER, rightOffset: 2 },
+        timeScale: { borderColor: BORDER, rightOffset: 2, timeVisible: isShort(period) },
         localization: { locale: "ko-KR", dateFormat: "yyyy-MM-dd" },
         handleScroll: false, handleScale: false,
       });
@@ -151,11 +151,11 @@ function Focus({ main, overlay, cards, period, onClose, onRemove }: {
             color: l.color, lineWidth: 2, title: l.name, priceLineVisible: false, lastValueVisible: true,
             priceFormat: { type: "custom", formatter: (v: number) => v.toFixed(1), minMove: 0.1 },
           });
-          s.setData(l.points.map((p) => ({ time: p.day as Time, value: p.close })));
+          s.setData(l.points.map((p) => ({ time: timeOf(p) as UTCTimestamp, value: p.close })));
         }
         const s100 = chart.addSeries(lc.LineSeries, { color: "transparent", priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
         const ends = [main.points[0], main.points.at(-1)].filter(Boolean) as Point[];
-        s100.setData(ends.map((p) => ({ time: p.day as Time, value: 100 })));
+        s100.setData(ends.map((p) => ({ time: timeOf(p) as UTCTimestamp, value: 100 })));
         s100.createPriceLine({ price: 100, color: "#4a3f28", lineWidth: 1, lineStyle: lc.LineStyle.Dashed, axisLabelVisible: false, title: "" });
       } else {
         const up = (main.period?.abs ?? 0) >= 0;
@@ -164,13 +164,13 @@ function Focus({ main, overlay, cards, period, onClose, onRemove }: {
           lineColor: color, lineWidth: 2, topColor: up ? "rgba(232,128,111,0.22)" : "rgba(134,168,230,0.22)", bottomColor: "rgba(0,0,0,0)",
           priceLineVisible: false, priceFormat: { type: "custom", formatter: (v: number) => fmtValue(meta, v), minMove: 0.01 },
         });
-        s.setData(main.points.map((p) => ({ time: p.day as Time, value: p.close })));
+        s.setData(main.points.map((p) => ({ time: timeOf(p) as UTCTimestamp, value: p.close })));
         if (meta.ref !== undefined) s.createPriceLine({ price: meta.ref, color: "#4a3f28", lineWidth: 1, lineStyle: lc.LineStyle.Dashed, axisLabelVisible: true, title: "" });
       }
       chart.timeScale().fitContent();
     })();
     return () => { disposed = true; chart?.remove(); };
-  }, [main, lines, meta]);
+  }, [main, lines, meta, period]);
 
   return (
     <div className="card mk-focus">

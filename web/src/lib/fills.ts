@@ -3,7 +3,7 @@
 export type KiwoomFill = {
   key: string; market: "KR" | "US"; day: string; time: string | null; ticker: string; name: string;
   side: "buy" | "sell"; quantity: number; price: number; fee: number | null; count: number;
-  done: boolean; positionId: number | null;
+  done: boolean; positionId: number | null; isa?: boolean;
 };
 
 // 매수는 매수 기록 폼, 매도는 그 종목의 보유 중 일지로 갑니다. 매도인데 일지가 없으면 null

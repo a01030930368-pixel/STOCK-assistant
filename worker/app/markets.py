@@ -5,6 +5,7 @@
 - 미국 10년 금리: 야후 ^TNX, 안 되면 FRED DGS10. 미국 2년 금리: FRED DGS2(FRED 키가 있어야 해요).
 - 공포·탐욕 지수: CNN 차트 데이터(키 없이, 비공식). 날짜는 뉴욕 날짜예요.
 처음 켤 때 2년 치를 받고, 그 뒤로는 30분마다 최근 며칠만 다시 받아요(오늘 봉은 그때그때 바뀌어요).
+1일·3일·1주 기간용으로 야후 지수는 15분 봉도 30분마다 받아 market_intraday에 열흘 치만 둬요.
 """
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -118,7 +119,18 @@ class MarketsJob:
                 continue  # 키가 없는 출처
             db.save_sector_daily(conn, "MK", code, scale(code, closes))
             self.full.add(code)
+            if source == "yahoo":
+                try:
+                    db.save_market_intraday(conn, code, scale(code, self._intraday(name)))
+                except Exception as e:
+                    # 짧은 기간 차트용이라 실패해도 일봉으로 그려요.
+                    log.info("%s 15분 봉 받기 실패: %s", code, e)
         db.set_setting(conn, "markets_status", {"at": now.isoformat(), "ok": not errors, "errors": errors})
+
+    def _intraday(self, name: str) -> list[tuple[datetime, Decimal]]:
+        res = self.http.get(f"{intraday.YAHOO}{name}", params={"interval": "15m", "range": "1mo"}, headers={"User-Agent": intraday.UA})
+        res.raise_for_status()
+        return [(b.ts, b.close) for b in intraday.parse_yahoo(res.json())]
 
     def _fetch(self, code: str, source: str, name: str, today: date, days: int):
         start = today - timedelta(days=days)

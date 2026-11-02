@@ -172,6 +172,8 @@ export function attachEntries(fills: FillRow[], entries: EntryRow[]): (BookEvent
     if (ev) attach(ev, e); else rest.push(e);
   }
   for (const e of rest) {
+    // ISA 계좌 체결로 쓴 일지는 일반 계좌 체결에 붙이지 않고 따로 한 줄로 둬요.
+    if (e.fill_key?.startsWith("isa:")) continue;
     const near = events
       .filter((x) => x.side === e.side && x.ticker === e.ticker && x.market === e.market && dayGap(x.day, e.day) <= NEAR_DAYS)
       .sort((a, b) => (a.entryId === null ? 0 : 1) - (b.entryId === null ? 0 : 1) || dayGap(a.day, e.day) - dayGap(b.day, e.day));

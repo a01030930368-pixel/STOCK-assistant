@@ -1,4 +1,4 @@
-"""ISA 계좌 체결을 30분마다 받아 올해 산 금액(납입 한도 확인)을 셉니다. 처음 한 번은 올해 1월 1일부터 받습니다."""
+"""ISA 계좌 체결을 30분마다 받아 올해 산 금액(납입 한도 확인)을 세고, 매수일지 체결 목록에도 보여요. 처음 한 번은 올해 1월 1일부터 받습니다."""
 import logging
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 
 from . import db, fills
+from .fills_job import FillsJob
 
 log = logging.getLogger("worker")
 
@@ -32,7 +33,14 @@ class IsaJob:
             rows = []
             for a, b in fills.chunks(start, today):
                 rows += self.kiwoom.kr_fills(a, b)
-            merged = fills.group(rows)
+            # kt00015에 아직 안 잡힌 오늘·최근 체결은 하루치 조회로 채워요(일반 계좌와 같은 방식).
+            for back in range(5):
+                day = today - timedelta(days=back)
+                try:
+                    rows += self.kiwoom.kr_day_fills(day)
+                except Exception as e:
+                    log.warning("ISA %s 하루치 체결 조회 실패: %s", day, e)
+            merged = FillsJob._merge(rows)
             db.save_isa_fills(conn, merged)
             db.set_setting(conn, YEAR_KEY, today.year)
             db.set_setting(conn, "isa_status", {"at": now.isoformat(), "ok": True, "count": len(merged)})

@@ -530,6 +530,7 @@ CREATE TABLE isa_fills (
   quantity    NUMERIC(18, 4) NOT NULL,
   price       NUMERIC(18, 4) NOT NULL,
   fee         NUMERIC(18, 4),
+  hidden      BOOLEAN NOT NULL DEFAULT false,
   fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -749,4 +750,12 @@ CREATE TABLE earnings_estimates (
   hour              TEXT,
   as_of             DATE NOT NULL,
   PRIMARY KEY (ticker, period)
+);
+
+-- 매크로 지수 15분 봉(1일·3일·1주 기간)
+CREATE TABLE market_intraday (
+  code   TEXT NOT NULL,
+  at     TIMESTAMPTZ NOT NULL,
+  close  NUMERIC(18, 4) NOT NULL,
+  PRIMARY KEY (code, at)
 );
