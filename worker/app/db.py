@@ -530,6 +530,64 @@ MIGRATIONS = [
       updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
     "CREATE INDEX IF NOT EXISTS book_notes_stock ON book_notes (market, ticker, day)",
+    # 기업 공부 가설: 확인 기준·날짜가 있는 내 생각. status watch 지켜보는 중 / ok 맞아 가는 중 / bad 흔들림 / right 맞음 / wrong 틀림
+    # metric·op·target이 있으면 분기 숫자로 앱이 확인해요. ai는 AI·숫자가 제안한 판정({status, why, at, by})
+    """CREATE TABLE IF NOT EXISTS study_theses (
+      id          SERIAL PRIMARY KEY,
+      ticker      TEXT NOT NULL REFERENCES study_notes(ticker) ON DELETE CASCADE,
+      title       TEXT NOT NULL,
+      rule        TEXT NOT NULL DEFAULT '',
+      due_on      DATE,
+      metric      TEXT,
+      op          TEXT CHECK (op IN ('>=', '<=')),
+      target      NUMERIC(14, 2),
+      status      TEXT NOT NULL DEFAULT 'watch' CHECK (status IN ('watch', 'ok', 'bad', 'right', 'wrong')),
+      source      TEXT NOT NULL DEFAULT 'self',
+      ai          JSONB,
+      scanned_at  TIMESTAMPTZ,
+      decided_at  TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    # 가설 근거: 실적·공시·뉴스·분기 숫자·내 메모. ref로 같은 근거가 두 번 붙지 않게 해요
+    """CREATE TABLE IF NOT EXISTS study_evidence (
+      id          SERIAL PRIMARY KEY,
+      thesis_id   INTEGER NOT NULL REFERENCES study_theses(id) ON DELETE CASCADE,
+      day         DATE NOT NULL,
+      kind        TEXT NOT NULL,
+      ref         TEXT NOT NULL,
+      text        TEXT NOT NULL,
+      url         TEXT NOT NULL DEFAULT '',
+      sign        TEXT NOT NULL DEFAULT 'neutral' CHECK (sign IN ('up', 'down', 'neutral')),
+      value       NUMERIC(14, 2),
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (thesis_id, ref)
+    )""",
+    "CREATE INDEX IF NOT EXISTS study_evidence_thesis ON study_evidence (thesis_id, day DESC)",
+    # 실적 날 점검: 실적이 나오면 한 줄(종목:분기). 점검을 마치면 그때 판정을 items에 남겨요
+    """CREATE TABLE IF NOT EXISTS study_reviews (
+      id          TEXT PRIMARY KEY,
+      ticker      TEXT NOT NULL REFERENCES study_notes(ticker) ON DELETE CASCADE,
+      period      TEXT NOT NULL,
+      day         DATE NOT NULL,
+      items       JSONB NOT NULL DEFAULT '[]',
+      memo        TEXT NOT NULL DEFAULT '',
+      done_at     TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    # 지난 실적 발표 목록(국내 잠정실적·정기보고서, 미국 8-K 실적·10-Q·10-K). 숫자는 재무제표에서 붙여요
+    """CREATE TABLE IF NOT EXISTS earnings_filings (
+      ticker   TEXT NOT NULL,
+      day      DATE NOT NULL,
+      period   TEXT NOT NULL,
+      title    TEXT NOT NULL,
+      url      TEXT NOT NULL,
+      source   TEXT NOT NULL,
+      PRIMARY KEY (ticker, url)
+    )""",
+    "CREATE INDEX IF NOT EXISTS earnings_filings_ticker ON earnings_filings (ticker, day DESC)",
+    # 깊이 보기 탭의 내 생각 한 줄
+    "ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS deep_note TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -828,12 +886,14 @@ def earnings_soon(conn: psycopg.Connection, ticker: str, start, end) -> bool:
     ).fetchone() is not None
 
 
-def us_stocks(conn: psycopg.Connection) -> list[tuple[str, str, bool]]:
-    """실적을 볼 미국 종목: 들고 있는 것과 미국 관심종목. (ticker, name, 들고 있나)"""
+def us_stocks(conn: psycopg.Connection) -> list[tuple[str, str, bool, bool]]:
+    """실적을 볼 미국 종목: 들고 있는 것, 미국 관심종목, 공부 중인 미국 종목. (ticker, name, 들고 있나, 알릴까)
+    공부만 하는 종목은 실적 점검용으로 정리만 하고 텔레그램 실적 알림은 보내지 않아요."""
     return conn.execute(
-        """SELECT ticker, max(name), bool_or(held) FROM (
-             SELECT ticker, name, true AS held FROM holdings WHERE market = 'US' AND quantity > 0
-             UNION ALL SELECT ticker, name, false FROM watchlist WHERE market = 'US'
+        """SELECT ticker, max(name), bool_or(held), bool_or(alert) FROM (
+             SELECT ticker, name, true AS held, true AS alert FROM holdings WHERE market = 'US' AND quantity > 0
+             UNION ALL SELECT ticker, name, false, true FROM watchlist WHERE market = 'US'
+             UNION ALL SELECT ticker, name, false, false FROM study_notes WHERE market = 'US' AND status <> '탈락'
            ) h GROUP BY ticker ORDER BY ticker"""
     ).fetchall()
 
@@ -987,13 +1047,15 @@ def held_quantities(conn: psycopg.Connection) -> list[tuple[str, str, str, Decim
     return conn.execute("SELECT ticker, name, market, quantity FROM held_all ORDER BY ticker").fetchall()
 
 
-def disclosure_stocks(conn: psycopg.Connection) -> list[tuple[str, str, bool]]:
-    """공시를 볼 국내 종목: 일반 계좌·ISA에 들고 있는 것과 국내 관심종목. (ticker, name, 들고 있나)"""
+def disclosure_stocks(conn: psycopg.Connection) -> list[tuple[str, str, bool, bool]]:
+    """공시를 볼 국내 종목: 일반 계좌·ISA에 들고 있는 것, 국내 관심종목, 공부 중인 국내 종목. (ticker, name, 들고 있나, 알릴까)
+    공부만 하는 종목은 가설 근거·실적 점검에 쓰려고 모으기만 하고 텔레그램으로 알리지는 않아요."""
     return conn.execute(
-        """SELECT ticker, max(name), bool_or(held) FROM (
-             SELECT ticker, name, true AS held FROM holdings WHERE market = 'KR' AND quantity > 0
-             UNION ALL SELECT ticker, name, true FROM isa_holdings WHERE quantity > 0
-             UNION ALL SELECT ticker, name, false FROM watchlist WHERE market = 'KR'
+        """SELECT ticker, max(name), bool_or(held), bool_or(alert) FROM (
+             SELECT ticker, name, true AS held, true AS alert FROM holdings WHERE market = 'KR' AND quantity > 0
+             UNION ALL SELECT ticker, name, true, true FROM isa_holdings WHERE quantity > 0
+             UNION ALL SELECT ticker, name, false, true FROM watchlist WHERE market = 'KR'
+             UNION ALL SELECT ticker, name, false, false FROM study_notes WHERE market = 'KR' AND status <> '탈락'
            ) h GROUP BY ticker ORDER BY ticker"""
     ).fetchall()
 

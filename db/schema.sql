@@ -473,6 +473,7 @@ CREATE TABLE study_notes (
   ai_fill      BOOLEAN NOT NULL DEFAULT false,
   ai_retry_at  TIMESTAMPTZ,   -- Gemini가 붐비면 이때 다시 써 봐요
   ai_tries     INTEGER NOT NULL DEFAULT 0,
+  deep_note    TEXT NOT NULL DEFAULT '',  -- 깊이 보기 탭의 내 생각 한 줄
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -676,3 +677,58 @@ CREATE OR REPLACE VIEW held_all AS
   FROM (SELECT ticker, name, market, quantity, avg_price, cur_price, eval_amount, pnl, pnl_pct FROM holdings WHERE quantity > 0
         UNION ALL SELECT ticker, name, 'KR', quantity, avg_price, cur_price, eval_amount, pnl, pnl_pct FROM isa_holdings WHERE quantity > 0) t
   GROUP BY ticker;
+
+-- 기업 공부 가설: 확인 기준·날짜가 있는 내 생각과 그 근거, 실적 날 점검
+CREATE TABLE study_theses (
+  id          SERIAL PRIMARY KEY,
+  ticker      TEXT NOT NULL REFERENCES study_notes(ticker) ON DELETE CASCADE,
+  title       TEXT NOT NULL,
+  rule        TEXT NOT NULL DEFAULT '',
+  due_on      DATE,
+  metric      TEXT,
+  op          TEXT CHECK (op IN ('>=', '<=')),
+  target      NUMERIC(14, 2),
+  status      TEXT NOT NULL DEFAULT 'watch' CHECK (status IN ('watch', 'ok', 'bad', 'right', 'wrong')),
+  source      TEXT NOT NULL DEFAULT 'self',
+  ai          JSONB,
+  scanned_at  TIMESTAMPTZ,
+  decided_at  TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE study_evidence (
+  id          SERIAL PRIMARY KEY,
+  thesis_id   INTEGER NOT NULL REFERENCES study_theses(id) ON DELETE CASCADE,
+  day         DATE NOT NULL,
+  kind        TEXT NOT NULL,
+  ref         TEXT NOT NULL,
+  text        TEXT NOT NULL,
+  url         TEXT NOT NULL DEFAULT '',
+  sign        TEXT NOT NULL DEFAULT 'neutral' CHECK (sign IN ('up', 'down', 'neutral')),
+  value       NUMERIC(14, 2),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (thesis_id, ref)
+);
+CREATE INDEX study_evidence_thesis ON study_evidence (thesis_id, day DESC);
+CREATE TABLE study_reviews (
+  id          TEXT PRIMARY KEY,
+  ticker      TEXT NOT NULL REFERENCES study_notes(ticker) ON DELETE CASCADE,
+  period      TEXT NOT NULL,
+  day         DATE NOT NULL,
+  items       JSONB NOT NULL DEFAULT '[]',
+  memo        TEXT NOT NULL DEFAULT '',
+  done_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 지난 실적 발표 목록(국내 잠정실적·정기보고서, 미국 8-K 실적·10-Q·10-K)
+CREATE TABLE earnings_filings (
+  ticker   TEXT NOT NULL,
+  day      DATE NOT NULL,
+  period   TEXT NOT NULL,
+  title    TEXT NOT NULL,
+  url      TEXT NOT NULL,
+  source   TEXT NOT NULL,
+  PRIMARY KEY (ticker, url)
+);
+CREATE INDEX earnings_filings_ticker ON earnings_filings (ticker, day DESC);

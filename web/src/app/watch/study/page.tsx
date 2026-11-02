@@ -9,6 +9,11 @@ import StudyDice from "./StudyDice";
 import StudyGroups, { StudyCompare, type Group, type GroupItem } from "./StudyGroups";
 import StudyList, { type ListItem } from "./StudyList";
 import StudyNote, { type NoteData } from "./StudyNote";
+import ThesisBoard, { type ThesisData } from "./ThesisBoard";
+import DeepView from "./DeepView";
+import { earningsHistory, quartersFrom, reviewRows, seeds, upcoming, type Evidence, type Filing, type Review, type Status, type Suggestion, type Thesis } from "@/lib/thesis";
+import type { Report } from "@/lib/earnings";
+import type { BriefInput } from "@/lib/brief";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +25,7 @@ type NoteRow = {
   updated: string;
 };
 
-export default async function StudyPage({ searchParams }: { searchParams: Promise<{ t?: string; step?: string; bad?: string; view?: string; sector?: string; style?: string }> }) {
+export default async function StudyPage({ searchParams }: { searchParams: Promise<{ t?: string; step?: string; bad?: string; view?: string; sector?: string; style?: string; tab?: string }> }) {
   const sp = await searchParams;
   // 🤖 전부 채우기 초안이 기다리는 동안 도착했으면 지금 채워요.
   if (sp.t) await settleStudyFill(sp.t).catch(() => false);
@@ -76,6 +81,10 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
 
   const picked = sp.t ? rows.find((r) => r.ticker === sp.t!.toUpperCase()) : undefined;
   let note: NoteData | null = null;
+  const tab = sp.tab === "thesis" || sp.tab === "deep" ? sp.tab : "note";
+  let thesisData: ThesisData | null = null;
+  let deep: { input: BriefInput; note: string } | null = null;
+  let openCount = 0;
   if (picked) {
     const t = picked.ticker;
     const input = await loadBriefInput(t, picked.market);
@@ -107,6 +116,13 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
       mine.debt = numbers.debt;
       mine.growth = prev && last !== undefined && last !== null ? Math.round((last / prev - 1) * 1000) / 10 : mine.growth;
       mine.ready = true;
+    }
+    const [oc] = await safe<{ n: number }>("SELECT count(*)::int AS n FROM study_theses WHERE ticker = $1 AND status IN ('watch', 'ok', 'bad')", [t]);
+    openCount = oc?.n ?? 0;
+    if (tab === "thesis") thesisData = await loadThesis(t, picked.name, picked.market, cleanFields(picked.fields), input, today);
+    if (tab === "deep") {
+      const [dn] = await safe<{ deep_note: string }>("SELECT deep_note FROM study_notes WHERE ticker = $1", [t]);
+      deep = { input, note: dn?.deep_note ?? "" };
     }
     note = {
       ticker: t, name: picked.name, market: picked.market, status: picked.status, confidence: picked.confidence, fields: cleanFields(picked.fields, true),
@@ -148,7 +164,24 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
           ) : note ? (
             <>
               <Link href="/watch/study" className="study-back">‹ 노트 목록</Link>
-              <StudyNote key={`${note.ticker}:${note.done}`} note={note} />
+              <nav className="tabs2" aria-label="노트 보기">
+                {([["note", "노트"], ["thesis", "가설"], ["deep", "깊이 보기"]] as const).map(([k, label]) => (
+                  <Link key={k} href={`/watch/study?t=${encodeURIComponent(note!.ticker)}${k === "note" ? "" : `&tab=${k}`}`} aria-current={tab === k ? "page" : undefined}>
+                    {label}{k === "thesis" && openCount > 0 && <em>{openCount}</em>}
+                  </Link>
+                ))}
+              </nav>
+              {tab === "note" ? <StudyNote key={`${note.ticker}:${note.done}`} note={note} /> : (
+                <>
+                  <div className="study-title th-title">
+                    <h2>{note.name}</h2>
+                    <span className="muted">{note.ticker}{note.price !== null && ` · ${note.market === "US" ? `$${note.price.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : `${Math.round(note.price).toLocaleString("ko-KR")}원`}`}</span>
+                    <span className={`study-tag s-${note.status}`}>{note.status}</span>
+                  </div>
+                  {tab === "thesis" && thesisData && <ThesisBoard data={thesisData} />}
+                  {tab === "deep" && deep && <DeepView ticker={note.ticker} input={deep.input} note={deep.note} />}
+                </>
+              )}
             </>
           ) : (
             <div className="panel study-intro">
@@ -172,4 +205,45 @@ export default async function StudyPage({ searchParams }: { searchParams: Promis
       </div>
     </>
   );
+}
+
+// 가설 탭 자료: 가설·근거, 아직 안 끝낸 실적 날 점검, 다가오는 확인 날, 지난 실적 발표 기록
+async function loadThesis(ticker: string, name: string, market: "KR" | "US", fields: ReturnType<typeof cleanFields>, input: BriefInput, today: string): Promise<ThesisData> {
+  const rows = await safe<{
+    id: number; title: string; rule: string; due_on: string | null; metric: Thesis["metric"]; op: Thesis["op"]; target: string | null; status: Status;
+    source: string; ai: Suggestion | null; created_at: string; decided_at: string | null; scanned: boolean;
+  }>(
+    `SELECT id, title, rule, to_char(due_on, 'YYYY-MM-DD') AS due_on, metric, op, target, status, source, ai,
+       to_char(created_at, 'YYYY-MM-DD') AS created_at, to_char(decided_at, 'YYYY-MM-DD') AS decided_at, scanned_at IS NOT NULL AS scanned
+     FROM study_theses WHERE ticker = $1 ORDER BY id`, [ticker],
+  );
+  const ev = await safe<Evidence & { thesis_id: number; value: string | null }>(
+    `SELECT e.id, e.thesis_id, to_char(e.day, 'YYYY-MM-DD') AS day, e.kind, e.ref, e.text, e.url, e.sign, e.value
+     FROM study_evidence e JOIN study_theses t ON t.id = e.thesis_id WHERE t.ticker = $1`, [ticker],
+  );
+  const theses: Thesis[] = rows.map((r) => ({
+    id: r.id, title: r.title, rule: r.rule, dueOn: r.due_on, metric: r.metric, op: r.op, target: r.target === null ? null : Number(r.target),
+    status: r.status, source: r.source, ai: r.ai, createdAt: r.created_at, decidedAt: r.decided_at, scanned: r.scanned,
+    evidence: ev.filter((e) => e.thesis_id === r.id).map((e) => ({ ...e, value: e.value === null ? null : Number(e.value) })),
+  }));
+  const reviews = (await safe<{ id: string; period: string; day: string; memo: string; done_at: string | null; items: Review["items"] }>(
+    "SELECT id, period, to_char(day, 'YYYY-MM-DD') AS day, memo, to_char(done_at, 'YYYY-MM-DD') AS done_at, items FROM study_reviews WHERE ticker = $1 ORDER BY period DESC", [ticker],
+  )).map<Review>((r) => ({ id: r.id, period: r.period, day: r.day, memo: r.memo, doneAt: r.done_at, items: r.items ?? [] }));
+  const pending = reviews.find((r) => !r.doneAt) ?? null;
+  const filings = await safe<Filing>(
+    "SELECT to_char(day, 'YYYY-MM-DD') AS day, period, title, url, source FROM earnings_filings WHERE ticker = $1 ORDER BY day", [ticker],
+  );
+  const reports = await safe<Report>(
+    "SELECT period, to_char(reported_on, 'YYYY-MM-DD') AS reported_on, url, market, data, ai FROM earnings_reports WHERE ticker = $1 ORDER BY reported_on", [ticker],
+  );
+  const events = await safe<{ day: string; title: string; kind: string }>(
+    "SELECT to_char(day, 'YYYY-MM-DD') AS day, title, kind FROM calendar_events WHERE ticker = $1 AND day >= CURRENT_DATE ORDER BY day LIMIT 6", [ticker],
+  );
+  return {
+    ticker, name, market, theses, seeds: seeds(fields, theses.map((x) => x.title)),
+    review: pending ? { ...pending, rows: reviewRows(pending.period, theses) } : null,
+    history: earningsHistory(filings, reports, quartersFrom(input.statements), reviews),
+    upcoming: upcoming(theses, events, today),
+    aiKey: Boolean(process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY), today,
+  };
 }

@@ -79,7 +79,8 @@ class EarningsJob:
 
     def _us(self, conn: psycopg.Connection, now: datetime) -> None:
         today = now.date()
-        for ticker, name, held in db.us_stocks(conn):
+        for ticker, name, held, *more in db.us_stocks(conn):
+            alert = more[0] if more else True
             soon = db.earnings_soon(conn, ticker, today - timedelta(days=FRESH_DAYS + 1), today + timedelta(days=1))
             tried = self.tried.get(ticker)
             if not soon and tried and now - tried < RETRY:
@@ -101,7 +102,7 @@ class EarningsJob:
                 self.explained.add(r.id)
                 text = self._explain(conn, r)
             db.save_earnings_report(conn, r, text)
-            if fresh:
+            if fresh and alert:
                 self._send(conn, f"earnings:{r.id}", earnings.message(r, text or "", held))
 
     # ------------------------------------------------------------ 공통
