@@ -728,13 +728,17 @@ def watched_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
     ).fetchall()
 
 
-def unpriced_stocks(conn: psycopg.Connection) -> list[tuple[str, str, str]]:
-    """일봉이 하나도 없는 관심종목·ISA 종목. (ticker, name, market)"""
+def unpriced_stocks(conn: psycopg.Connection, stale_days: int = 4) -> list[tuple[str, str, str]]:
+    """일봉이 없거나 마지막 일봉이 stale_days일보다 오래된 관심종목·ISA·공부 종목. (ticker, name, market)
+    연습 문제용으로 예전에 받아 둔 일봉만 있는 종목(예: 인텔)도 바로 최신 일봉을 받게 합니다."""
     return conn.execute(
         """SELECT w.ticker, w.name, w.market FROM (
              SELECT ticker, name, market FROM watchlist UNION SELECT ticker, name, 'KR' FROM isa_holdings
              UNION SELECT ticker, name, market FROM study_notes WHERE status <> '탈락') w
-           WHERE NOT EXISTS (SELECT 1 FROM price_history p WHERE p.ticker = w.ticker) ORDER BY w.ticker"""
+           WHERE COALESCE((SELECT max(day) FROM price_history p WHERE p.ticker = w.ticker), '1900-01-01')
+                 < CURRENT_DATE - %s::int
+           ORDER BY w.ticker""",
+        (stale_days,),
     ).fetchall()
 
 

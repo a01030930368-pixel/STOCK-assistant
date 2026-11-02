@@ -47,3 +47,19 @@ def test_us_stock_also_gets_korean_articles(monkeypatch):
     job._news(None, datetime(2026, 10, 20, tzinfo=timezone.utc))
     # 한글 이름이 없는 종목은 국내 기사를 찾지 않아요.
     assert calls == [("finnhub", "IONQ"), ("google", "아이온큐"), ("finnhub", "PLTR")]
+
+
+def test_stale_prices_are_refetched_and_retried_after_an_hour(monkeypatch):
+    from datetime import timedelta
+    from app import prices
+    got, saved = [], []
+    monkeypatch.setattr(db, "unpriced_stocks", lambda conn: [("INTC", "인텔", "US")])
+    monkeypatch.setattr(db, "save_prices", lambda conn, t, rows: saved.append(t))
+    monkeypatch.setattr(prices, "us_daily", lambda t, http: got.append(t) or [])
+    job = ResearchJob(SimpleNamespace(), httpx.Client())
+    t0 = datetime(2026, 11, 2, 3, tzinfo=timezone.utc)
+    job._new_prices(None, t0)
+    job._new_prices(None, t0 + timedelta(minutes=30))
+    assert got == ["INTC"]
+    job._new_prices(None, t0 + timedelta(hours=1))
+    assert got == ["INTC", "INTC"] and saved == ["INTC", "INTC"]
