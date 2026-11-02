@@ -11,7 +11,7 @@ import StudyList, { type ListItem } from "./StudyList";
 import StudyNote, { type NoteData } from "./StudyNote";
 import ThesisBoard, { type ThesisData } from "./ThesisBoard";
 import DeepView from "./DeepView";
-import { earningsHistory, quartersFrom, reviewRows, seeds, upcoming, type Evidence, type Filing, type Review, type Status, type Suggestion, type Thesis } from "@/lib/thesis";
+import { earningsHistory, quartersFrom, reviewRows, seeds, upcoming, type Close, type Estimate, type Evidence, type Filing, type Review, type Status, type Suggestion, type Thesis } from "@/lib/thesis";
 import type { Report } from "@/lib/earnings";
 import type { BriefInput } from "@/lib/brief";
 
@@ -239,10 +239,22 @@ async function loadThesis(ticker: string, name: string, market: "KR" | "US", fie
   const events = await safe<{ day: string; title: string; kind: string }>(
     "SELECT to_char(day, 'YYYY-MM-DD') AS day, title, kind FROM calendar_events WHERE ticker = $1 AND day >= CURRENT_DATE ORDER BY day LIMIT 6", [ticker],
   );
+  const num = (v: string | null) => (v === null ? null : Number(v));
+  const estimates = (await safe<{ period: string; source: Estimate["source"]; eps_actual: string | null; eps_estimate: string | null; revenue_actual: string | null;
+    revenue_estimate: string | null; op_estimate: string | null; net_estimate: string | null; reported_on: string | null; hour: string | null; as_of: string }>(
+    `SELECT period, source, eps_actual, eps_estimate, revenue_actual, revenue_estimate, op_estimate, net_estimate,
+       to_char(reported_on, 'YYYY-MM-DD') AS reported_on, hour, to_char(as_of, 'YYYY-MM-DD') AS as_of FROM earnings_estimates WHERE ticker = $1`, [ticker],
+  )).map<Estimate>((r) => ({
+    period: r.period, source: r.source, epsActual: num(r.eps_actual), epsEstimate: num(r.eps_estimate), revenueActual: num(r.revenue_actual),
+    revenueEstimate: num(r.revenue_estimate), opEstimate: num(r.op_estimate), netEstimate: num(r.net_estimate), reportedOn: r.reported_on, hour: r.hour, asOf: r.as_of,
+  }));
+  const closes = (await safe<{ day: string; close: string }>(
+    "SELECT to_char(day, 'YYYY-MM-DD') AS day, close FROM price_history WHERE ticker = $1 AND day >= CURRENT_DATE - 1200 ORDER BY day", [ticker],
+  )).map<Close>((r) => ({ day: r.day, close: Number(r.close) }));
   return {
     ticker, name, market, theses, seeds: seeds(fields, theses.map((x) => x.title)),
     review: pending ? { ...pending, rows: reviewRows(pending.period, theses) } : null,
-    history: earningsHistory(filings, reports, quartersFrom(input.statements), reviews),
+    history: earningsHistory(filings, reports, quartersFrom(input.statements), reviews, 12, { estimates, closes }),
     upcoming: upcoming(theses, events, today),
     aiKey: Boolean(process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY), today,
   };

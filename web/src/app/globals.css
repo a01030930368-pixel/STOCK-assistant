@@ -1383,6 +1383,12 @@ p .study-lab, span.study-lab { display: inline; margin-right: 6px; }
 .th-hist-body { padding: 0 0 10px 60px; display: grid; gap: 6px; font-size: 0.84rem; }
 .th-hist-nums { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; }
 .th-hist-ai { margin: 0; color: var(--sub); }
+.th-hist-block { display: grid; gap: 4px; }
+.th-hist-table { border-collapse: collapse; width: 100%; max-width: 560px; font-variant-numeric: tabular-nums; }
+.th-hist-table th, .th-hist-table td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+.th-hist-table thead th { color: var(--sub); font-weight: 500; font-size: 0.78rem; }
+.th-hist-table tbody th { text-align: left; font-weight: 500; color: var(--sub); }
+.th-hist-note { margin: 0; }
 .th-hist-review { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 .th-hist-review p { margin: 2px 0; }
 .th-hist-review ul { margin: 4px 0 0; padding-left: 18px; }

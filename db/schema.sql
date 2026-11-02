@@ -732,3 +732,21 @@ CREATE TABLE earnings_filings (
   PRIMARY KEY (ticker, url)
 );
 CREATE INDEX earnings_filings_ticker ON earnings_filings (ticker, day DESC);
+
+-- 실적 발표의 시장 예상치
+CREATE TABLE earnings_estimates (
+  ticker            TEXT NOT NULL,
+  period            TEXT NOT NULL,
+  market            TEXT NOT NULL,
+  source            TEXT NOT NULL,
+  eps_actual        NUMERIC(18, 4),
+  eps_estimate      NUMERIC(18, 4),
+  revenue_actual    NUMERIC(24, 2),
+  revenue_estimate  NUMERIC(24, 2),
+  op_estimate       NUMERIC(24, 2),
+  net_estimate      NUMERIC(24, 2),
+  reported_on       DATE,
+  hour              TEXT,
+  as_of             DATE NOT NULL,
+  PRIMARY KEY (ticker, period)
+);

@@ -588,6 +588,23 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS earnings_filings_ticker ON earnings_filings (ticker, day DESC)",
     # 깊이 보기 탭의 내 생각 한 줄
     "ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS deep_note TEXT NOT NULL DEFAULT ''",
+    # 실적 발표의 시장 예상치(미국 Finnhub, 국내는 네이버 예상 칸을 발표 전까지 매일 적어 둔 값)
+    """CREATE TABLE IF NOT EXISTS earnings_estimates (
+      ticker            TEXT NOT NULL,
+      period            TEXT NOT NULL,
+      market            TEXT NOT NULL,
+      source            TEXT NOT NULL,
+      eps_actual        NUMERIC(18, 4),
+      eps_estimate      NUMERIC(18, 4),
+      revenue_actual    NUMERIC(24, 2),
+      revenue_estimate  NUMERIC(24, 2),
+      op_estimate       NUMERIC(24, 2),
+      net_estimate      NUMERIC(24, 2),
+      reported_on       DATE,
+      hour              TEXT,
+      as_of             DATE NOT NULL,
+      PRIMARY KEY (ticker, period)
+    )""",
 ]
 
 
