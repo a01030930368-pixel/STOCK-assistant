@@ -14,6 +14,7 @@ log = logging.getLogger("worker")
 KST = ZoneInfo("Asia/Seoul")
 NEWS_EVERY = timedelta(hours=1)
 FUNDAMENTALS_EVERY = timedelta(hours=12)
+PRICE_RETRY = timedelta(hours=1)
 CODES_EVERY = timedelta(days=1)
 SUMMARY_MAX = 1000  # 번역 주소에 넣을 수 있게 긴 요약은 잘라서 옮깁니다
 
@@ -28,7 +29,7 @@ class ResearchJob:
         self.dart_codes: dict[str, str] = {}
         self.sec_ciks: dict[str, int] = {}
         self.codes_at: datetime | None = None
-        self.tried_prices: set[str] = set()
+        self.tried_prices: dict[str, datetime] = {}
         self.ir_seen: dict = {}
         self.tried_study: set[str] = set()
 
@@ -104,12 +105,14 @@ class ResearchJob:
                 self._try(f"{ticker} 일봉", lambda: db.save_prices(conn, ticker, prices.us_daily(ticker, self.http)))
 
     def _new_prices(self, conn: psycopg.Connection, now: datetime) -> None:
-        # 새로 넣은 관심종목은 12시간을 기다리지 않고 바로 일봉을 받아 차트가 보이게 합니다.
+        # 새로 넣은 관심종목이나 일봉이 며칠 밀린 종목은 12시간을 기다리지 않고 바로 받아 차트를 최신으로 맞춥니다.
+        # 실패하거나 받아도 그대로면(상장 폐지 등) 한 시간 뒤에 다시 해 봅니다.
         base = now.astimezone(KST).strftime("%Y%m%d")
         for ticker, name, market in db.unpriced_stocks(conn):
-            if ticker in self.tried_prices:
+            last = self.tried_prices.get(ticker)
+            if last is not None and now - last < PRICE_RETRY:
                 continue
-            self.tried_prices.add(ticker)
+            self.tried_prices[ticker] = now
             if market == "KR" and self.kiwoom:
                 self._try(f"{name} 일봉", lambda: db.save_prices(conn, ticker, self.kiwoom.kr_daily(ticker, base)))
             elif market == "US":
