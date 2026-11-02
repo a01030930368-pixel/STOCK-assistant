@@ -107,10 +107,10 @@ def from_dart(reports: dict[tuple[int, int], list[dict]]) -> list[Line]:
 
 
 def dart_statements(corp_code: str, key: str, today: date, http: httpx.Client) -> list[Line]:
-    """작년·올해 분기·반기·사업보고서를 받아요. 연결 재무제표가 있으면 연결, 없으면 별도."""
+    """재작년·작년·올해 분기·반기·사업보고서를 받아요(12분기). 연결 재무제표가 있으면 연결, 없으면 별도."""
     for fs_div in ("CFS", "OFS"):
         reports = {}
-        for year in (today.year - 1, today.year):
+        for year in (today.year - 2, today.year - 1, today.year):
             for code, q in REPORTS.items():
                 body = _dart_json(http, "fnlttSinglAcntAll.json", {
                     "crtfc_key": key, "corp_code": corp_code, "bsns_year": str(year), "reprt_code": code, "fs_div": fs_div,
@@ -224,7 +224,7 @@ def from_sec(facts: dict, rate: Decimal = Decimal(1)) -> list[Line]:
             if item not in q4 and item in values and all(p is not None for p in parts):
                 q4[item] = values[item] - sum(parts)
     keep_y = sorted(years)[-KEEP_YEARS:]
-    keep_q = sorted(p for p in quarters if quarters[p])[-8:]
+    keep_q = sorted(p for p in quarters if quarters[p])[-12:]
     lines = [Line("Y", y, k, v) for y in keep_y for k, v in _fcf(years[y]).items()]
     lines += [Line("Q", p, k, v) for p in keep_q for k, v in _fcf(quarters[p]).items()]
     return lines

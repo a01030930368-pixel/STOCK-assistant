@@ -13,6 +13,7 @@ import { buildCells, type Cell } from "@/lib/brief";
 import { decodeGame, score, STEPS, type Decision } from "@/lib/practice";
 import { ALL_PARTS, applyDraft, cleanFields, reviewDefault, STATUSES, type Draft, type Fields } from "@/lib/study";
 import { loadBriefInput } from "@/lib/briefData";
+import { cleanThesis, STATUSES as THESIS_STATUSES, type ReviewItem } from "@/lib/thesis";
 import type { LiveValue } from "@/lib/live";
 import { KIND_LABEL, validColor, validDoodle, validShape, type DoodlePoint, type LevelKind, type ShapeKind } from "@/lib/drawings";
 
@@ -948,4 +949,105 @@ export async function pollLive(ticker: string, market: string): Promise<LiveValu
     [`live:${t}`, market],
   ).catch(() => []);
   return row?.value ?? null;
+}
+
+// ---------------------------------------------------------------- 기업 공부 › 가설 탭
+
+// 가설 추가·고치기. 숫자 기준을 바꾸면 예전 숫자 근거와 제안은 지우고 워커가 다시 맞춰 봐요.
+export async function saveThesis(input: Record<string, string>): Promise<{ error?: string; id?: number }> {
+  const ticker = String(input.ticker ?? "").toUpperCase();
+  if (!STUDY_TICKER.test(ticker)) return { error: "노트를 찾지 못했어요." };
+  const t = cleanThesis(input);
+  if ("error" in t) return { error: t.error };
+  const id = Number(input.id) || 0;
+  if (id > 0) {
+    const [old] = await query<{ metric: string | null; op: string | null; target: string | null }>("SELECT metric, op, target FROM study_theses WHERE id = $1 AND ticker = $2", [id, ticker]);
+    if (!old) return { error: "가설을 찾지 못했어요." };
+    const changed = old.metric !== t.metric || old.op !== t.op || (old.target === null ? null : Number(old.target)) !== t.target;
+    await query(
+      `UPDATE study_theses SET title = $3, rule = $4, due_on = $5::date, metric = $6, op = $7, target = $8, updated_at = now(),
+         ai = CASE WHEN $9 THEN NULL ELSE ai END, scanned_at = NULL WHERE id = $1 AND ticker = $2`,
+      [id, ticker, t.title, t.rule, t.dueOn, t.metric, t.op, t.target, changed],
+    );
+    if (changed) await query("DELETE FROM study_evidence WHERE thesis_id = $1 AND kind = 'metric'", [id]);
+    refreshStudy(ticker);
+    return { id };
+  }
+  const [row] = await query<{ id: number }>(
+    `INSERT INTO study_theses (ticker, title, rule, due_on, metric, op, target, source) VALUES ($1, $2, $3, $4::date, $5, $6, $7, $8) RETURNING id`,
+    [ticker, t.title, t.rule, t.dueOn, t.metric, t.op, t.target, t.source],
+  );
+  refreshStudy(ticker);
+  return { id: row?.id };
+}
+
+// 판정 정하기. 맞음·틀림은 끝난 가설이라 날짜를 남겨요.
+export async function setThesisStatus(id: number, status: string) {
+  if (!(THESIS_STATUSES as string[]).includes(status)) return;
+  const [row] = await query<{ ticker: string }>(
+    `UPDATE study_theses SET status = $2, updated_at = now(), decided_at = CASE WHEN $2 IN ('right', 'wrong') THEN now() ELSE NULL END
+     WHERE id = $1 RETURNING ticker`, [id, status],
+  );
+  refreshStudy(row?.ticker);
+}
+
+export async function deleteThesis(id: number) {
+  const [row] = await query<{ ticker: string }>("DELETE FROM study_theses WHERE id = $1 RETURNING ticker", [id]);
+  refreshStudy(row?.ticker);
+}
+
+// 내가 직접 붙이는 근거 메모
+export async function addThesisMemo(id: number, body: string, sign: string) {
+  const textBody = String(body ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
+  if (!textBody) return;
+  const [row] = await query<{ ticker: string }>(
+    `INSERT INTO study_evidence (thesis_id, day, kind, ref, text, sign) SELECT id, CURRENT_DATE, 'memo', 'memo:' || md5(random()::text), $2, $3
+     FROM study_theses WHERE id = $1 RETURNING (SELECT ticker FROM study_theses WHERE id = $1)`,
+    [id, textBody, ["up", "down"].includes(sign) ? sign : "neutral"],
+  );
+  refreshStudy(row?.ticker);
+}
+
+export async function deleteEvidence(id: number) {
+  const [row] = await query<{ ticker: string }>(
+    "DELETE FROM study_evidence e USING study_theses t WHERE e.id = $1 AND t.id = e.thesis_id RETURNING t.ticker", [id],
+  );
+  refreshStudy(row?.ticker);
+}
+
+// 실적 날 점검 끝: 가설마다 고른 판정을 반영하고, 그때 표를 남겨요.
+export async function finishReview(input: { id: string; memo: string; items: ReviewItem[] }) {
+  const items = (Array.isArray(input.items) ? input.items : []).slice(0, 30).map((x) => ({
+    thesis: Number(x.thesis), title: String(x.title ?? "").slice(0, 200), before: String(x.before ?? "").slice(0, 100), now: String(x.now ?? "").slice(0, 120),
+    ai: String(x.ai ?? "").slice(0, 20), aiStatus: String(x.aiStatus ?? "").slice(0, 10), mine: (THESIS_STATUSES as string[]).includes(x.mine) ? x.mine : "watch",
+  }));
+  const [rev] = await query<{ ticker: string }>(
+    "UPDATE study_reviews SET items = $2::jsonb, memo = $3, done_at = now() WHERE id = $1 RETURNING ticker",
+    [String(input.id), JSON.stringify(items), String(input.memo ?? "").trim().slice(0, 1000)],
+  );
+  if (!rev) return;
+  for (const it of items) {
+    await query(
+      `UPDATE study_theses SET status = $3, updated_at = now(), decided_at = CASE WHEN $3 IN ('right', 'wrong') THEN now() ELSE decided_at END
+       WHERE id = $1 AND ticker = $2`, [it.thesis, rev.ticker, it.mine],
+    );
+  }
+  refreshStudy(rev.ticker);
+}
+
+// '지금 다시 보기': 워커가 다음 회차(1분 안쪽)에 이 종목 근거를 AI에게 다시 물어요.
+export async function askThesisScan(ticker: string) {
+  const t = String(ticker ?? "").toUpperCase();
+  if (!STUDY_TICKER.test(t)) return;
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ('thesis_scan', jsonb_build_object('tickers', jsonb_build_array($1::text)))
+     ON CONFLICT (key) DO UPDATE SET value = jsonb_build_object('tickers', COALESCE(app_settings.value->'tickers', '[]'::jsonb) || jsonb_build_array($1::text))`, [t],
+  );
+}
+
+export async function saveDeepNote(ticker: string, body: string) {
+  const t = String(ticker ?? "").toUpperCase();
+  if (!STUDY_TICKER.test(t)) return;
+  await query("UPDATE study_notes SET deep_note = $2 WHERE ticker = $1", [t, String(body ?? "").trim().slice(0, 500)]);
+  refreshStudy(t);
 }
