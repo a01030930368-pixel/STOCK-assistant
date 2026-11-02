@@ -10,12 +10,17 @@ class FakeIsa:
     def __init__(self, fail=False):
         self.calls = []
         self.fail = fail
+        self.main, self.today, self.days = [], [], []
 
     def kr_fills(self, start, end):
         self.calls.append((start, end))
         if self.fail:
             raise RuntimeError("키움 API 오류 kt00015: 계좌 없음")
-        return []
+        return list(self.main)
+
+    def kr_day_fills(self, day):
+        self.days.append(day)
+        return [f for f in self.today if f.day == day]
 
     def domestic_balance(self):
         h = Holding("360750", "TIGER 미국S&P500", Decimal(245), Decimal(20935), Decimal(22390), Decimal(5485550),
@@ -30,7 +35,7 @@ def fake_db(monkeypatch):
     store = {}
     monkeypatch.setattr("app.db.get_setting", lambda conn, key: store.get(key))
     monkeypatch.setattr("app.db.set_setting", lambda conn, key, value: store.__setitem__(key, value))
-    monkeypatch.setattr("app.db.save_isa_fills", lambda conn, rows: None)
+    monkeypatch.setattr("app.db.save_isa_fills", lambda conn, rows: store.setdefault("saved", []).extend(rows))
     return store
 
 
@@ -73,3 +78,20 @@ def test_tick_saves_isa_balance_separately(monkeypatch):
     main.tick(cfg, object(), None, True, False, datetime(2026, 10, 20, 3, tzinfo=timezone.utc), FakeIsa())
     assert saved["balance"].holdings[0].ticker == "360750" and saved["cash"].deposit == 14200
     assert store["isa_balance_status"]["ok"]
+
+
+def test_isa_job_adds_todays_fills_and_prefers_kt00015(monkeypatch):
+    from datetime import date
+    from app.fills import Fill
+    store = fake_db(monkeypatch)
+    k = FakeIsa()
+    day = date(2026, 11, 2)
+    f = lambda src, price: Fill("KR", day, "360750", "TIGER 미국S&P500", "buy", Decimal(10), Decimal(price), None, None, src)  # noqa: E731
+    k.today = [f("kt00009", 22000)]
+    IsaJob(k).run(object(), datetime(2026, 11, 2, 3, tzinfo=timezone.utc))
+    assert [(x.ticker, x.source) for x in store["saved"]] == [("360750", "kt00009")]
+    assert len(k.days) == 5
+    store["saved"].clear()
+    k.main = [f("kt00015", 22010)]
+    IsaJob(k).run(object(), datetime(2026, 11, 2, 4, tzinfo=timezone.utc))
+    assert [(x.source, x.price) for x in store["saved"]] == [("kt00015", Decimal(22010))]

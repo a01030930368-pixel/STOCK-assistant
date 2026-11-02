@@ -378,7 +378,9 @@ export async function deleteBookNote(form: FormData) {
 
 // 일지에 남기지 않을 체결(예: 단타 테스트)은 목록에서 숨깁니다.
 export async function hideFill(form: FormData) {
-  await query("UPDATE trade_fills SET hidden = true WHERE fill_key = $1", [text(form, "key")]);
+  const key = text(form, "key");
+  if (key.startsWith("isa:")) await query("UPDATE isa_fills SET hidden = true WHERE fill_key = $1", [key.slice(4)]);
+  else await query("UPDATE trade_fills SET hidden = true WHERE fill_key = $1", [key]);
   revalidatePath("/journal");
 }
 

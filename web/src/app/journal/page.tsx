@@ -40,13 +40,13 @@ export default async function JournalPage() {
         <div className="callout">키움에서 일지에 안 적은 체결 {todo}건을 찾았어요. &ldquo;일지 쓰기&rdquo;를 누르면 종목·날짜·수량·가격이 채워져 있어요.</div>
       )}
       <section className="fills">
-        <h2>최근 체결 <span className="muted">(최근 3개월, 키움)</span></h2>
+        <h2>최근 체결 <span className="muted">(최근 3개월, 키움 · ISA 포함)</span></h2>
         <p className="muted fill-status">
           {checked.length === 0
             ? "아직 키움 체결을 확인하지 않았어요. 워커를 켠 뒤 몇 분 안에 처음 확인하고, 그 뒤로 30분마다 확인해요."
             : checked.map((c) => (
                 <span key={c.market} className={c.ok ? "" : "warn"}>
-                  {c.market === "KR" ? "국내" : "미국"} {c.at} 확인{c.ok ? (c.count !== null ? ` · ${c.count}건` : "") : ` 실패: ${c.error}`}
+                  {c.market === "KR" ? "국내" : c.market === "US" ? "미국" : "ISA"} {c.at} 확인{c.ok ? (c.count !== null ? ` · ${c.count}건` : "") : ` 실패: ${c.error}`}
                 </span>
               ))}
         </p>
@@ -88,7 +88,7 @@ export default async function JournalPage() {
   );
 }
 
-type Checked = { market: "KR" | "US"; at: string; ok: boolean; error: string; count: number | null };
+type Checked = { market: "KR" | "US" | "ISA"; at: string; ok: boolean; error: string; count: number | null };
 
 // 워커가 남긴 마지막 체결 확인 결과(app_settings.fills_status). 없으면 아직 한 번도 안 돈 것
 async function fillStatus(): Promise<Checked[]> {
@@ -100,9 +100,14 @@ async function fillStatus(): Promise<Checked[]> {
       .formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
     return `${p.month}-${p.day} ${p.hour}:${p.minute}`;
   };
-  return (["KR", "US"] as const)
+  const [isa] = await query<{ value: { at: string; ok: boolean; error?: string; count?: number } }>(
+    "SELECT value FROM app_settings WHERE key = 'isa_status'",
+  ).catch(() => []);
+  const out: Checked[] = (["KR", "US"] as const)
     .filter((m) => row?.value[m])
     .map((m) => ({ market: m, at: time(row.value[m].at), ok: row.value[m].ok, error: row.value[m].error ?? "", count: row.value[m].count ?? null }));
+  if (isa) out.push({ market: "ISA", at: time(isa.value.at), ok: isa.value.ok, error: isa.value.error ?? "", count: isa.value.count ?? null });
+  return out;
 }
 
 function FillRow({ f, href }: { f: KiwoomFill; href: string | null }) {
@@ -110,7 +115,7 @@ function FillRow({ f, href }: { f: KiwoomFill; href: string | null }) {
   return (
     <div className="list-item">
       <div className="main">
-        <div className="title">{f.name} <span className={f.side === "buy" ? "up" : "down"}>{sideLabel(f.side)}</span> {won(f.quantity, 4)}주</div>
+        <div className="title">{f.isa && <><span className="badge">ISA</span> </>}{f.name} <span className={f.side === "buy" ? "up" : "down"}>{sideLabel(f.side)}</span> {won(f.quantity, 4)}주</div>
         <div className="sub num">
           {f.day.slice(5)}{f.time ? ` ${f.time}` : ""} · {f.count > 1 ? `평균 ${price} (${f.count}번 나눠 체결)` : price}
           {f.fee !== null && f.fee > 0 && ` · 수수료·세금 ${f.market === "US" ? usd(f.fee) : `${won(f.fee)}원`}`}

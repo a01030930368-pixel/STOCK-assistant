@@ -23,7 +23,7 @@ export default async function BuyPage({ searchParams }: { searchParams: Promise<
     <>
       <h1>매수 기록</h1>
       {fill && (
-        <div className="callout fill-note">키움 체결에서 종목·날짜·수량·가격을 채웠어요. 체크리스트만 적으면 돼요.</div>
+        <div className="callout fill-note">{fill.isa ? "ISA 계좌 " : "키움 "}체결에서 종목·날짜·수량·가격을 채웠어요. 체크리스트만 적으면 돼요.</div>
       )}
       <Principles />
       <BuyForm

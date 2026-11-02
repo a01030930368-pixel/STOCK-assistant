@@ -5,7 +5,7 @@ import MacroCard, { SNAPSHOT_COLUMNS, type Snapshot } from "./MacroCard";
 import MacroForm from "./MacroForm";
 import MacroTabs from "./MacroTabs";
 import MarketBoard from "./MarketBoard";
-import type { Point } from "@/lib/markets";
+import { intradayPoint, type Point } from "@/lib/markets";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +43,12 @@ export default async function MacroPage() {
   ).catch(() => []);
   const series: Record<string, Point[]> = {};
   for (const d of daily) (series[d.code] ??= []).push({ day: d.day, close: Number(d.close) });
+  // 1일·3일·1주용 15분 봉(워커가 열흘 치만 둬요)
+  const fine = await query<{ code: string; at: string; close: string }>(
+    "SELECT code, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS at, close FROM market_intraday WHERE at >= now() - interval '9 days' ORDER BY at",
+  ).catch(() => []);
+  const intraday: Record<string, Point[]> = {};
+  for (const r of fine) (intraday[r.code] ??= []).push(intradayPoint(r.at, Number(r.close)));
   const [markets] = await query<{ value: { at: string; errors?: Record<string, string> } }>("SELECT value FROM app_settings WHERE key = 'markets_status'").catch(() => []);
   const gap = rateGap(latest.kr_base_rate?.value ?? null, latest.us_base_rate?.value ?? null);
 
@@ -52,7 +58,7 @@ export default async function MacroPage() {
         <h1>매크로 환경</h1>
         <MacroTabs on="indicators" />
       </div>
-      <MarketBoard series={series} status={markets?.value ?? null} />
+      <MarketBoard series={series} intraday={intraday} status={markets?.value ?? null} />
       <h2>최신 지표</h2>
       {indicators.length === 0 ? (
         <p className="card muted">자동으로 가져온 지표가 아직 없습니다. .env에 ECOS_API_KEY와 FRED_API_KEY를 넣으면 워커가 6시간마다 가져옵니다. 키가 없어도 아래에 직접 적을 수 있습니다.</p>

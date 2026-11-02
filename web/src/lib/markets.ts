@@ -8,7 +8,8 @@ export type Meta = { code: string; name: string; tab: Tab; unit: Unit; digits: n
 export function fearGreedWord(v: number): string {
   return v < 25 ? "극단적 공포" : v < 45 ? "공포" : v <= 55 ? "중립" : v <= 75 ? "탐욕" : "극단적 탐욕";
 }
-export type Point = { day: string; close: number };
+// 일봉은 day만, 15분 봉은 t(한국 시각으로 옮긴 초)도 있어요. day는 "YYYY-MM-DD" 또는 "YYYY-MM-DD HH:MM"(한국 시각).
+export type Point = { day: string; close: number; t?: number };
 
 export const MARKETS: Meta[] = [
   { code: "KOSPI", name: "코스피", tab: "KR", unit: "pt", digits: 2 },
@@ -33,32 +34,67 @@ export const MARKETS: Meta[] = [
 ];
 export const metaOf = (code: string) => MARKETS.find((m) => m.code === code);
 
-export type Period = "1m" | "3m" | "1y";
-export const PERIODS: { key: Period; label: string; days: number }[] = [
+export type Period = "1d" | "3d" | "1w" | "1m" | "3m" | "1y";
+export const PERIODS: { key: Period; label: string; days: number; short?: boolean }[] = [
+  { key: "1d", label: "1일", days: 1, short: true }, { key: "3d", label: "3일", days: 3, short: true }, { key: "1w", label: "1주", days: 7, short: true },
   { key: "1m", label: "1개월", days: 31 }, { key: "3m", label: "3개월", days: 92 }, { key: "1y", label: "1년", days: 366 },
 ];
+export const PERIOD_KEYS = PERIODS.map((p) => p.key);
+export const isShort = (period: Period) => PERIODS.find((p) => p.key === period)!.short === true;
 
 const shift = (day: string, days: number) => new Date(Date.parse(`${day}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
+const DAY = 86_400;
+const KST = 9 * 3600;
+
+// 차트 시간축 값(초). 15분 봉은 한국 시각으로 옮긴 값, 일봉은 그날 0시라서 둘을 한 차트에 같이 그릴 수 있어요.
+export const timeOf = (p: Point) => p.t ?? Date.parse(`${p.day}T00:00:00Z`) / 1000;
+
+// 워커의 15분 봉(UTC 시각)을 화면용 점으로.
+export function intradayPoint(at: string, close: number): Point {
+  const t = Math.floor(Date.parse(at) / 1000) + KST;
+  const iso = new Date(t * 1000).toISOString();
+  return { day: `${iso.slice(0, 10)} ${iso.slice(11, 16)}`, close, t };
+}
 
 // 마지막 봉에서 기간만큼 거슬러 올라간 구간. 시작점 바로 앞 봉 하나를 붙여 기간 등락의 기준으로 써요.
+// 일봉만 있을 때 1일·3일은 마지막 거래일 1개·3개, 1주는 7일 전부터예요.
 export function slice(points: Point[], period: Period): Point[] {
   if (!points.length) return [];
-  const from = shift(points.at(-1)!.day, PERIODS.find((p) => p.key === period)!.days);
+  if (period === "1d") return points.slice(-2);
+  if (period === "3d") return points.slice(-4);
+  const from = shift(points.at(-1)!.day.slice(0, 10), PERIODS.find((p) => p.key === period)!.days);
   const i = points.findIndex((p) => p.day >= from);
   return points.slice(Math.max(0, i - 1));
+}
+
+// 15분 봉 구간: 1일은 마지막 24시간, 3일은 봉이 있는 마지막 사흘(주말 건너뜀), 1주는 마지막 7일. 앞 봉 하나를 기준으로 붙여요.
+export function sliceIntraday(bars: Point[], period: Period): Point[] {
+  if (bars.length < 2) return [];
+  const last = bars.at(-1)!.t!;
+  let from: number;
+  if (period === "3d") {
+    const dates = [...new Set(bars.map((b) => Math.floor(b.t! / DAY)))];
+    from = (dates.at(-3) ?? dates[0]) * DAY;
+  } else {
+    from = last - (period === "1d" ? 1 : 7) * DAY;
+  }
+  const i = bars.findIndex((b) => b.t! >= from);
+  return i < 0 ? [] : bars.slice(Math.max(0, i - 1));
 }
 
 export type Change = { abs: number; pct: number };
 const change = (from: number, to: number): Change => ({ abs: to - from, pct: from ? (to / from - 1) * 100 : 0 });
 
 export type CardData = { meta: Meta; last: Point | null; day: Change | null; period: Change | null; points: Point[] };
-export function cardData(meta: Meta, all: Point[], period: Period): CardData {
-  const points = slice(all, period);
-  const last = all.at(-1) ?? null, prev = all.at(-2);
+export function cardData(meta: Meta, all: Point[], period: Period, intraday: Point[] = []): CardData {
+  const daily = all.at(-1) ?? null, prev = all.at(-2);
+  const fine = isShort(period) ? sliceIntraday(intraday, period) : [];
+  const points = fine.length >= 2 ? fine : slice(all, period);
+  const last = points.at(-1) ?? daily;
   return {
     meta, last, points,
-    day: last && prev ? change(prev.close, last.close) : null,
-    period: points.length >= 2 ? change(points[0].close, last!.close) : null,
+    day: daily && prev ? change(prev.close, daily.close) : null,
+    period: points.length >= 2 ? change(points[0].close, points.at(-1)!.close) : null,
   };
 }
 
@@ -81,10 +117,12 @@ export const dir = (m: Meta, c: Change | null) => {
 };
 
 // 겹쳐 보기: 시작=100. 기준 구간의 첫날보다 늦게 시작하는 지수는 그 지수의 첫날을 100으로 잡아요.
-export function indexed(points: Point[], from: string): Point[] {
-  const xs = points.filter((p) => p.day >= from);
+export function indexed(points: Point[], from: Point | undefined): Point[] {
+  if (!from) return [];
+  const start = timeOf(from);
+  const xs = points.filter((p) => timeOf(p) >= start);
   const base = xs[0]?.close;
-  return base ? xs.map((p) => ({ day: p.day, close: (p.close / base) * 100 })) : [];
+  return base ? xs.map((p) => ({ ...p, close: (p.close / base) * 100 })) : [];
 }
 
 // 미니 차트 선 좌표(0~w, 0~h). 기준선(ref)이 있으면 범위에 넣어 같이 그려요.

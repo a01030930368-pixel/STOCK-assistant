@@ -588,6 +588,15 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS earnings_filings_ticker ON earnings_filings (ticker, day DESC)",
     # 깊이 보기 탭의 내 생각 한 줄
     "ALTER TABLE study_notes ADD COLUMN IF NOT EXISTS deep_note TEXT NOT NULL DEFAULT ''",
+    # 매크로 지수 15분 봉(1일·3일·1주 기간)
+    """CREATE TABLE IF NOT EXISTS market_intraday (
+      code   TEXT NOT NULL,
+      at     TIMESTAMPTZ NOT NULL,
+      close  NUMERIC(18, 4) NOT NULL,
+      PRIMARY KEY (code, at)
+    )""",
+    # ISA 체결도 매수일지 체결 목록에 보여요. "일지 안 씀"으로 숨길 수 있게
+    "ALTER TABLE isa_fills ADD COLUMN IF NOT EXISTS hidden BOOLEAN NOT NULL DEFAULT false",
     # 실적 발표의 시장 예상치(미국 Finnhub, 국내는 네이버 예상 칸을 발표 전까지 매일 적어 둔 값)
     """CREATE TABLE IF NOT EXISTS earnings_estimates (
       ticker            TEXT NOT NULL,
@@ -1542,6 +1551,17 @@ def save_sector_daily(conn: psycopg.Connection, market: str, code: str, closes: 
                ON CONFLICT (market, code, day) DO UPDATE SET close = EXCLUDED.close""",
             [(market, code, d, c) for d, c in closes],
         )
+
+
+def save_market_intraday(conn: psycopg.Connection, code: str, bars: list, keep_days: int = 10) -> None:
+    """매크로 지수의 15분 봉(1일·3일·1주 차트용). 열흘 넘은 건 지워요."""
+    with conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO market_intraday (code, at, close) VALUES (%s, %s, %s)
+               ON CONFLICT (code, at) DO UPDATE SET close = EXCLUDED.close""",
+            [(code, t, c) for t, c in bars],
+        )
+    conn.execute("DELETE FROM market_intraday WHERE code = %s AND at < now() - make_interval(days => %s)", (code, keep_days))
 
 
 def flow_targets(conn: psycopg.Connection) -> list[tuple[str, str]]:
