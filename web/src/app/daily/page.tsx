@@ -76,6 +76,7 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
           <Link href="/">보유 종목</Link>
           <Link href="/weights">비중</Link>
           <Link href="/daily" aria-current="page">달력</Link>
+          <Link href="/crisis">위기 리허설</Link>
         </nav>
       </div>
 

@@ -1456,3 +1456,61 @@ text.deep-ref { stroke: none; }
 .deep-note input { font-size: 0.86rem; padding: 7px 10px; }
 @media (max-width: 1180px) { .deep-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .deep-grid { grid-template-columns: minmax(0, 1fr); } .tabs2 { gap: 16px; } }
+
+/* 위기 리허설 */
+.crisis-card { border-color: #4a3f28; }
+.crisis-big { font-size: 1.6rem; font-weight: 700; margin: 2px 0 8px; font-variant-numeric: tabular-nums; }
+.crisis-big small { font-size: 0.95rem; font-weight: 600; }
+.crisis-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.crisis-foot { font-size: 0.8rem; margin-top: 8px; }
+.crisis-link { margin-left: 10px; font-size: 0.8rem; }
+.crisis { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 20px; align-items: start; }
+.crisis-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.crisis > aside { min-width: 0; }
+.crisis-list { display: flex; flex-direction: column; gap: 6px; }
+.crisis-list .label { margin-top: 6px; }
+.crisis-scn { display: flex; justify-content: space-between; gap: 8px; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font-size: 0.88rem; text-decoration: none; }
+.crisis-scn .muted { font-size: 0.76rem; text-align: right; }
+.crisis-scn.on { border-color: #4a3f28; background: var(--accent-soft); color: var(--accent); }
+.crisis-total { display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: flex-end; }
+.crisis-total .crisis-big { font-size: 2rem; margin: 2px 0; }
+.crisis-total dl { display: grid; grid-template-columns: auto auto; gap: 4px 12px; margin: 0; font-size: 0.86rem; }
+.crisis-total dt { color: var(--muted); }
+.crisis-total dd { margin: 0; font-variant-numeric: tabular-nums; }
+.crisis-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.crisis-bar { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; padding: 4px 0; }
+.crisis-bar .n { width: 130px; flex-shrink: 0; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crisis-bar .track { flex: 1; height: 12px; background: var(--surface-2); border-radius: 3px; position: relative; overflow: hidden; }
+.crisis-bar .track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; }
+.crisis-bar .track i.down { background: var(--down); } .crisis-bar .track i.up { background: var(--up); }
+.crisis-bar b { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
+.crisis-table { font-size: 0.84rem; }
+.crisis-table th, .crisis-table td { padding: 6px 6px; text-align: right; }
+.crisis-table th:first-child, .crisis-table td:first-child { text-align: left; }
+.crisis-rules ol { margin: 0; padding-left: 20px; line-height: 1.85; font-size: 0.9rem; }
+.crisis-note { font-size: 0.8rem; margin: 0; }
+.crisis-replay { display: flex; flex-direction: column; gap: 14px; }
+.crisis-chart { width: 100%; height: auto; display: block; }
+.crisis-chart polyline { fill: none; stroke-width: 2; }
+.crisis-chart .mine { stroke: var(--accent); } .crisis-chart .kospi { stroke: var(--muted); }
+.crisis-chart .base { stroke: var(--line-2); stroke-dasharray: 4 4; }
+.crisis-chart .trough { fill: var(--down); } .crisis-chart .trough-t { fill: var(--down); font-size: 12px; }
+.crisis-k { color: var(--muted); }
+.crisis-axis { display: flex; justify-content: space-between; font-size: 0.76rem; }
+.crisis-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.crisis .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.crisis .kpi .v { font-size: 1.45rem; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.crisis .kpi .s { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+.crisis .warn { background: var(--accent-soft); border: 1px solid #4a3f28; color: #e7cf9c; border-radius: var(--radius); padding: 10px 14px; font-size: 0.9rem; }
+@media (max-width: 1180px) {
+  .crisis-kpis { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 720px) {
+  .crisis { grid-template-columns: 1fr; }
+  .crisis-list { flex-direction: row; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
+  .crisis-list .label { display: none; }
+  .crisis-scn { flex-shrink: 0; }
+  .crisis-scn .muted { display: none; }
+  .crisis-two { grid-template-columns: 1fr; }
+  .crisis-bar .n { width: 96px; }
+}

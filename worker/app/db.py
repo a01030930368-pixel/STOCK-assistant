@@ -614,6 +614,20 @@ MIGRATIONS = [
       as_of             DATE NOT NULL,
       PRIMARY KEY (ticker, period)
     )""",
+    # 위기 리허설 '그때 그대로': 과거 위기 구간 일봉(지수·보유 종목)과 받은 기록
+    """CREATE TABLE IF NOT EXISTS crisis_prices (
+      code   TEXT NOT NULL,
+      day    DATE NOT NULL,
+      close  NUMERIC(18, 4) NOT NULL,
+      PRIMARY KEY (code, day)
+    )""",
+    """CREATE TABLE IF NOT EXISTS crisis_fetch (
+      code        TEXT NOT NULL,
+      win         TEXT NOT NULL,
+      rows        INT NOT NULL,
+      fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (code, win)
+    )""",
 ]
 
 
