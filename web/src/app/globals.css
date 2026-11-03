@@ -1393,6 +1393,37 @@ p .study-lab, span.study-lab { display: inline; margin-right: 6px; }
 .th-hist-review p { margin: 2px 0; }
 .th-hist-review ul { margin: 4px 0 0; padding-left: 18px; }
 .th-links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.82rem; }
+/* 실적 예측 내기 */
+.bet-wrap { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; }
+.bet-card { display: grid; gap: 2px; }
+.bet-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.bet-head > span { margin-left: auto; font-size: 0.8rem; display: inline-flex; gap: 6px; align-items: center; }
+.bet-cons { margin: 2px 0 4px; font-size: 0.82rem; }
+.bet-cons b { color: var(--fg); }
+.bet-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--line-2); font-size: 0.88rem; }
+.bet-l { width: 92px; flex-shrink: 0; color: var(--sub); }
+.bet-seg { display: inline-flex; gap: 2px; }
+.bet-seg button { background: transparent; color: var(--muted); border: 0; padding: 5px 11px; border-radius: 6px; font-size: 0.84rem; min-height: 30px; white-space: nowrap; }
+.bet-seg button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.bet-seg button.px-up[aria-selected="true"] { color: var(--up); }
+.bet-seg button.px-down[aria-selected="true"] { color: var(--down); }
+.bet-num { width: 96px; }
+.bet-num.short { width: 64px; }
+.bet-reason { flex: 1; min-width: 200px; }
+.bet-row input[type="range"] { width: 200px; accent-color: var(--accent); }
+.bet-side { display: grid; gap: 12px; align-content: start; }
+.bet-sum { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 8px; }
+.bet-sum span { display: block; font-size: 0.74rem; }
+.bet-habit { margin: 8px 0 0; font-size: 0.82rem; color: var(--sub); }
+.bet-past .th-hist-table { max-width: none; }
+.bet-marks { letter-spacing: 3px; }
+.bet-hist .th-k { margin-right: 6px; }
+@media (max-width: 1180px) { .bet-wrap { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 720px) {
+  .bet-l { width: 100%; }
+  .bet-row input[type="range"] { width: 140px; }
+  .bet-past .th-hist-table td, .bet-past .th-hist-table th { white-space: normal; }
+}
 @media (max-width: 1180px) { .th-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .th-two { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 720px) {
   .th-sum { grid-template-columns: repeat(3, minmax(0, 1fr)); }

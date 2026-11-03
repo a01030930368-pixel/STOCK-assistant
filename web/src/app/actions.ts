@@ -14,6 +14,7 @@ import { decodeGame, score, STEPS, type Decision } from "@/lib/practice";
 import { ALL_PARTS, applyDraft, cleanFields, reviewDefault, STATUSES, type Draft, type Fields } from "@/lib/study";
 import { loadBriefInput } from "@/lib/briefData";
 import { cleanThesis, STATUSES as THESIS_STATUSES, type ReviewItem } from "@/lib/thesis";
+import { cleanBet, isLocked } from "@/lib/bets";
 import type { LiveValue } from "@/lib/live";
 import { KIND_LABEL, validColor, validDoodle, validShape, type DoodlePoint, type LevelKind, type ShapeKind } from "@/lib/drawings";
 
@@ -981,6 +982,39 @@ export async function saveThesis(input: Record<string, string>): Promise<{ error
   );
   refreshStudy(ticker);
   return { id: row?.id };
+}
+
+// 실적 예측 내기: 발표 전까지 고칠 수 있어요. 그때 시장 예상치도 같이 적어 둬요(나중에 예상치가 없어져도 채점하려고).
+export async function saveBet(input: Record<string, string>): Promise<{ error?: string }> {
+  const ticker = String(input.ticker ?? "").toUpperCase();
+  if (!STUDY_TICKER.test(ticker)) return { error: "노트를 찾지 못했어요." };
+  const [note] = await query<{ market: "KR" | "US" }>("SELECT market FROM study_notes WHERE ticker = $1", [ticker]);
+  if (!note) return { error: "노트를 찾지 못했어요." };
+  const b = cleanBet({ ...input, ticker }, note.market);
+  if ("error" in b) return { error: b.error };
+  const reported = (await query<{ period: string }>(
+    "SELECT period FROM earnings_filings WHERE ticker = $1 UNION SELECT period FROM earnings_reports WHERE ticker = $1", [ticker],
+  )).map((r) => r.period);
+  if (isLocked(b.period, reported)) return { error: "이미 실적이 나온 분기라 고칠 수 없어요." };
+  const [est] = await query<{ revenue_estimate: string | null; op_estimate: string | null }>(
+    "SELECT revenue_estimate, op_estimate FROM earnings_estimates WHERE ticker = $1 AND period = $2", [ticker, b.period],
+  );
+  await query(
+    `INSERT INTO earnings_bets (ticker, period, market, rev_dir, rev_value, op_dir, op_value, px_dir, px_pct, confidence, reason, est_rev, est_op)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     ON CONFLICT (ticker, period) DO UPDATE SET rev_dir = EXCLUDED.rev_dir, rev_value = EXCLUDED.rev_value, op_dir = EXCLUDED.op_dir,
+       op_value = EXCLUDED.op_value, px_dir = EXCLUDED.px_dir, px_pct = EXCLUDED.px_pct, confidence = EXCLUDED.confidence, reason = EXCLUDED.reason,
+       est_rev = COALESCE(EXCLUDED.est_rev, earnings_bets.est_rev), est_op = COALESCE(EXCLUDED.est_op, earnings_bets.est_op), updated_at = now()`,
+    [ticker, b.period, note.market, b.revDir, b.revValue, b.opDir, b.opValue, b.pxDir, b.pxPct, b.confidence, b.reason,
+      est?.revenue_estimate ?? null, est?.op_estimate ?? null],
+  );
+  refreshStudy(ticker);
+  return {};
+}
+
+export async function deleteBet(ticker: string, period: string) {
+  await query("DELETE FROM earnings_bets WHERE ticker = $1 AND period = $2 AND scored_at IS NULL", [ticker.toUpperCase(), period]);
+  refreshStudy(ticker.toUpperCase());
 }
 
 // 판정 정하기. 맞음·틀림은 끝난 가설이라 날짜를 남겨요.

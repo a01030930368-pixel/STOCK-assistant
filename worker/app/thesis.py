@@ -17,7 +17,7 @@ import httpx
 import psycopg
 from psycopg.types.json import Jsonb
 
-from . import ai, earnings, estimates, research, telegram
+from . import ai, bets, earnings, estimates, research, telegram
 from .config import Config
 from .market import KST
 from .study import _json, _s
@@ -337,7 +337,7 @@ class ThesisJob:
         self.last = now
         today = now.astimezone(KST).date()
         for step in (lambda: self.filings(conn, today), lambda: self.estimates(conn, today), lambda: self.metrics(conn, today), lambda: self.reviews(conn, today, now),
-                     lambda: self.scan(conn, now), lambda: self.notices(conn, now)):
+                     lambda: bets.run_scoring(conn, lambda t: self.numbers(conn, t), today), lambda: self.scan(conn, now), lambda: self.notices(conn, now)):
             try:
                 step()
             except Exception:
@@ -551,6 +551,8 @@ class ThesisJob:
                 (today, list(OPEN))).fetchall():
             titles = [r[0] for r in conn.execute("SELECT title FROM study_theses WHERE ticker = %s AND status = ANY(%s) ORDER BY id", (ticker, list(OPEN)))]
             self.queue(conn, f"thesis-eday:{ticker}:{today}", eday_text(name, titles))
+        # 실적 예측 내기: 발표 3일 전 알림, 채점 결과
+        bets.notices(conn, today, lambda key, text: self.queue(conn, key, text))
         # 확인 날이 된 가설(9시 뒤 한 번에)
         if local.hour >= 9:
             due = conn.execute(
