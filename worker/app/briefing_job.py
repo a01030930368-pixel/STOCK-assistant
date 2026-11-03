@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 import httpx
 import psycopg
 
-from . import ai, books, briefing, db, prices, telegram, terms
+from . import ai, books, briefing, db, links, prices, telegram, terms
 from .config import Config
 
 log = logging.getLogger("worker")
@@ -135,7 +135,13 @@ class BriefingJob:
             except Exception as e:
                 log.warning("오늘의 용어 만들기 실패: %s", e)
                 term_at, term = None, None
-            text = briefing.morning_message(day, indexes, holdings, items, us, fx, fx_prev, term, repeat)
+            # 연결고리는 못 만들어도 브리핑은 그대로 보내요. 이미 보낸 미국장이면 다시 세지 않아요.
+            try:
+                link_lines = [] if repeat else links.build(conn, self.http, day, us_day)
+            except Exception as e:
+                log.warning("연결고리 만들기 실패: %s", e)
+                link_lines = []
+            text = briefing.morning_message(day, indexes, holdings, items, us, fx, fx_prev, term, repeat, link_lines)
             self._morning_parts = (day, telegram.split(text), 0, term_at, us_day)
         _, parts, sent, term_at, us_day = self._morning_parts
         while sent < len(parts):
