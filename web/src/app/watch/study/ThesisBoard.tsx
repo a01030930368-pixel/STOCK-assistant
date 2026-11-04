@@ -8,6 +8,8 @@ import {
   counts, isOpen, meter, METRICS, metricRule, pendingSuggestion, reviewTitle, sortTheses, STATUS_WORD,
   type HistoryRow, type Review, type ReviewItem, type Seed, type Status, type Thesis, type Upcoming,
 } from "@/lib/thesis";
+import { actualLine, betLine, resultMarks, type Bet } from "@/lib/bets";
+import BetCard, { type BetData } from "./BetCard";
 
 const dot = (d: string) => d.slice(5).replace("-", ".");
 const fullDot = (d: string) => d.replaceAll("-", ".");
@@ -16,7 +18,7 @@ const PICK: Status[] = ["ok", "watch", "bad", "right", "wrong"];
 
 export type ThesisData = {
   ticker: string; name: string; market: "KR" | "US"; theses: Thesis[]; seeds: Seed[]; review: (Review & { rows: ReviewItem[] }) | null;
-  history: HistoryRow[]; upcoming: Upcoming[]; aiKey: boolean; today: string;
+  history: HistoryRow[]; upcoming: Upcoming[]; aiKey: boolean; today: string; bet: BetData;
 };
 
 export default function ThesisBoard({ data }: { data: ThesisData }) {
@@ -32,6 +34,7 @@ export default function ThesisBoard({ data }: { data: ThesisData }) {
   return (
     <div className="th-board">
       {data.review && <ReviewPanel review={data.review} onDone={refresh} />}
+      <BetCard key={data.bet.period} ticker={data.ticker} market={data.market} data={data.bet} today={data.today} onSaved={refresh} />
 
       <div className="th-sum">
         <div><b>{c.open}</b>지금 보는 가설</div>
@@ -83,7 +86,7 @@ export default function ThesisBoard({ data }: { data: ThesisData }) {
             ))}</ul>
           )}
         </section>
-        <EarningsHistory rows={data.history} market={data.market} />
+        <EarningsHistory rows={data.history} market={data.market} bets={data.bet.past} />
       </div>
     </div>
   );
@@ -290,7 +293,7 @@ function Pct({ v }: { v: number }) {
   return <b className={v >= 0 ? "up" : "down"}>{v >= 0 ? "+" : "−"}{Math.abs(v).toFixed(1)}%</b>;
 }
 
-function EarningsHistory({ rows, market }: { rows: HistoryRow[]; market: "KR" | "US" }) {
+function EarningsHistory({ rows, market, bets }: { rows: HistoryRow[]; market: "KR" | "US"; bets: Bet[] }) {
   const m = (v: number | null) => money(v, market);
   const fmt = (v: number | null, kind: "money" | "eps") =>
     v === null ? "-" : kind === "money" ? m(v) : market === "US" ? `$${v.toFixed(2)}` : `${Math.round(v).toLocaleString("ko-KR")}원`;
@@ -311,6 +314,17 @@ function EarningsHistory({ rows, market }: { rows: HistoryRow[]; market: "KR" | 
                 {r.review?.doneAt && <span className="th-pill g">점검함</span>}
               </summary>
               <div className="th-hist-body">
+                {(() => {
+                  const b = bets.find((x) => x.period === r.period);
+                  return b ? (
+                    <p className="th-hist-note bet-hist">
+                      <span className="th-k">내 예상</span>{betLine(b)}
+                      <span className="muted"> → {actualLine(b.result)} </span>
+                      {resultMarks(b.result).map((m) => <span key={m.label} className={m.ok ? "th-ok" : m.ok === false ? "th-no" : "muted"}>{m.label} {m.ok ? "✓" : m.ok === false ? "✗" : "·"} </span>)}
+                      {b.reason && <span className="muted"> · &ldquo;{b.reason}&rdquo;</span>}
+                    </p>
+                  ) : null;
+                })()}
                 {r.est && r.est.items.length > 0 && (
                   <div className="th-hist-block">
                     <span className="th-k">시장 예상과 비교</span>

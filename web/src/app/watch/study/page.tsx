@@ -13,6 +13,7 @@ import ThesisBoard, { type ThesisData } from "./ThesisBoard";
 import DeepView from "./DeepView";
 import { earningsHistory, quartersFrom, reviewRows, seeds, upcoming, type Close, type Estimate, type Evidence, type Filing, type Review, type Status, type Suggestion, type Thesis } from "@/lib/thesis";
 import type { Report } from "@/lib/earnings";
+import { stats as betStats, targetPeriod, type Bet, type BetResult } from "@/lib/bets";
 import type { BriefInput } from "@/lib/brief";
 
 export const dynamic = "force-dynamic";
@@ -251,8 +252,30 @@ async function loadThesis(ticker: string, name: string, market: "KR" | "US", fie
   const closes = (await safe<{ day: string; close: string }>(
     "SELECT to_char(day, 'YYYY-MM-DD') AS day, close FROM price_history WHERE ticker = $1 AND day >= CURRENT_DATE - 1200 ORDER BY day", [ticker],
   )).map<Close>((r) => ({ day: r.day, close: Number(r.close) }));
+  // 실적 예측 내기: 이 회사의 다음 분기 예측 + 모든 회사 예측(내 성적)
+  const allBets = (await safe<{ ticker: string; name: string | null; period: string; market: "KR" | "US"; rev_dir: Bet["revDir"]; rev_value: string | null;
+    op_dir: Bet["opDir"]; op_value: string | null; px_dir: Bet["pxDir"]; px_pct: string | null; confidence: number; reason: string;
+    est_rev: string | null; est_op: string | null; result: BetResult | null; updated: string }>(
+    `SELECT b.ticker, n.name, b.period, b.market, b.rev_dir, b.rev_value, b.op_dir, b.op_value, b.px_dir, b.px_pct, b.confidence, b.reason,
+       b.est_rev, b.est_op, b.result, to_char(b.updated_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS updated
+     FROM earnings_bets b LEFT JOIN study_notes n ON n.ticker = b.ticker ORDER BY b.period DESC`,
+  )).map<Bet>((r) => ({
+    ticker: r.ticker, name: r.name ?? r.ticker, period: r.period, market: r.market, revDir: r.rev_dir, revValue: num(r.rev_value), opDir: r.op_dir,
+    opValue: num(r.op_value), pxDir: r.px_dir, pxPct: num(r.px_pct), confidence: r.confidence, reason: r.reason, estRev: num(r.est_rev), estOp: num(r.est_op),
+    result: r.result, updated: r.updated,
+  }));
+  const reported = [...new Set([...filings.map((f) => f.period), ...reports.map((r) => r.period)])];
+  const period = targetPeriod(reported, today);
+  const nextEst = estimates.find((e) => e.period === period);
+  const mine = allBets.filter((b) => b.ticker === ticker);
   return {
     ticker, name, market, theses, seeds: seeds(fields, theses.map((x) => x.title)),
+    bet: {
+      period, current: mine.find((b) => b.period === period) ?? null,
+      est: nextEst ? { rev: nextEst.revenueEstimate, op: nextEst.opEstimate, asOf: nextEst.asOf } : null,
+      day: events.find((e) => e.kind === "earnings")?.day ?? null,
+      past: mine.filter((b) => b.period !== period), stats: betStats(allBets), companies: new Set(allBets.filter((b) => b.result?.total).map((b) => b.ticker)).size,
+    },
     review: pending ? { ...pending, rows: reviewRows(pending.period, theses) } : null,
     history: earningsHistory(filings, reports, quartersFrom(input.statements), reviews, 12, { estimates, closes }),
     upcoming: upcoming(theses, events, today),

@@ -159,7 +159,7 @@ AI_NOTE = "<i>🤖 AI 한마디는 참고용이에요. 사고팔지는 직접 �
 
 def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], items: list[Item],
                     us: list[UsStock] | None = None, fx: float | None = None, fx_prev: float | None = None,
-                    term: str | None = None, repeat: date | None = None) -> str:
+                    term: str | None = None, repeat: date | None = None, links: list[str] | None = None) -> str:
     """텔레그램 HTML 모양(굵게·고정폭 표)으로 만들어요. 이름·뉴스 같은 글은 모두 이스케이프해요.
     term은 terms.message가 만든(이미 이스케이프한) 오늘의 용어예요.
     repeat은 지난 브리핑에서 이미 보낸 미국장 날짜예요(월요일 아침의 금요일 장 등). 있으면 '밤사이'라고 하지 않아요."""
@@ -198,6 +198,9 @@ def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], it
             if s.ai:
                 lines.append(f"🤖 {e(s.ai)}")
         lines.append(LINE)
+    # 해외 대표 종목이 크게 움직였을 때 내 국내 종목과의 연결고리(links.lines가 만든 HTML 줄)
+    if links and not repeat:
+        lines += links
     # 미국 카드가 없으면(가격을 못 받았을 때) 미국 종목도 아래 표에 같이 넣어요.
     rest = [h for h in holdings if h.market == "KR" or not us]
     if rest:

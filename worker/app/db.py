@@ -614,6 +614,28 @@ MIGRATIONS = [
       as_of             DATE NOT NULL,
       PRIMARY KEY (ticker, period)
     )""",
+    # 실적 예측 내기: 발표 전에 적은 내 예측(매출·영업이익이 예상보다 높다/비슷/낮다, 다음 날 주가), 발표 뒤 워커가 채점
+    """CREATE TABLE IF NOT EXISTS earnings_bets (
+      ticker      TEXT NOT NULL,
+      period      TEXT NOT NULL,
+      market      TEXT NOT NULL,
+      rev_dir     TEXT,
+      rev_value   NUMERIC(24, 2),
+      op_dir      TEXT,
+      op_value    NUMERIC(24, 2),
+      px_dir      TEXT,
+      px_pct      NUMERIC(8, 2),
+      confidence  INT NOT NULL DEFAULT 60,
+      reason      TEXT NOT NULL DEFAULT '',
+      est_rev     NUMERIC(24, 2),
+      est_op      NUMERIC(24, 2),
+      result      JSONB,
+      scored_at   TIMESTAMPTZ,
+      notified    BOOLEAN NOT NULL DEFAULT false,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (ticker, period)
+    )""",
     # 연습하기 › 실험실: 내 매매 규칙과 그 규칙을 연습용 종목 일봉에 돌린 결과
     """CREATE TABLE IF NOT EXISTS lab_rules (
       id          SERIAL PRIMARY KEY,
