@@ -1,4 +1,5 @@
 import { addPrinciple, deletePrinciple } from "@/app/actions";
+import Link from "next/link";
 import { query } from "@/lib/db";
 
 type Principle = { id: number; kind: "trading" | "crisis"; body: string };
@@ -13,6 +14,7 @@ export default async function Principles({ editable = false }: { editable?: bool
       {(["trading", "crisis"] as const).map((kind) => (
         <div key={kind}>
           <strong>{kind === "trading" ? "내 매매원칙" : "위기 대응 원칙"}</strong>
+          {kind === "crisis" && <Link href="/crisis" className="muted crisis-link">🧯 위기 리허설로 미리 겪어 보기 ›</Link>}
           {group(kind).length === 0 && <p className="muted">아직 없습니다.</p>}
           <ul className="principles">
             {group(kind).map((p) => (

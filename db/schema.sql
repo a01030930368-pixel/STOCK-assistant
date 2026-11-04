@@ -782,3 +782,20 @@ CREATE TABLE earnings_bets (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (ticker, period)
 );
+
+-- 위기 리허설 '그때 그대로': 과거 위기 구간 일봉(지수 KOSPI·NASDAQ·SPX·USDKRW와 보유 종목)
+CREATE TABLE crisis_prices (
+  code   TEXT NOT NULL,
+  day    DATE NOT NULL,
+  close  NUMERIC(18, 4) NOT NULL,
+  PRIMARY KEY (code, day)
+);
+
+-- 위기 구간마다 받은 기록(0줄 = 그때 없던 종목, 30일 뒤 다시 확인)
+CREATE TABLE crisis_fetch (
+  code        TEXT NOT NULL,
+  win         TEXT NOT NULL,
+  rows        INT NOT NULL,
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (code, win)
+);
