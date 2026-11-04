@@ -14,6 +14,8 @@ import { realized, settingsOf } from "@/lib/isa";
 import FxSplit from "./_components/FxSplit";
 import { extPct, extWon, liveQuotes, SESSION_LABEL, type ExtQuote } from "@/lib/extended";
 import { splitAll, type FxDay, type FxFill } from "@/lib/fxsplit";
+import CrisisCard from "./_components/CrisisCard";
+import { loadCrisis } from "@/lib/crisisData";
 
 export const dynamic = "force-dynamic";
 
@@ -196,6 +198,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
      FROM ai_comments c JOIN holdings h ON h.ticker = c.ticker ORDER BY c.ticker, c.day DESC`,
   ).catch(() => []);
   const summaries = await loadSummaries();
+  const crisis = await loadCrisis().catch(() => null);
   const krCash = cash.find((c) => c.market === "KR");
   const usCash = cash.find((c) => c.market === "US");
   const rate = await usdKrw();
@@ -241,6 +244,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
           <Link href="/" aria-current="page">보유 종목</Link>
           <Link href="/weights">비중</Link>
           <Link href="/daily">달력</Link>
+          <Link href="/crisis">위기 리허설</Link>
         </nav>
         <nav className="segment" aria-label="계좌 범위">
           {tabs.map(([id, label]) => (
@@ -284,6 +288,7 @@ export default async function PortfolioPage({ searchParams }: { searchParams: Pr
               today={new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" })}
             />
           )}
+          {crisis && <CrisisCard holdings={crisis.holdings} cash={crisis.cash} rate={crisis.rate} />}
         </section>
 
         <section>

@@ -86,6 +86,7 @@ export default async function WeightsPage() {
           <Link href="/">보유 종목</Link>
           <Link href="/weights" aria-current="page">비중</Link>
           <Link href="/daily">달력</Link>
+          <Link href="/crisis">위기 리허설</Link>
         </nav>
       </div>
 
