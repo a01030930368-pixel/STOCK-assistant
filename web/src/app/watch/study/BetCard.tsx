@@ -1,15 +1,16 @@
 "use client";
 // 기업 공부 › 가설 탭 위: 🎯 다음 실적 내 예측 + 📊 내 예측 성적 + 이 회사 지난 예측
+import Link from "next/link";
 import { useState } from "react";
 import { deleteBet, saveBet } from "@/app/actions";
 import {
-  actualLine, amountText, betLine, DIR_WORD, PX_WORD, pct, periodWord, resultMarks, short, UNIT,
+  actualLine, amountText, betLine, listOrder, DIR_WORD, PX_WORD, pct, periodWord, resultMarks, short, UNIT,
   type Bet, type Dir, type PxDir, type Stats,
 } from "@/lib/bets";
 
 export type BetData = {
   period: string; current: Bet | null; est: { rev: number | null; op: number | null; asOf: string } | null; day: string | null;
-  past: Bet[]; stats: Stats; companies: number;
+  past: Bet[]; all: Bet[]; stats: Stats; companies: number;
 };
 
 const DIRS: Dir[] = ["up", "same", "down"];
@@ -101,6 +102,27 @@ export default function BetCard({ ticker, market, data, today, onSaved }: { tick
               </div>
               {s.habits.map((h) => <p key={h} className="bet-habit">버릇: {h}</p>)}
             </>
+          )}
+        </section>
+        <section className="panel bet-list">
+          <div className="bet-head"><b>📝 내가 적은 예측</b><span className="muted">모든 회사 · {data.all.length}개</span></div>
+          {data.all.length === 0 ? <p className="muted">아직 저장한 예측이 없어요. 위에서 적고 저장하면 여기에 모여요.</p> : (
+            <ul className="bet-list-rows">{listOrder(data.all).map((b) => {
+              const done = Boolean(b.result && b.result.total);
+              const here = b.ticker === ticker && b.period === data.period;
+              return (
+                <li key={`${b.ticker}:${b.period}`} className={here ? "on" : ""}>
+                  <div className="bet-list-top">
+                    <Link href={`/watch/study?t=${encodeURIComponent(b.ticker)}&tab=thesis`}><b>{b.name}</b></Link>
+                    <span className="muted">{periodWord(b.period)}</span>
+                    <span className={done ? "bet-done" : "bet-wait"}>{done ? `${b.result!.hits}/${b.result!.total} 맞힘` : "채점 기다리는 중"}</span>
+                  </div>
+                  <div className="bet-list-line">{betLine(b)}{done && <span className="muted"> · {actualLine(b.result)}</span>}</div>
+                  {b.reason && <div className="muted bet-list-why">“{b.reason}”</div>}
+                  <div className="muted th-small">적은 날 {fullDot(b.updated)}</div>
+                </li>
+              );
+            })}</ul>
           )}
         </section>
         {data.past.length > 0 && (

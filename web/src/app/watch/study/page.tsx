@@ -274,7 +274,7 @@ async function loadThesis(ticker: string, name: string, market: "KR" | "US", fie
       period, current: mine.find((b) => b.period === period) ?? null,
       est: nextEst ? { rev: nextEst.revenueEstimate, op: nextEst.opEstimate, asOf: nextEst.asOf } : null,
       day: events.find((e) => e.kind === "earnings")?.day ?? null,
-      past: mine.filter((b) => b.period !== period), stats: betStats(allBets), companies: new Set(allBets.filter((b) => b.result?.total).map((b) => b.ticker)).size,
+      past: mine.filter((b) => b.period !== period), all: allBets, stats: betStats(allBets), companies: new Set(allBets.filter((b) => b.result?.total).map((b) => b.ticker)).size,
     },
     review: pending ? { ...pending, rows: reviewRows(pending.period, theses) } : null,
     history: earningsHistory(filings, reports, quartersFrom(input.statements), reviews, 12, { estimates, closes }),
