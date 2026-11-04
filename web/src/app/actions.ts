@@ -16,6 +16,7 @@ import { loadBriefInput } from "@/lib/briefData";
 import { cleanThesis, STATUSES as THESIS_STATUSES, type ReviewItem } from "@/lib/thesis";
 import { cleanBet, isLocked } from "@/lib/bets";
 import type { LiveValue } from "@/lib/live";
+import { cleanRule as cleanLabRule } from "@/lib/lab";
 import { KIND_LABEL, validColor, validDoodle, validShape, type DoodlePoint, type LevelKind, type ShapeKind } from "@/lib/drawings";
 
 // values: 오류가 났을 때 입력한 값을 폼에 되돌려 주기 위해 사용합니다.
@@ -1086,4 +1087,59 @@ export async function saveDeepNote(ticker: string, body: string) {
   if (!STUDY_TICKER.test(t)) return;
   await query("UPDATE study_notes SET deep_note = $2 WHERE ticker = $1", [t, String(body ?? "").trim().slice(0, 500)]);
   refreshStudy(t);
+}
+
+// 연습하기 › 실험실: 규칙 저장·다시 돌리기·지우기. 워커(lab.py)가 status='queued'인 규칙을 돌려 result에 적어요.
+const LAB_MAX = 20;
+export async function saveLabRule(input: { id?: number | null; name: string; rule: unknown }): Promise<{ error?: string; id?: number }> {
+  const { rule, errors } = cleanLabRule(input.rule);
+  if (errors.length) return { error: errors.join(" ") };
+  const name = String(input.name ?? "").trim().slice(0, 30) || "이름 없는 규칙";
+  if (input.id) {
+    const [row] = await query<{ id: number }>(
+      `UPDATE lab_rules SET name = $2, rule = $3::jsonb, status = 'queued', error = NULL, result = NULL, asked_at = now(), done_at = NULL
+       WHERE id = $1 RETURNING id`, [input.id, name, JSON.stringify(rule)],
+    );
+    revalidatePath("/watch/practice/lab");
+    return row ? { id: row.id } : { error: "규칙을 못 찾았어요." };
+  }
+  const [{ count }] = await query<{ count: string }>("SELECT count(*) FROM lab_rules");
+  if (Number(count) >= LAB_MAX) return { error: `규칙은 ${LAB_MAX}개까지 저장할 수 있어요. 안 쓰는 규칙을 지워 주세요.` };
+  const [row] = await query<{ id: number }>("INSERT INTO lab_rules (name, rule) VALUES ($1, $2::jsonb) RETURNING id", [name, JSON.stringify(rule)]);
+  revalidatePath("/watch/practice/lab");
+  return { id: row.id };
+}
+
+export async function rerunLabRule(id: number) {
+  await query("UPDATE lab_rules SET status = 'queued', error = NULL, asked_at = now() WHERE id = $1", [id]);
+  revalidatePath("/watch/practice/lab");
+}
+
+export async function deleteLabRule(id: number) {
+  await query("DELETE FROM lab_rules WHERE id = $1", [id]);
+  revalidatePath("/watch/practice/lab");
+}
+
+export async function readLabStatus(ids: number[]): Promise<{ id: number; status: string }[]> {
+  const list = ids.filter((x) => Number.isInteger(x)).slice(0, 50);
+  if (!list.length) return [];
+  return query<{ id: number; status: string }>("SELECT id, status FROM lab_rules WHERE id = ANY($1::int[])", [list]).catch(() => []);
+}
+
+// "한 줄로" 쓴 규칙을 AI가 칸으로 바꿔요. 워커가 app_settings 'lab_parse'에 답을 써요.
+export async function askLabParse(text: string): Promise<string> {
+  const id = Math.random().toString(36).slice(2, 10);
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ('lab_parse', $1::jsonb) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify({ id, text: String(text ?? "").slice(0, 400), status: "pending", at: new Date().toISOString() })],
+  );
+  return id;
+}
+
+type LabParse = { status: string; rule?: unknown; partial?: unknown; unsupported?: string[]; name?: string; error?: string };
+export async function readLabParse(id: string): Promise<LabParse | null> {
+  const [row] = await query<{ value: (LabParse & { id?: string }) | null }>("SELECT value FROM app_settings WHERE key = 'lab_parse'").catch(() => []);
+  const v = row?.value;
+  if (!v || v.id !== id) return null;
+  return { status: v.status ?? "pending", rule: v.rule, partial: v.partial, unsupported: v.unsupported, name: v.name, error: v.error };
 }

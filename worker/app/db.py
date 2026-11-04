@@ -650,6 +650,18 @@ MIGRATIONS = [
       fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (code, win)
     )""",
+    # 연습하기 › 실험실: 내 매매 규칙과 그 규칙을 연습용 종목 일봉에 돌린 결과
+    """CREATE TABLE IF NOT EXISTS lab_rules (
+      id          SERIAL PRIMARY KEY,
+      name        TEXT NOT NULL,
+      rule        JSONB NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'queued',
+      error       TEXT,
+      result      JSONB,
+      asked_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      done_at     TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
 
 
