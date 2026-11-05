@@ -1618,3 +1618,15 @@ text.deep-ref { stroke: none; }
   .crisis-two { grid-template-columns: 1fr; }
   .crisis-bar .n { width: 96px; }
 }
+
+/* 실적 예측 내기 › 내가 적은 예측 */
+.bet-list-rows { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; max-height: 420px; overflow-y: auto; }
+.bet-list-rows li { padding: 8px 6px; border-bottom: 1px solid var(--line, #26262b); display: flex; flex-direction: column; gap: 2px; border-radius: 6px; }
+.bet-list-rows li.on { background: rgba(201, 169, 107, 0.08); }
+.bet-list-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.bet-list-top a { color: inherit; text-decoration: none; }
+.bet-list-top a:hover b { text-decoration: underline; }
+.bet-wait, .bet-done { margin-left: auto; font-size: 0.78rem; border-radius: 5px; padding: 1px 7px; border: 1px solid #4a3f28; color: #c9a96b; }
+.bet-done { border-color: #2b3d35; color: #7fb8a0; }
+.bet-list-line { font-size: 0.86rem; }
+.bet-list-why { font-size: 0.82rem; overflow-wrap: anywhere; }

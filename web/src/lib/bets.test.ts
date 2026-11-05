@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actualLine, betLine, cleanBet, isLocked, parseAmount, resultMarks, stats, targetPeriod, type BetResult } from "./bets";
+import { actualLine, betLine, cleanBet, isLocked, parseAmount, resultMarks, stats, targetPeriod, listOrder, type BetResult } from "./bets";
 
 describe("분기", () => {
   it("마지막 발표 다음 분기를 예측해요", () => {
@@ -57,5 +57,18 @@ describe("성적", () => {
     expect(resultMarks(r(true, false, null))).toEqual([{ label: "매출", ok: true }, { label: "영업이익", ok: false }, { label: "주가", ok: null }]);
     expect(actualLine(null)).toBe("채점 기다리는 중");
     expect(actualLine(r(true, true, true))).toBe("매출 +1.0% · 이익 +1.0% · 주가 −2.0%");
+  });
+});
+
+describe("listOrder", () => {
+  it("채점 기다리는 예측을 먼저, 그 안에서는 최근 분기 먼저", () => {
+    const r = { hits: 1, total: 2 };
+    const rows = [
+      { ticker: "A", period: "2026Q2", result: r, updated: "2026-07-01" },
+      { ticker: "B", period: "2026Q3", result: null, updated: "2026-10-01" },
+      { ticker: "C", period: "2026Q4", result: null, updated: "2026-11-04" },
+      { ticker: "D", period: "2026Q3", result: r, updated: "2026-10-20" },
+    ];
+    expect(listOrder(rows).map((x) => x.ticker)).toEqual(["C", "B", "D", "A"]);
   });
 });

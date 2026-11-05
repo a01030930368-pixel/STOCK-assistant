@@ -136,3 +136,9 @@ export function actualLine(r: BetResult | null) {
   if (r.px && r.px.actual !== null) parts.push(`주가 ${sign(r.px.actual)}`);
   return parts.length ? parts.join(" · ") : "숫자가 없어 채점하지 못했어요";
 }
+
+// 내가 적은 예측 모아 보기: 채점 기다리는 것(최근 분기 먼저) → 채점 끝난 것(최근 분기 먼저)
+export function listOrder<T extends Pick<Bet, "period" | "result" | "updated" | "ticker">>(bets: T[]): T[] {
+  const waiting = (b: T) => !(b.result && b.result.total);
+  return [...bets].sort((a, b) => Number(waiting(b)) - Number(waiting(a)) || b.period.localeCompare(a.period) || b.updated.localeCompare(a.updated) || a.ticker.localeCompare(b.ticker));
+}
