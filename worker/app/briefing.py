@@ -187,9 +187,10 @@ def morning_message(day: date, indexes: list[Quote], holdings: list[Holding], it
             lines.append(f"<i>{sub}</i>")
         lines += ["", "🇺🇸 <b>내 미국 종목</b>"]
         for s in sorted(us, key=lambda x: -abs(x.change_pct or 0)):
-            facts = [f"${s.last:,.2f}"]
+            # 첫 숫자는 지금 값(전날 종가)이에요. 평단과 헷갈리지 않게 둘 다 이름을 붙여요.
+            facts = [f"지금 ${s.last:,.2f}"]
             if s.avg > 0:
-                facts.append(f"평단 {_pct((s.last / s.avg - 1) * 100)}")
+                facts.append(f"평단 ${s.avg:,.2f} ({_pct((s.last / s.avg - 1) * 100)})")
             if (w := stock_won(s, fx, fx_prev)) is not None:
                 facts.append(_signed_won(w))
             lines += [LINE, f"{dot(s.change_pct)} <b>{e(s.name)}</b>   <b>{_pct(s.change_pct)}</b>", f"<i>{' · '.join(facts)}</i>"]
