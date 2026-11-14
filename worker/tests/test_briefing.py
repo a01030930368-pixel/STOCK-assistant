@@ -87,7 +87,7 @@ def test_morning_message_us_cards():
     assert "💵 <b>밤사이 내 미국 주식</b>" in text
     # 많이 움직인 아이온큐가 먼저, 뉴스·AI는 이스케이프
     assert text.index("아이온큐</b>") < text.index("사운드하운드</b>")
-    assert "🔴 <b>아이온큐</b>   <b>+6.1%</b>\n<i>$31.42 · 평단 +6.2% · +2만원</i>\n🤖 관심이 이어질 수 있어요 &amp; 흔들림도" in text
+    assert "🔴 <b>아이온큐</b>   <b>+6.1%</b>\n<i>지금 $31.42 · 평단 $29.59 (+6.2%) · +2만원</i>\n🤖 관심이 이어질 수 있어요 &amp; 흔들림도" in text
     assert "📰 3분기 실적 발표일 &lt;11.6&gt; 확정" in text
     assert "💼 <b>국내 종목</b>" in text and "아이온큐    ⚪" not in text
     assert text.endswith(briefing.AI_NOTE)
