@@ -69,7 +69,7 @@ export function cleanBet(raw: Record<string, string>, market: "KR" | "US"): BetI
   const confidence = Math.round(Math.max(50, Math.min(90, Number(raw.confidence) || 60)) / 5) * 5;
   return {
     ticker: (raw.ticker ?? "").toUpperCase(), period, revDir, revValue, opDir, opValue, pxDir, pxPct, confidence,
-    reason: (raw.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 200),
+    reason: (raw.reason ?? "").replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, 200),
   };
 }
 

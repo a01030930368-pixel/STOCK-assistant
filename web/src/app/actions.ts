@@ -1035,7 +1035,7 @@ export async function deleteThesis(id: number) {
 
 // 내가 직접 붙이는 근거 메모
 export async function addThesisMemo(id: number, body: string, sign: string) {
-  const textBody = String(body ?? "").replace(/\s+/g, " ").trim().slice(0, 500);
+  const textBody = String(body ?? "").replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, 500);
   if (!textBody) return;
   const [row] = await query<{ ticker: string }>(
     `INSERT INTO study_evidence (thesis_id, day, kind, ref, text, sign) SELECT id, CURRENT_DATE, 'memo', 'memo:' || md5(random()::text), $2, $3

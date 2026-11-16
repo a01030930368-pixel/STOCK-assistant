@@ -1,5 +1,6 @@
 "use client";
 // 기업 공부 › 가설 탭: 가설 카드 보드(A) + 실적 날 점검·다가오는 확인 날·지난 실적 발표 기록(C)
+import AutoText from "@/app/_components/AutoText";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { addThesisMemo, askThesisScan, deleteEvidence, deleteThesis, finishReview, saveThesis, setThesisStatus } from "@/app/actions";
@@ -206,7 +207,7 @@ function ThesisForm({ initial, seeds, onClose, onSaved }: { initial: Record<stri
         </div>
       )}
       <label>가설 (확인할 수 있는 문장)
-        <input value={v.title ?? ""} maxLength={200} required placeholder="예: HBM이 영업이익의 절반 이상을 계속 낸다" onChange={(e) => set("title", e.target.value)} />
+        <AutoText value={v.title ?? ""} maxLength={200} required placeholder="예: HBM이 영업이익의 절반 이상을 계속 낸다" onChange={(e) => set("title", e.target.value)} />
       </label>
       <div className="th-form-row">
         <label>확인 방법
@@ -225,7 +226,7 @@ function ThesisForm({ initial, seeds, onClose, onSaved }: { initial: Record<stri
           </label>
         ) : (
           <label>확인 기준 (무엇이 보이면 맞고 틀린지)
-            <input value={v.rule ?? ""} maxLength={300} placeholder="예: 실적 발표에서 HBM 매출 비중 40% 이상" onChange={(e) => set("rule", e.target.value)} />
+            <AutoText value={v.rule ?? ""} maxLength={300} placeholder="예: 실적 발표에서 HBM 매출 비중 40% 이상" onChange={(e) => set("rule", e.target.value)} />
           </label>
         )}
         <label className="th-due">언제까지 (선택)

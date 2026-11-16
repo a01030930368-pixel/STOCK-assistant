@@ -2,6 +2,7 @@
 // 깊이 보기 › 역산 칸 아래 내 생각 한 줄(멈추면 저장)
 import { useEffect, useRef, useState } from "react";
 import { saveDeepNote } from "@/app/actions";
+import AutoText from "@/app/_components/AutoText";
 
 export default function DeepNote({ ticker, initial }: { ticker: string; initial: string }) {
   const [v, setV] = useState(initial);
@@ -16,7 +17,7 @@ export default function DeepNote({ ticker, initial }: { ticker: string; initial:
   return (
     <label className="deep-note">
       <span>내 생각 <span className="muted">{state}</span></span>
-      <input value={v} maxLength={500} placeholder="예: 사이클을 감안해도 연 6%는 넘을 것 같다 → 비싸지 않다" onChange={(e) => setV(e.target.value)} />
+      <AutoText value={v} maxLength={500} placeholder="예: 사이클을 감안해도 연 6%는 넘을 것 같다 → 비싸지 않다" onChange={(e) => setV(e.target.value)} />
     </label>
   );
 }
