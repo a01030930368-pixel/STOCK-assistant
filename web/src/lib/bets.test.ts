@@ -72,3 +72,11 @@ describe("listOrder", () => {
     expect(listOrder(rows).map((x) => x.ticker)).toEqual(["C", "B", "D", "A"]);
   });
 });
+
+describe("예측 이유 줄바꿈", () => {
+  it("엔터로 바꾼 줄이 남아요", () => {
+    const r = cleanBet({ period: "2026Q4", revDir: "up", reason: "첫째 줄\n둘째 줄" }, "KR");
+    if ("error" in r) throw new Error(r.error);
+    expect(r.reason).toBe("첫째 줄\n둘째 줄");
+  });
+});

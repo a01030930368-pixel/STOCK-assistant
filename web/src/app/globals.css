@@ -1484,7 +1484,7 @@ text.deep-ref { stroke: none; }
 .deep-gnow, .deep-gpast { position: absolute; font-size: 0.72rem; white-space: nowrap; transform: translateX(-50%); }
 .deep-gnow { top: -6px; color: var(--fg); } .deep-gpast { top: 30px; color: var(--accent); }
 .deep-note { display: grid; gap: 4px; font-size: 0.82rem; }
-.deep-note input { font-size: 0.86rem; padding: 7px 10px; }
+.deep-note input, .deep-note textarea { font-size: 0.86rem; padding: 7px 10px; }
 @media (max-width: 1180px) { .deep-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .deep-grid { grid-template-columns: minmax(0, 1fr); } .tabs2 { gap: 16px; } }
 
@@ -1630,3 +1630,7 @@ text.deep-ref { stroke: none; }
 .bet-done { border-color: #2b3d35; color: #7fb8a0; }
 .bet-list-line { font-size: 0.86rem; }
 .bet-list-why { font-size: 0.82rem; overflow-wrap: anywhere; }
+
+/* 엔터로 줄바꿈한 글을 그대로 보여 주기 (기업 공부) */
+textarea.autotext { resize: none; overflow: hidden; min-height: 2.2em; line-height: 1.5; }
+.study-rows li, .study-risks li, .th-card, .th-hist-note, .bet-list-why, .bet-list-line, .th-ev-text, .th-review td { white-space: pre-wrap; overflow-wrap: anywhere; }

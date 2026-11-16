@@ -1,5 +1,6 @@
 "use client";
 
+import AutoText from "@/app/_components/AutoText";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -567,12 +568,12 @@ function ModelEd({ f, set }: { f: Fields; set: Set }) {
       ))}
       <button type="button" className="chip-btn" onClick={() => set({ ...f, lines: [...lines, { name: "", pct: 0 }] })}>＋ 사업 추가</button>
       {split.length > 0 && <SplitBar split={split} />}
-      <label className="study-lab">주요 고객<input value={f.customers} onChange={(e) => set({ ...f, customers: e.target.value })} placeholder="누가 사 가나요? (예: 엔비디아·애플·서버 업체)" /></label>
+      <label className="study-lab">주요 고객<AutoText value={f.customers} onChange={(e) => set({ ...f, customers: e.target.value })} placeholder="누가 사 가나요? (예: 엔비디아·애플·서버 업체)" /></label>
       <div className="study-lab">가격을 올릴 힘 (가격 결정력)</div>
       <div className="segment study-seg" role="radiogroup" aria-label="가격 결정력">
         {(["강함", "보통", "약함"] as const).map((p) => <button key={p} type="button" aria-selected={f.power === p} onClick={() => set({ ...f, power: f.power === p ? "" : p })}>{p}</button>)}
       </div>
-      <input value={f.powerWhy} onChange={(e) => set({ ...f, powerWhy: e.target.value })} placeholder="왜 그렇게 생각해요? (예: 메모리 값이 오르내리는 대로 따라가요)" />
+      <AutoText value={f.powerWhy} onChange={(e) => set({ ...f, powerWhy: e.target.value })} placeholder="왜 그렇게 생각해요? (예: 메모리 값이 오르내리는 대로 따라가요)" />
     </div>
   );
 }
@@ -585,7 +586,7 @@ function PromisesEd({ f, set, filings }: { f: Fields; set: Set; filings: { day: 
       {rows.map((r, i) => (
         <div key={i} className="study-line">
           <input value={r.when} onChange={(e) => put(i, { when: e.target.value })} placeholder="2026.07" className="study-when" />
-          <input value={r.said} onChange={(e) => put(i, { said: e.target.value })} placeholder="한 말 (예: HBM4 하반기 양산)" />
+          <AutoText value={r.said} onChange={(e) => put(i, { said: e.target.value })} placeholder="한 말 (예: HBM4 하반기 양산)" />
           <select value={r.result} onChange={(e) => put(i, { result: e.target.value as Fields["promises"][number]["result"] })} aria-label="지켰나">
             {RESULTS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
           </select>
@@ -608,7 +609,7 @@ function EventsEd({ f, set, app }: { f: Fields; set: Set; app: { day: string; ti
       {rows.map((r, i) => (
         <div key={i} className="study-line">
           <input type="date" value={r.day} onChange={(e) => put(i, { day: e.target.value })} aria-label="날짜 (모르면 비워 두세요)" className="study-when" />
-          <input value={r.text} onChange={(e) => put(i, { text: e.target.value })} placeholder="일 (예: 4분기 실적 발표, HBM4 인증)" />
+          <AutoText value={r.text} onChange={(e) => put(i, { text: e.target.value })} placeholder="일 (예: 4분기 실적 발표, HBM4 인증)" />
           <button type="button" className="ghost" onClick={() => set({ ...f, events: rows.filter((_, k) => k !== i) })} aria-label="줄 지우기">✕</button>
         </div>
       ))}
@@ -641,8 +642,8 @@ function RisksEd({ f, set }: { f: Fields; set: Set }) {
     <div className="study-form">
       {f.risks.map((r, i) => (
         <div key={i} className="study-risk">
-          <input value={r.text} onChange={(e) => put(i, { text: e.target.value })} placeholder={`${i + 1}. 틀릴 수 있는 이유 (예: 메모리 값이 다시 빠진다)`} />
-          <input value={r.signal} onChange={(e) => put(i, { signal: e.target.value })} placeholder="→ 이게 보이면 다시 생각 (예: D램 고정가 2달 연속 하락)" />
+          <AutoText value={r.text} onChange={(e) => put(i, { text: e.target.value })} placeholder={`${i + 1}. 틀릴 수 있는 이유 (예: 메모리 값이 다시 빠진다)`} />
+          <AutoText value={r.signal} onChange={(e) => put(i, { signal: e.target.value })} placeholder="→ 이게 보이면 다시 생각 (예: D램 고정가 2달 연속 하락)" />
         </div>
       ))}
       {f.risks.length < 5 && <button type="button" className="chip-btn" onClick={() => set({ ...f, risks: [...f.risks, { text: "", signal: "" }] })}>＋ 이유 추가</button>}
@@ -677,7 +678,7 @@ function PriceEd({ f, set, note, money_ }: { f: Fields; set: Set; note: NoteData
         <label className="study-lab">비싸다 (이 위면)<PriceInput value={f.pricey} onChange={(pricey) => set({ ...f, pricey })} placeholder={unit} /></label>
       </div>
       <p className="muted practice-small">지금 {note.price !== null ? money_(note.price) : "-"}{note.value && ` · ${note.value}`}</p>
-      <input value={f.priceWhy} onChange={(e) => set({ ...f, priceWhy: e.target.value })} placeholder="왜 그 가격이에요? (예: PER 8배, 지난 5년 밴드 아래쪽)" />
+      <AutoText value={f.priceWhy} onChange={(e) => set({ ...f, priceWhy: e.target.value })} placeholder="왜 그 가격이에요? (예: PER 8배, 지난 5년 밴드 아래쪽)" />
       {f.cheap && <AlertButton ticker={note.ticker} price={f.cheap} on={note.alerts.some((a) => Math.abs(a - f.cheap!) < 1e-6)} money_={money_} />}
     </div>
   );

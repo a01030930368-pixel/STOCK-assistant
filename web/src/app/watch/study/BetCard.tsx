@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { deleteBet, saveBet } from "@/app/actions";
+import AutoText from "@/app/_components/AutoText";
 import {
   actualLine, amountText, betLine, listOrder, DIR_WORD, PX_WORD, pct, periodWord, resultMarks, short, UNIT,
   type Bet, type Dir, type PxDir, type Stats,
@@ -80,7 +81,7 @@ export default function BetCard({ ticker, market, data, today, onSaved }: { tick
           <b>{v.confidence}%</b><span className="muted th-small">50% = 동전 던지기</span>
         </div>
         <div className="bet-row"><span className="bet-l">한 줄 이유</span>
-          <input className="bet-reason" maxLength={200} value={v.reason} placeholder="예: HBM 물량은 늘지만 D램 값 상승이 둔해져서 이익은 예상 수준일 것 같다" onChange={(e) => set("reason", e.target.value)} />
+          <AutoText className="bet-reason" maxLength={200} value={v.reason} placeholder="예: HBM 물량은 늘지만 D램 값 상승이 둔해져서 이익은 예상 수준일 것 같다" onChange={(e) => set("reason", e.target.value)} />
         </div>
         {error && <p className="th-no">{error}</p>}
         <div className="th-row">

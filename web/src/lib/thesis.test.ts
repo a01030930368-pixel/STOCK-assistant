@@ -157,3 +157,12 @@ describe("earnings detail", () => {
     expect(reaction(closes, "2026-10-29")).toBeNull();
   });
 });
+
+describe("줄바꿈", () => {
+  it("가설 문장과 확인 기준의 엔터 줄바꿈을 그대로 둬요", () => {
+    const r = cleanThesis({ title: "HBM이  절반\r\n이상을 낸다", rule: "기준 1\n\n\n\n기준 2  " });
+    if ("error" in r) throw new Error(r.error);
+    expect(r.title).toBe("HBM이 절반\n이상을 낸다");
+    expect(r.rule).toBe("기준 1\n\n기준 2");
+  });
+});

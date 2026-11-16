@@ -30,7 +30,7 @@ export type ThesisInput = { title: string; rule: string; dueOn: string | null; m
 const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v);
 
 export function cleanThesis(raw: Record<string, string>): ThesisInput | { error: string } {
-  const title = (raw.title ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const title = (raw.title ?? "").replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, 200);
   if (!title) return { error: "가설 문장을 적어 주세요." };
   const metric = isMetric(raw.metric) ? raw.metric : null;
   const op = raw.op === "<=" ? "<=" : raw.op === ">=" ? ">=" : null;
@@ -38,7 +38,7 @@ export function cleanThesis(raw: Record<string, string>): ThesisInput | { error:
   if (metric && (op === null || target === null || !Number.isFinite(target) || Math.abs(target) > 10000)) return { error: "숫자 기준(이상·이하와 %)을 적어 주세요." };
   const dueOn = raw.dueOn && isDay(raw.dueOn) ? raw.dueOn : null;
   return {
-    title, rule: (raw.rule ?? "").replace(/\s+/g, " ").trim().slice(0, 300), dueOn,
+    title, rule: (raw.rule ?? "").replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, 300), dueOn,
     metric, op: metric ? op : null, target: metric ? target : null, source: ["risk", "promise", "event"].includes(raw.source) ? raw.source : "self",
   };
 }
